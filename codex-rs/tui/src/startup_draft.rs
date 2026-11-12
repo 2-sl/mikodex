@@ -198,7 +198,7 @@ impl StartupDraftPump {
         session_action: StartupDraftSessionAction,
     ) -> Self {
         let (app_event_tx, app_event_rx) = unbounded_channel();
-        let mut blossom = crate::empty_state_animation::EmptyStateAnimation::default();
+        let mut blossom = crate::empty_state_animation::EmptyStateAnimation::for_current_home();
         if matches!(
             session_action,
             StartupDraftSessionAction::New | StartupDraftSessionAction::NewFromCommandCenter

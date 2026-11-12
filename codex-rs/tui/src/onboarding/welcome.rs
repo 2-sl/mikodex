@@ -62,7 +62,7 @@ impl WelcomeWidget {
         request_frame: FrameRequester,
         animations_enabled: bool,
     ) -> Self {
-        let mut animation = EmptyStateAnimation::default();
+        let mut animation = EmptyStateAnimation::for_current_home();
         animation.start_fresh();
         Self {
             is_logged_in,

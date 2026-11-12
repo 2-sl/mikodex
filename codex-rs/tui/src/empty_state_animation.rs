@@ -1,4 +1,4 @@
-//! The Reimu welcome animation. Visible time pauses while hidden.
+//! The user-selected image animation. Visible time pauses while hidden.
 
 // Keep the original logo geometry and renderer source available, but don't draw it in the TUI.
 #[allow(dead_code)]
@@ -12,7 +12,10 @@ mod policy;
 mod renderer;
 mod sequence;
 
-use std::sync::OnceLock;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -42,14 +45,10 @@ use renderer::MAX_ROWS;
 use renderer::Renderer;
 
 pub(crate) const FRAME_INTERVAL: Duration = Duration::from_millis(/*millis*/ 50);
-const REIMU_SELECTION_SHEET: &[u8] = include_bytes!("../../../assets/selection-screen.png");
 const MAX_BOB_SUBPIXEL_ROWS: i16 = 6;
-const REIMU_SHEET_CROP: (u32, u32, u32, u32) = (350, 535, 370, 500);
-static REIMU_ART: OnceLock<Option<SpriteArt>> = OnceLock::new();
-
-struct SpriteArt {
-    portrait: RgbaImage,
-}
+const BACKGROUND_IMAGE_DIRECTORY: &str = "background";
+const BACKGROUND_IMAGE_FILENAME: &str = "custom.png";
+static BACKGROUND_IMAGE_REVISION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy)]
 struct SpriteCell {
@@ -61,6 +60,7 @@ struct SpriteCell {
 struct SpriteFrame {
     area_width: u16,
     area_height: u16,
+    image_revision: u64,
     portrait_size: (u16, u16),
     portrait_frames: Vec<Vec<Option<SpriteCell>>>,
 }
@@ -68,27 +68,6 @@ struct SpriteFrame {
 pub(crate) enum ComposerState {
     Empty,
     Draft,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum BackgroundCharacter {
-    #[default]
-    Reimu,
-}
-
-impl BackgroundCharacter {
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Reimu => "Reimu",
-        }
-    }
-
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "reimu" | "hakurei" | "레이무" => Some(Self::Reimu),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Default)]
@@ -100,16 +79,29 @@ pub(crate) struct EmptyStateAnimation {
     static_mark: Option<bool>,
     opacity: f32,
     fade_from: f32,
-    character_elapsed: Duration,
+    image_elapsed: Duration,
     chat_background_elapsed: Duration,
     chat_background_last_frame: Option<Instant>,
-    background_character: BackgroundCharacter,
+    background_image_path: Option<PathBuf>,
     sprite_frame: Option<SpriteFrame>,
     stage: Option<Rect>,
     replaying: bool,
 }
 
 impl EmptyStateAnimation {
+    pub(crate) fn for_home(home: &Path) -> Self {
+        Self {
+            background_image_path: Some(background_image_path(home)),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn for_current_home() -> Self {
+        codex_utils_home_dir::find_codex_home()
+            .map(|home| Self::for_home(home.as_path()))
+            .unwrap_or_default()
+    }
+
     pub(crate) fn is_eligible(&self) -> bool {
         self.eligible
     }
@@ -122,7 +114,7 @@ impl EmptyStateAnimation {
         self.fade_elapsed = Duration::ZERO;
         self.static_mark = None;
         self.opacity = 1.0;
-        self.character_elapsed = Duration::ZERO;
+        self.image_elapsed = Duration::ZERO;
         self.chat_background_elapsed = Duration::ZERO;
         self.chat_background_last_frame = None;
     }
@@ -141,19 +133,77 @@ impl EmptyStateAnimation {
         self.cancel_replay();
     }
 
-    pub(crate) fn set_background_character(&mut self, character: BackgroundCharacter) {
-        if self.background_character == character {
-            return;
+    pub(crate) fn set_background_image(
+        &mut self,
+        source: &Path,
+        home: &Path,
+    ) -> Result<PathBuf, String> {
+        let source = source.canonicalize().map_err(|error| {
+            format!("Could not open background image {}: {error}", source.display())
+        })?;
+        let image = image::open(&source).map_err(|error| {
+            format!("Could not read background image {}: {error}", source.display())
+        })?;
+        let directory = home.join(BACKGROUND_IMAGE_DIRECTORY);
+        std::fs::create_dir_all(&directory).map_err(|error| {
+            format!(
+                "Could not create background image directory {}: {error}",
+                directory.display()
+            )
+        })?;
+        let destination = background_image_path(home);
+        let temporary = directory.join("custom.pending.png");
+        image
+            .save_with_format(&temporary, image::ImageFormat::Png)
+            .map_err(|error| format!("Could not save background image: {error}"))?;
+        if destination.exists() {
+            std::fs::remove_file(&destination).map_err(|error| {
+                format!(
+                    "Could not replace background image {}: {error}",
+                    destination.display()
+                )
+            })?;
         }
-        self.background_character = character;
-        self.character_elapsed = Duration::ZERO;
-        self.chat_background_elapsed = Duration::ZERO;
-        self.chat_background_last_frame = None;
-        self.sprite_frame = None;
+        std::fs::rename(&temporary, &destination).map_err(|error| {
+            format!(
+                "Could not install background image {}: {error}",
+                destination.display()
+            )
+        })?;
+        self.background_image_path = Some(destination.clone());
+        self.reset_background_image_frame();
+        Ok(destination)
     }
 
-    pub(crate) fn background_character(&self) -> BackgroundCharacter {
-        self.background_character
+    pub(crate) fn clear_background_image(&mut self, home: &Path) -> Result<(), String> {
+        let path = background_image_path(home);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "Could not remove background image {}: {error}",
+                    path.display()
+                ));
+            }
+        }
+        self.background_image_path = Some(path);
+        self.reset_background_image_frame();
+        Ok(())
+    }
+
+    pub(crate) fn background_image_path(&self) -> Option<&Path> {
+        self.background_image_path
+            .as_deref()
+            .filter(|path| path.is_file())
+    }
+
+    fn reset_background_image_frame(&mut self) {
+        BACKGROUND_IMAGE_REVISION.fetch_add(1, Ordering::Relaxed);
+        self.sprite_frame = None;
+        self.image_elapsed = Duration::ZERO;
+        self.chat_background_elapsed = Duration::ZERO;
+        self.chat_background_last_frame = None;
     }
 
     pub(crate) fn cancel_replay(&mut self) {
@@ -173,7 +223,7 @@ impl EmptyStateAnimation {
         self.last_frame = None;
     }
 
-    /// Paint the Reimu sprite inside a caller-owned, reserved rectangle.
+    /// Paint the selected image inside a caller-owned, reserved rectangle.
     /// The caller clears the stage and schedules another frame while it stays visible.
     pub(crate) fn render_in(
         &mut self,
@@ -198,6 +248,7 @@ impl EmptyStateAnimation {
             || area.width > MAX_COLUMNS
             || area.height > MAX_ROWS
             || area.intersection(buffer.area) != area
+            || !self.has_background_image()
         {
             self.pause_clock();
             return None;
@@ -205,7 +256,7 @@ impl EmptyStateAnimation {
         let static_mark = presentation == Presentation::Faded;
         let previous_frame = self.last_frame.replace(now);
         if let Some(previous) = previous_frame {
-            self.character_elapsed += now.saturating_duration_since(previous);
+            self.image_elapsed += now.saturating_duration_since(previous);
         }
         if self.static_mark != Some(static_mark) {
             self.fade_elapsed = if self.static_mark.is_none() {
@@ -243,7 +294,7 @@ impl EmptyStateAnimation {
         self.paint_frame(
             area,
             buffer,
-            self.character_elapsed.as_secs_f64(),
+            self.image_elapsed.as_secs_f64(),
             self.opacity,
         );
         Some(FRAME_INTERVAL)
@@ -260,6 +311,10 @@ impl EmptyStateAnimation {
     ) -> Option<Duration> {
         const STAGE_ROWS: u16 = 63;
         const MIN_STAGE_ROWS: u16 = 14;
+        if !self.has_background_image() {
+            self.cancel_replay();
+            return None;
+        }
         let height_limited_width = (u32::from(screen.height) * u32::from(MAX_COLUMNS)
             / u32::from(STAGE_ROWS))
         .min(u32::from(MAX_COLUMNS)) as u16;
@@ -294,7 +349,7 @@ impl EmptyStateAnimation {
         self.render_in(stage, buffer, Presentation::Animated)
     }
 
-    /// Paint the selected character as a faint watermark in unused transcript cells.
+    /// Paint the selected image as a faint watermark in unused transcript cells.
     pub(crate) fn render_chat_background(
         &mut self,
         area: Rect,
@@ -302,6 +357,10 @@ impl EmptyStateAnimation {
     ) -> Option<Duration> {
         const STAGE_ROWS: u16 = 63;
         const MIN_STAGE_ROWS: u16 = 14;
+        if !self.has_background_image() {
+            self.chat_background_last_frame = None;
+            return None;
+        }
         let height_limited_width = (u32::from(area.height) * u32::from(MAX_COLUMNS)
             / u32::from(STAGE_ROWS))
         .min(u32::from(MAX_COLUMNS)) as u16;
@@ -375,7 +434,7 @@ impl EmptyStateAnimation {
             terminal_palette::StdoutColorLevel::Unknown
         };
         let background = background.unwrap_or((15, 20, 37));
-        self.paint_character(
+        self.paint_image(
             area,
             buffer,
             bob_seconds,
@@ -387,7 +446,7 @@ impl EmptyStateAnimation {
         );
     }
 
-    fn paint_character(
+    fn paint_image(
         &mut self,
         area: Rect,
         buffer: &mut Buffer,
@@ -398,8 +457,7 @@ impl EmptyStateAnimation {
         color_level: terminal_palette::StdoutColorLevel,
         background: (u8, u8, u8),
     ) {
-        let character = self.background_character;
-        if !self.ensure_sprite_frame(character, area.width, area.height) {
+        if !self.ensure_sprite_frame(area.width, area.height) {
             return;
         }
         let Some(frame) = self.sprite_frame.as_ref() else {
@@ -433,37 +491,52 @@ impl EmptyStateAnimation {
 
     fn ensure_sprite_frame(
         &mut self,
-        character: BackgroundCharacter,
         area_width: u16,
         area_height: u16,
     ) -> bool {
+        let image_revision = BACKGROUND_IMAGE_REVISION.load(Ordering::Relaxed);
         let matches = self.sprite_frame.as_ref().is_some_and(|frame| {
-            frame.area_width == area_width && frame.area_height == area_height
+            frame.area_width == area_width
+                && frame.area_height == area_height
+                && frame.image_revision == image_revision
         });
         if !matches {
-            self.sprite_frame = build_character_frame(character, area_width, area_height);
+            self.sprite_frame = self
+                .background_image_path
+                .as_deref()
+                .and_then(|path| build_image_frame(path, area_width, area_height, image_revision));
         }
         self.sprite_frame.is_some()
     }
+
+    fn has_background_image(&self) -> bool {
+        self.background_image_path
+            .as_deref()
+            .is_some_and(Path::is_file)
+    }
 }
 
-fn build_character_frame(
-    character: BackgroundCharacter,
+fn background_image_path(home: &Path) -> PathBuf {
+    home.join(BACKGROUND_IMAGE_DIRECTORY)
+        .join(BACKGROUND_IMAGE_FILENAME)
+}
+
+fn build_image_frame(
+    image_path: &Path,
     area_width: u16,
     area_height: u16,
+    image_revision: u64,
 ) -> Option<SpriteFrame> {
-    let art = match character {
-        BackgroundCharacter::Reimu => reimu_art(),
-    }?;
+    let portrait = image::open(image_path).ok()?.to_rgba8();
     let max_portrait_height = area_height.saturating_sub(4).max(1);
     let portrait_size = fit_sprite(
-        art.portrait.width(),
-        art.portrait.height(),
+        portrait.width(),
+        portrait.height(),
         area_width.saturating_sub(4),
         max_portrait_height,
     );
     let resized_portrait = image::imageops::resize(
-        &art.portrait,
+        &portrait,
         u32::from(portrait_size.0) * 2,
         u32::from(portrait_size.1) * 4,
         FilterType::Lanczos3,
@@ -482,107 +555,10 @@ fn build_character_frame(
     Some(SpriteFrame {
         area_width,
         area_height,
+        image_revision,
         portrait_frames,
         portrait_size,
     })
-}
-
-fn reimu_art() -> Option<&'static SpriteArt> {
-    REIMU_ART
-        .get_or_init(|| {
-            let sheet = image::load_from_memory(REIMU_SELECTION_SHEET)
-                .ok()?
-                .to_rgba8();
-            let (x, y, width, height) = REIMU_SHEET_CROP;
-            if x.saturating_add(width) > sheet.width() || y.saturating_add(height) > sheet.height()
-            {
-                return None;
-            }
-            let mut portrait = image::imageops::crop_imm(&sheet, x, y, width, height).to_image();
-            remove_neighbor_fragments(&mut portrait);
-            enhance_reimu_weapon(&mut portrait);
-            let portrait = trim_sprite(portrait);
-            Some(SpriteArt { portrait })
-        })
-        .as_ref()
-}
-
-fn enhance_reimu_weapon(image: &mut RgbaImage) {
-    // Sharpen the gohei shaft and the attached paper streamers without changing the source file.
-    let sharpened = image::imageops::unsharpen(image, /*sigma*/ 0.9, /*threshold*/ 10);
-    for (left, top, right, bottom) in [
-        (0, 184, 112, 224),
-        (126, 208, 320, 265),
-        (298, 236, 370, 380),
-    ] {
-        for y in top..bottom.min(image.height()) {
-            for x in left..right.min(image.width()) {
-                *image.get_pixel_mut(x, y) = *sharpened.get_pixel(x, y);
-            }
-        }
-    }
-}
-
-fn remove_neighbor_fragments(image: &mut RgbaImage) {
-    let (width, height) = image.dimensions();
-    // The roster crop includes small pieces of adjacent characters at its edges.
-    for (left, top, right, bottom) in [
-        (0, 270, 24, height),
-        (363, 249, width, 267),
-        (363, 0, width, 5),
-    ] {
-        for y in top.min(height)..bottom.min(height) {
-            for x in left.min(width)..right.min(width) {
-                image.get_pixel_mut(x, y)[3] = 0;
-            }
-        }
-    }
-}
-
-fn trim_sprite(mut image: RgbaImage) -> RgbaImage {
-    let (width, height) = image.dimensions();
-    if width == 0 || height == 0 {
-        return image;
-    }
-    let corners = [
-        image.get_pixel(0, 0),
-        image.get_pixel(width - 1, 0),
-        image.get_pixel(0, height - 1),
-        image.get_pixel(width - 1, height - 1),
-    ];
-    let dark_key = corners
-        .iter()
-        .filter(|pixel| pixel[3] > 240 && pixel[0] < 12 && pixel[1] < 12 && pixel[2] < 12)
-        .count()
-        >= 3;
-    let mut min_x = width;
-    let mut min_y = height;
-    let mut max_x = 0;
-    let mut max_y = 0;
-    let mut found = false;
-
-    for y in 0..height {
-        for x in 0..width {
-            let pixel = image.get_pixel_mut(x, y);
-            let keyed = dark_key && pixel[0] < 12 && pixel[1] < 12 && pixel[2] < 12;
-            if pixel[3] <= 8 || keyed {
-                pixel[3] = 0;
-                continue;
-            }
-            found = true;
-            min_x = min_x.min(x);
-            min_y = min_y.min(y);
-            max_x = max_x.max(x);
-            max_y = max_y.max(y);
-        }
-    }
-
-    if found {
-        image::imageops::crop_imm(&image, min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
-            .to_image()
-    } else {
-        image
-    }
 }
 
 fn fit_sprite(

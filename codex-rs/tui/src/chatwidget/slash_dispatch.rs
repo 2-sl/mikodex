@@ -14,9 +14,9 @@ use crate::bottom_pane::slash_commands::BuiltinCommandFlags;
 use crate::bottom_pane::slash_commands::ServiceTierCommand;
 use crate::bottom_pane::slash_commands::SlashCommandItem;
 use crate::bottom_pane::slash_commands::find_slash_command;
-use crate::empty_state_animation::BackgroundCharacter;
 use crate::goal_display::GOAL_USAGE;
 use crate::goal_files::GoalDraft;
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SlashCommandDispatchSource {
@@ -40,6 +40,50 @@ const SIDE_SLASH_COMMAND_UNAVAILABLE_HINT: &str =
 const GOAL_USAGE_HINT: &str = "Example: /goal improve benchmark coverage";
 const RAW_USAGE: &str = "Usage: /raw [on|off]";
 const USAGE_CHATGPT_LOGIN_REQUIRED: &str = "Sign in with ChatGPT to use /usage.";
+
+fn background_image_source_path(argument: &str) -> Result<PathBuf, String> {
+    let argument = argument.trim();
+    let argument = if argument.len() >= 2
+        && ((argument.starts_with('"') && argument.ends_with('"'))
+            || (argument.starts_with('\'') && argument.ends_with('\'')))
+    {
+        &argument[1..argument.len() - 1]
+    } else {
+        argument
+    };
+    if argument.is_empty() {
+        return Err("Usage: /background \"<image path>\" | /background off".to_string());
+    }
+
+    let mut expanded = String::with_capacity(argument.len());
+    let mut remaining = argument;
+    while let Some(start) = remaining.find('%') {
+        expanded.push_str(&remaining[..start]);
+        let after_start = &remaining[start + 1..];
+        let Some(end) = after_start.find('%') else {
+            expanded.push_str(&remaining[start..]);
+            remaining = "";
+            break;
+        };
+        let variable = &after_start[..end];
+        let value = std::env::var(variable)
+            .map_err(|_| format!("Environment variable %{variable}% is not defined."))?;
+        expanded.push_str(&value);
+        remaining = &after_start[end + 1..];
+    }
+    expanded.push_str(remaining);
+
+    if let Some(relative) = expanded
+        .strip_prefix("~/")
+        .or_else(|| expanded.strip_prefix("~\\"))
+    {
+        let home = dirs::home_dir()
+            .ok_or_else(|| "Could not resolve the user home directory.".to_string())?;
+        Ok(home.join(relative))
+    } else {
+        Ok(PathBuf::from(expanded))
+    }
+}
 
 impl ChatWidget {
     /// Dispatch a bare slash command and record its staged local-history entry.
@@ -585,11 +629,15 @@ impl ChatWidget {
                 self.open_theme_picker();
             }
             SlashCommand::Background => {
-                let current = self.empty_state_animation.borrow().background_character();
+                let current = self
+                    .empty_state_animation
+                    .borrow()
+                    .background_image_path()
+                    .map(|path| path.display().to_string());
+                let status = current.unwrap_or_else(|| "none".to_string());
                 self.add_info_message(
                     format!(
-                        "Current chat background: {}. Use /background reimu.",
-                        current.label()
+                        "Current chat background image: {status}. Set one with /background \"<image path>\"; clear it with /background off."
                     ),
                     /*hint*/ None,
                 );
@@ -1139,16 +1187,36 @@ impl ChatWidget {
                 self.select_pet_by_id(args);
             }
             SlashCommand::Background => {
-                if let Some(character) = BackgroundCharacter::parse(trimmed) {
-                    self.empty_state_animation
+                if matches!(trimmed.to_ascii_lowercase().as_str(), "off" | "none" | "disable") {
+                    match self
+                        .empty_state_animation
                         .borrow_mut()
-                        .set_background_character(character);
-                    self.add_info_message(
-                        format!("Chat background changed to {}.", character.label()),
-                        /*hint*/ None,
-                    );
+                        .clear_background_image(self.config.codex_home.as_path())
+                    {
+                        Ok(()) => self.add_info_message(
+                            "Chat background image cleared.".to_string(),
+                            /*hint*/ None,
+                        ),
+                        Err(error) => self.add_error_message(error),
+                    }
                 } else {
-                    self.add_error_message("Usage: /background <reimu>".to_string());
+                    match background_image_source_path(trimmed) {
+                        Ok(path) => match self
+                            .empty_state_animation
+                            .borrow_mut()
+                            .set_background_image(&path, self.config.codex_home.as_path())
+                        {
+                            Ok(destination) => self.add_info_message(
+                                format!(
+                                    "Chat background image saved to {}.",
+                                    destination.display()
+                                ),
+                                /*hint*/ None,
+                            ),
+                            Err(error) => self.add_error_message(error),
+                        },
+                        Err(error) => self.add_error_message(error),
+                    }
                 }
             }
             _ => self.dispatch_command_from_source(cmd, source),
