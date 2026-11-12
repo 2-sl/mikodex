@@ -84,7 +84,7 @@ fn updater_reexec_preserves_paths_and_recovers_deleted_working_directory() {
         let executable = home.path().join("updater");
         std::fs::write(
         &executable,
-        b"#!/bin/sh\ntest -d \"$CODEX_HOME\" || exit 1\n{ pwd -P; printf '%s\\n' \"$CODEX_HOME\" \"$CODEX_SQLITE_HOME\" \"$AWS_CONFIG_FILE\" \"$SSL_CERT_DIR\" \"$NPM_CONFIG_CAFILE\"; } > \"$CODEX_TEST_UPDATER_OUTPUT\"\n",
+        b"#!/bin/sh\ntest -d \"$MIKODEX_HOME\" || exit 1\n{ pwd -P; printf '%s\\n' \"$MIKODEX_HOME\" \"$MIKODEX_SQLITE_HOME\" \"$AWS_CONFIG_FILE\" \"$SSL_CERT_DIR\" \"$NPM_CONFIG_CAFILE\"; } > \"$CODEX_TEST_UPDATER_OUTPUT\"\n",
     )
     .expect("updater shim");
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
@@ -108,8 +108,8 @@ fn updater_reexec_preserves_paths_and_recovers_deleted_working_directory() {
             .env("CODEX_TEST_UPDATER_STATE", &state)
             .env("CODEX_TEST_UPDATER_OUTPUT", &output)
             .env("CODEX_TEST_UPDATER_DELETE_CWD", delete_cwd.to_string())
-            .env("CODEX_HOME", format!("../{home_name}"))
-            .env("CODEX_SQLITE_HOME", " sqlite ")
+            .env("MIKODEX_HOME", format!("../{home_name}"))
+            .env("MIKODEX_SQLITE_HOME", " sqlite ")
             .env("AWS_CONFIG_FILE", "~/config")
             .env("NPM_CONFIG_CAFILE", ca_file)
             .env(
@@ -273,10 +273,10 @@ test "$CODEX_INSTALL_DEFER_SELECTION" = 1
 test "$CODEX_INSTALL_IF_CURRENT" = 0
 test "$CODEX_INSTALL_DAEMON_ONLY" = 1
 test "$CODEX_INSTALL_IF_LATEST" = 0
-root="$CODEX_HOME/packages/app-server-daemon"
+root="$MIKODEX_HOME/packages/app-server-daemon"
 mkdir -p "$root/releases/{release}/bin"
-printf '#!/bin/sh\nif [ "$1" = --version ]; then echo codex 1.0.0; else exit 2; fi\n' > "$root/releases/{release}/bin/codex"
-chmod +x "$root/releases/{release}/bin/codex"
+printf '#!/bin/sh\nif [ "$1" = --version ]; then echo codex 1.0.0; else exit 2; fi\n' > "$root/releases/{release}/bin/mikodex"
+chmod +x "$root/releases/{release}/bin/mikodex"
 ln -sfn 'releases/{release}' "$root/.migration-current"
 printf '{release}' > "$root/auto-update-version"
 "#
@@ -306,7 +306,7 @@ printf '{release}' > "$root/auto-update-version"
         status: UpdateStatus::Updated,
         installed_version: Some("1.0.0".to_string()),
         running_version: (running).then(|| "1.0.0".to_string()),
-        managed_codex_path: dedicated.join("current/bin/codex"),
+        managed_codex_path: dedicated.join("current/bin/mikodex"),
         message: "The daemon was updated and moved to its dedicated package. The legacy CLI package was left unchanged.".to_string(),
     });
         assert_eq!(
@@ -328,7 +328,7 @@ printf '{release}' > "$root/auto-update-version"
             update_pid_file: legacy
                 .update_pid_file
                 .with_file_name(crate::DAEMON_UPDATE_PID_FILE_NAME),
-            managed_codex_bin: dedicated.join("current/bin/codex"),
+            managed_codex_bin: dedicated.join("current/bin/mikodex"),
             ..legacy.clone()
         };
         let new_backend = crate::backend::pid_backend(selected.backend_paths(&daemon_settings));
@@ -728,13 +728,13 @@ async fn scheduled_no_op_preserves_daemon_and_hands_off_stale_updater() {
         .join("releases")
         .join(release.replace("1.0.0", "0.8.0"));
     std::fs::create_dir_all(stale.join("bin")).unwrap();
-    std::fs::copy(&daemon.managed_codex_bin, stale.join("bin/codex")).unwrap();
+    std::fs::copy(&daemon.managed_codex_bin, stale.join("bin/mikodex")).unwrap();
     std::fs::write(
         stale.join("codex-package.json"),
         serde_json::json!({
             "version": "0.8.0",
             "target": release.strip_prefix("1.0.0-").unwrap(),
-            "entrypoint": "bin/codex"
+            "entrypoint": "bin/mikodex"
         })
         .to_string(),
     )
@@ -1059,19 +1059,19 @@ async fn check_manual_update_restart(package_directory: &str) {
     let install_binary = if local_package {
         // Same binary and version, but a different package: it must still restart.
         format!(
-            "cp '{root}/releases/{release}/codex' '{root}/releases/{next}/bin/codex'",
+            "cp '{root}/releases/{release}/codex' '{root}/releases/{next}/bin/mikodex'",
             root = standalone.display()
         )
     } else {
         format!(
-            r#"printf '#!/bin/sh\nif [ "$1" = --version ]; then echo codex 1.1.0; else exec sleep 30; fi\n' > '{root}/releases/{next}/bin/codex'"#,
+            r#"printf '#!/bin/sh\nif [ "$1" = --version ]; then echo codex 1.1.0; else exec sleep 30; fi\n' > '{root}/releases/{next}/bin/mikodex'"#,
             root = standalone.display()
         )
     };
     let ready = home.path().join("installer-ready");
     let proceed = home.path().join("installer-proceed");
     let script = format!(
-        "#!/bin/sh\n# CODEX_INSTALL_IF_LATEST CODEX_INSTALL_IF_CURRENT CODEX_INSTALL_DAEMON_ONLY\nif [ \"$CODEX_UPDATE_FROM_RELEASE\" = '{next}' ]; then exit 0; fi\ntest \"${guard}\" = 1 || exit 4\ntest \"$CODEX_UPDATE_FROM_RELEASE\" = '{release}' || exit 5\ntouch '{ready}'\nwhile [ ! -e '{proceed}' ]; do sleep .05; done\nmkdir -p '{root}/releases/{next}/bin'\n{install_binary}\nchmod +x '{root}/releases/{next}/bin/codex'\nln -sfn 'releases/{next}' '{root}/current'\nprintf '{next}' > '{root}/auto-update-version'\n",
+        "#!/bin/sh\n# CODEX_INSTALL_IF_LATEST CODEX_INSTALL_IF_CURRENT CODEX_INSTALL_DAEMON_ONLY\nif [ \"$CODEX_UPDATE_FROM_RELEASE\" = '{next}' ]; then exit 0; fi\ntest \"${guard}\" = 1 || exit 4\ntest \"$CODEX_UPDATE_FROM_RELEASE\" = '{release}' || exit 5\ntouch '{ready}'\nwhile [ ! -e '{proceed}' ]; do sleep .05; done\nmkdir -p '{root}/releases/{next}/bin'\n{install_binary}\nchmod +x '{root}/releases/{next}/bin/mikodex'\nln -sfn 'releases/{next}' '{root}/current'\nprintf '{next}' > '{root}/auto-update-version'\n",
         root = standalone.display(),
         ready = ready.display(),
         proceed = proceed.display(),
@@ -1122,7 +1122,7 @@ async fn check_manual_update_restart(package_directory: &str) {
     assert_eq!(output.running_version.as_deref(), Some(version));
     assert_eq!(
         output.managed_codex_path,
-        standalone.join("current/bin/codex")
+        standalone.join("current/bin/mikodex")
     );
     let restarted = current_pid();
     assert_ne!(restarted, before);

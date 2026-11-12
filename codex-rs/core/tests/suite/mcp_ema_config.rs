@@ -173,7 +173,7 @@ async fn trusted_project_cannot_downgrade_enterprise_auth(project_auth: &str) ->
     let home = tempdir()?;
     let workspace = tempdir()?;
     std::fs::create_dir_all(workspace.path().join(".git"))?;
-    std::fs::create_dir_all(workspace.path().join(".codex"))?;
+    std::fs::create_dir_all(workspace.path().join(".mikodex"))?;
     set_project_trust_level(home.path(), workspace.path(), TrustLevel::Trusted)?;
     let managed_config = r#"
 [features]

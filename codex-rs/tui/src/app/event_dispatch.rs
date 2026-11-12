@@ -530,6 +530,7 @@ impl App {
                 .await;
             }
             AppEvent::OpenResumePicker => {
+                self.agents_overview.sidebar_focused = false;
                 self.pending_open_resume_picker = true;
             }
             AppEvent::OpenExternalAgentConfigMigration => {
@@ -1039,6 +1040,7 @@ impl App {
                     && (self.agents_overview.threads.iter().any(|(id, thread)| {
                         (mode == ExitMode::Immediate
                             || Some(*id) != self.current_displayed_thread_id()
+                            || self.agents_overview.sidebar_focused
                             || self.chat_widget.active_view_is(AGENTS_OVERVIEW_VIEW_ID))
                             && matches!(thread.as_ref().map(|t| &t.status), Some(ThreadStatus::Active { .. }))
                     }) || self.running_side_thread_id().await.is_some()) =>
@@ -1048,7 +1050,7 @@ impl App {
                     subtitle: Some("Quitting this TUI will stop its running sessions.".into()),
                     items: vec![
                         SelectionItem {
-                            name: "Stay in Codex".into(),
+                            name: "Stay in Mikodex".into(),
                             dismiss_on_select: true,
                             ..Default::default()
                         },
@@ -2650,7 +2652,7 @@ impl App {
                                     Line::from(vec!["• ".dim(), "Sandbox ready".into()]),
                                     Line::from(vec![
                                         "  ".into(),
-                                        "Codex can now safely edit files and execute commands in your computer"
+                                        "Mikodex can now safely edit files and execute commands in your computer"
                                             .dark_gray(),
                                     ]),
                                 ]);
@@ -2976,7 +2978,10 @@ impl App {
                     ));
                 }
             }
-            AppEvent::OpenAgentsOverview => self.open_agents_overview(app_server),
+            AppEvent::OpenAgentsOverview => {
+                self.open_agents_overview(app_server);
+                tui.frame_requester().schedule_frame();
+            }
             AppEvent::ShowMoreAgentsOverview => self.show_more_agents_overview(app_server),
             AppEvent::RefreshViewedThread { backend_id, thread_id, revision } => {
                 if app_server.backend_id() == backend_id {
@@ -2992,6 +2997,7 @@ impl App {
                 self.apply_agents_overview_thread_refresh(app_server, request_id, result);
             }
             AppEvent::SelectAgentsOverviewThread { thread_id } => {
+                self.agents_overview.sidebar_focused = false;
                 match self
                     .select_agents_overview_thread(tui, app_server, thread_id)
                     .await?
@@ -3023,6 +3029,7 @@ impl App {
                 if matches!(&control, Ok(AppRunControl::Continue))
                     && self.current_displayed_thread_id() == Some(thread_id)
                 {
+                    self.agents_overview.sidebar_focused = false;
                     if let Some(input) = self.chat_widget.capture_thread_input_state() {
                         self.agents_overview.input_states.insert(thread_id, input);
                     }

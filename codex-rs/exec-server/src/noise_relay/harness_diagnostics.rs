@@ -92,10 +92,10 @@ impl HeartbeatDiagnostics {
             }
         };
         tracing::event!(
-            name: "codex.exec_server.noise_heartbeat",
+            name: "mikodex.exec_server.noise_heartbeat",
             target: "codex_otel.trace_safe",
             tracing::Level::INFO,
-            event.name = "codex.exec_server.noise_heartbeat",
+            event.name = "mikodex.exec_server.noise_heartbeat",
             stream_id,
             phase,
             pings_written = self.pings_written,

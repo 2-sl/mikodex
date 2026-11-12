@@ -5,6 +5,7 @@ use super::*;
 use crate::bottom_pane::render_filled_tab_bar;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crossterm::cursor::SetCursorStyle;
+use ratatui::style::Color;
 use ratatui::widgets::WidgetRef;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -82,6 +83,36 @@ impl AgentsOverviewView {
             footer,
         }
     }
+
+    pub(in crate::app) fn render_docked(&self, area: Rect, buf: &mut Buffer) {
+        if area.height < 34 || area.width < 20 {
+            self.render(area, buf);
+            return;
+        }
+        let details_height = (area.height * 2 / 5).clamp(12, 26);
+        let list_height = area.height.saturating_sub(details_height + 1);
+        let [list, divider, details] = Layout::vertical([
+            Constraint::Length(list_height),
+            Constraint::Length(1),
+            Constraint::Fill(1),
+        ])
+        .areas(area);
+        self.render(list, buf);
+        for x in divider.x..divider.right() {
+            buf[(x, divider.y)]
+                .set_symbol("-")
+                .set_style(if self.docked_focus {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default().dim()
+                });
+        }
+        Clear.render(details, buf);
+        self.render_details(
+            row(details, /*offset*/ 1, details.height.saturating_sub(1)),
+            buf,
+        );
+    }
 }
 
 impl Renderable for AgentsOverviewView {
@@ -148,7 +179,11 @@ impl Renderable for AgentsOverviewView {
             .unwrap_or_default();
         line(
             vec![
-                "Agent command center".bold(),
+                if self.docked_focus {
+                    "Agent command center".cyan().bold()
+                } else {
+                    "Agent command center".bold()
+                },
                 format!("  Group: {grouping}  {group_key}").dim(),
             ],
             inset(layout.header),

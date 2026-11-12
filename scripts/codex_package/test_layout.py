@@ -99,7 +99,7 @@ int main(void) {
             with self.subTest(target=target), tempfile.TemporaryDirectory() as temp:
                 package = Path(temp)
                 files = {
-                    "bin/codex.exe": b"signed CLI",
+                    "bin/mikodex.exe": b"signed CLI",
                     "bin/codex-code-mode-host.exe": b"signed code mode host",
                     "bin/codex-exec-server.exe": b"signed executor",
                     "codex-resources/codex-command-runner.exe": b"signed runner",
@@ -116,7 +116,7 @@ int main(void) {
                 metadata = {
                     "layoutVersion": 1,
                     "target": target,
-                    "entrypoint": "bin/codex.exe",
+                    "entrypoint": "bin/mikodex.exe",
                 }
                 (package / "codex-package.json").write_text(json.dumps(metadata))
                 manifest = {
@@ -124,7 +124,7 @@ int main(void) {
                     "sha256": {
                         name: hashlib.sha256(contents).hexdigest()
                         for name, contents in files.items()
-                        if name == "bin/codex.exe"
+                        if name == "bin/mikodex.exe"
                         or name.startswith("codex-resources/voice/")
                     },
                 }
@@ -132,7 +132,7 @@ int main(void) {
                 manifest_path.write_text(json.dumps(manifest))
                 prepare_winget_package(package)
                 entrypoint = f"codex-{target}.exe"
-                files[entrypoint] = files.pop("bin/codex.exe")
+                files[entrypoint] = files.pop("bin/mikodex.exe")
                 files["codex-code-mode-host.exe"] = files.pop(
                     "bin/codex-code-mode-host.exe"
                 )
@@ -153,7 +153,7 @@ int main(void) {
                 self.assertEqual(actual, files)
                 metadata["entrypoint"] = entrypoint
                 self.assertEqual(actual_metadata, metadata)
-                manifest["sha256"][entrypoint] = manifest["sha256"].pop("bin/codex.exe")
+                manifest["sha256"][entrypoint] = manifest["sha256"].pop("bin/mikodex.exe")
                 self.assertEqual(actual_manifest, manifest)
                 for name, digest in actual_manifest["sha256"].items():
                     self.assertEqual(hashlib.sha256(actual[name]).hexdigest(), digest)

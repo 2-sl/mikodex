@@ -9,7 +9,7 @@ use tempfile::TempDir;
 
 fn codex_command(codex_home: &Path) -> Result<assert_cmd::Command> {
     let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?);
-    cmd.env("CODEX_HOME", codex_home)
+    cmd.env("MIKODEX_HOME", codex_home)
         .env_remove("CODEX_ACCESS_TOKEN")
         .env_remove("CODEX_API_KEY")
         .env_remove("OPENAI_API_KEY")
@@ -160,7 +160,7 @@ fn app_server_keeps_sqlite_logs_in_overridden_sqlite_home() -> Result<()> {
     )?;
 
     codex_command(home.path())?
-        .env("CODEX_SQLITE_HOME", sqlite_home.path())
+        .env("MIKODEX_SQLITE_HOME", sqlite_home.path())
         .env(
             "CODEX_APP_SERVER_MANAGED_CONFIG_PATH",
             home.path().join("managed_config.toml"),
@@ -191,7 +191,7 @@ fn app_server_preserves_the_existing_sqlite_logs_symlink() -> Result<()> {
     )?;
 
     codex_command(home.path())?
-        .env_remove("CODEX_SQLITE_HOME")
+        .env_remove("MIKODEX_SQLITE_HOME")
         .env(
             "CODEX_APP_SERVER_MANAGED_CONFIG_PATH",
             home.path().join("managed_config.toml"),
@@ -219,7 +219,7 @@ fn print_startup_config_preserves_project_login_restrictions() -> Result<()> {
         format!("[projects.{project_key}]\ntrust_level = \"trusted\"\n"),
     )?;
     std::fs::create_dir(project.path().join(".git"))?;
-    std::fs::create_dir(project.path().join(".codex"))?;
+    std::fs::create_dir(project.path().join(".mikodex"))?;
     for method in ["chatgpt", "api"] {
         std::fs::write(
             project.path().join(".codex/config.toml"),
@@ -314,8 +314,8 @@ async fn print_startup_config_is_independent_of_a_locked_history_database() -> R
     let binary = codex_utils_cargo_bin::cargo_bin("codex")?;
     let mut command = Command::new(&binary);
     command
-        .env("CODEX_HOME", home.path())
-        .env("CODEX_SQLITE_HOME", sqlite.path())
+        .env("MIKODEX_HOME", home.path())
+        .env("MIKODEX_SQLITE_HOME", sqlite.path())
         .env_remove("CODEX_ACCESS_TOKEN")
         .env_remove("CODEX_API_KEY")
         .env_remove("OPENAI_API_KEY")

@@ -10,10 +10,18 @@ use std::collections::HashSet;
 impl App {
     pub(in crate::app) fn prepare_agents_overview_removal(&mut self, removed: &HashSet<ThreadId>) {
         let selected = self.agents_overview.selection_after_removal.or_else(|| {
-            let index = self
-                .chat_widget
-                .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)?;
-            self.agents_overview.visible_thread_ids.get(index).copied()
+            self.agents_overview
+                .sidebar_view
+                .as_ref()
+                .and_then(
+                    super::super::agents_overview_view::AgentsOverviewView::selected_thread_id,
+                )
+                .or_else(|| {
+                    let index = self
+                        .chat_widget
+                        .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)?;
+                    self.agents_overview.visible_thread_ids.get(index).copied()
+                })
         });
         let Some(selected) = selected.filter(|id| removed.contains(id)) else {
             return;

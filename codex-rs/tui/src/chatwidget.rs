@@ -1,4 +1,4 @@
-//! The main Codex TUI chat surface.
+//! The main Mikodex TUI chat surface.
 //!
 //! `ChatWidget` consumes protocol events, builds and updates history cells, and drives rendering
 //! for both the main viewport and overlay UIs.
@@ -963,6 +963,10 @@ fn token_usage_info_from_app_server(token_usage: ThreadTokenUsage) -> TokenUsage
 }
 
 impl ChatWidget {
+    pub(crate) fn command_reference_items(&self) -> Vec<(String, String)> {
+        self.bottom_pane.command_reference_items()
+    }
+
     /// Stores or overwrites the cached nickname and role for a collab agent thread.
     ///
     /// Called by `App::upsert_agent_picker_thread` and `App::replace_chat_widget` to keep the
@@ -2115,7 +2119,7 @@ impl Drop for ChatWidget {
     }
 }
 
-const PLACEHOLDER: &str = "Ask Codex to do anything";
+const PLACEHOLDER: &str = "Ask Mikodex to do anything";
 const SIDE_PLACEHOLDER: &str = "Ask a follow-up question";
 
 // Extract the first bold (Markdown) element in the form **...** from `s`.

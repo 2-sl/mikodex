@@ -438,7 +438,7 @@ impl ExecServerClient {
         .await
     }
 
-    #[tracing::instrument(name = "codex.exec_server.remote.noise.connect", skip_all)]
+    #[tracing::instrument(name = "mikodex.exec_server.remote.noise.connect", skip_all)]
     async fn open_initial_noise_rendezvous_connection(
         provider: &Arc<dyn NoiseRendezvousConnectProvider>,
         identity: &NoiseChannelIdentity,
@@ -598,11 +598,11 @@ impl ExecServerClient {
     /// retained [`NoiseRendezvousConnectProvider`] so recovery can fetch a fresh
     /// bundle for each reconnect.
     #[tracing::instrument(
-        name = "codex.exec_server.remote.harness.connect",
+        name = "mikodex.exec_server.remote.harness.connect",
         skip_all,
         fields(
             otel.kind = "client",
-            otel.name = "codex.exec_server.remote.harness.connect",
+            otel.name = "mikodex.exec_server.remote.harness.connect",
         )
     )]
     pub async fn connect_noise_rendezvous(
@@ -620,11 +620,11 @@ impl ExecServerClient {
     }
 
     #[tracing::instrument(
-        name = "codex.exec_server.remote.noise.websocket_connect",
+        name = "mikodex.exec_server.remote.noise.websocket_connect",
         skip_all,
         fields(
             otel.kind = "client",
-            otel.name = "codex.exec_server.remote.noise.websocket_connect",
+            otel.name = "mikodex.exec_server.remote.noise.websocket_connect",
             environment_id = %args.bundle.environment_id,
             executor_registration_id = %args.bundle.executor_registration_id,
         )
@@ -712,12 +712,12 @@ impl ExecServerClient {
     }
 
     #[tracing::instrument(
-        name = "codex.exec_server.remote.noise.handshake",
+        name = "mikodex.exec_server.remote.noise.handshake",
         skip_all,
         parent = initialize_span,
         fields(
             otel.kind = "client",
-            otel.name = "codex.exec_server.remote.noise.handshake",
+            otel.name = "mikodex.exec_server.remote.noise.handshake",
         )
     )]
     async fn wait_for_noise_handshake(
@@ -733,10 +733,10 @@ impl ExecServerClient {
             )),
             Err(_) => {
                 tracing::event!(
-                    name: "codex.exec_server.noise_handshake_failed",
+                    name: "mikodex.exec_server.noise_handshake_failed",
                     target: "codex_otel.trace_safe",
                     tracing::Level::WARN,
-                    event.name = "codex.exec_server.noise_handshake_failed",
+                    event.name = "mikodex.exec_server.noise_handshake_failed",
                     noise_event = "handshake",
                     noise_outcome = "failed",
                     noise_side = "harness",
@@ -763,7 +763,7 @@ impl ExecServerClient {
         let noise_context = NoiseInitializeContext {
             executor_registration_id: connection.executor_registration_id.clone(),
             span: tracing::info_span!(
-                "codex.exec_server.request",
+                "mikodex.exec_server.request",
                 otel.kind = "client",
                 otel.name = "initialize",
                 method = "initialize",

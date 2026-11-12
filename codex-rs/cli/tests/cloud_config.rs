@@ -134,7 +134,7 @@ impl CloudManagedConfigFixture {
         command
             .kill_on_drop(true)
             .current_dir(self.codex_home.path())
-            .env("CODEX_HOME", self.codex_home.path())
+            .env("MIKODEX_HOME", self.codex_home.path())
             .env("NO_PROXY", "127.0.0.1,localhost")
             .env("no_proxy", "127.0.0.1,localhost")
             .env_remove("CODEX_ACCESS_TOKEN")
@@ -496,7 +496,7 @@ async fn startup_config_loads_managed_policy_or_reports_cloud_failure() -> Resul
         std::fs::write(&history_path, b"history must not be repaired")?;
         let output = fixture
             .command(&["app-server", "--print-startup-config"])?
-            .env("CODEX_SQLITE_HOME", sqlite_home.path())
+            .env("MIKODEX_SQLITE_HOME", sqlite_home.path())
             .env(
                 "CODEX_REFRESH_TOKEN_URL_OVERRIDE",
                 format!("{}/refresh", fixture.server.uri()),
@@ -562,14 +562,14 @@ async fn startup_config_sign_out_reloads_policy_without_starting_runtime() -> Re
         let baseline = successful_json(
             fixture
                 .command(&["app-server", "--print-startup-config"])?
-                .env("CODEX_HOME", signed_out_home.path()),
+                .env("MIKODEX_HOME", signed_out_home.path()),
         )
         .await?;
         let sqlite_home = TempDir::new()?;
         let value = successful_json(
             fixture
                 .command(&["app-server", "--print-startup-config", "--startup-sign-out"])?
-                .env("CODEX_SQLITE_HOME", sqlite_home.path())
+                .env("MIKODEX_SQLITE_HOME", sqlite_home.path())
                 .env(
                     "CODEX_REVOKE_TOKEN_URL_OVERRIDE",
                     format!("{}/revoke", fixture.server.uri()),

@@ -806,7 +806,7 @@ async fn malformed_handshakes_preserve_active_streams_and_admission_recovers() -
     assert!(!environment_task.is_finished());
     let spans = span_exporter.get_finished_spans()?;
     assert!(spans.iter().any(|span| {
-        span.name == "codex.exec_server.noise_handshake_diagnostic"
+        span.name == "mikodex.exec_server.noise_handshake_diagnostic"
             && span.parent_span_id == SpanId::INVALID
             && [
                 ("noise_outcome", "reset_received"),

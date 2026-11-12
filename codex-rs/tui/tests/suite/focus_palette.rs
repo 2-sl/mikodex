@@ -313,7 +313,7 @@ impl PtyCodex {
         extra_args: &[&str],
     ) -> Result<Self> {
         let codex = codex_utils_cargo_bin::cargo_bin("codex-tui")
-            .or_else(|_| codex_utils_cargo_bin::cargo_bin("codex"))?;
+            .or_else(|_| codex_utils_cargo_bin::cargo_bin("mikodex"))?;
         Self::start_binary(
             &codex, repo_root, codex_home, extra_args, /*editor*/ None,
         )
@@ -325,8 +325,8 @@ impl PtyCodex {
         codex_home: TempDir,
         extra_args: &[&str],
     ) -> Result<Self> {
-        let codex = codex_utils_cargo_bin::cargo_bin("codex")
-            .context("build codex-cli and set CARGO_BIN_EXE_codex to its executable")?;
+        let codex = codex_utils_cargo_bin::cargo_bin("mikodex")
+            .context("build codex-cli and set CARGO_BIN_EXE_mikodex to its executable")?;
         Self::start_binary(
             &codex, repo_root, codex_home, extra_args, /*editor*/ None,
         )
@@ -386,7 +386,7 @@ impl PtyCodex {
             .env("TERM_PROGRAM", "kitty")
             .env_remove("TERM_PROGRAM_VERSION")
             .env("OPENAI_API_KEY", "focus-palette-test")
-            .env("CODEX_HOME", codex_home.path())
+            .env("MIKODEX_HOME", codex_home.path())
             .stdin(stdin)
             .stdout(stdout)
             .stderr(slave.try_clone()?)
@@ -672,11 +672,11 @@ fn auto_daemon_start_failure_exits_with_manual_fallback_hint() -> Result<()> {
                         .canonicalize()?
                         .to_string_lossy()
                         .as_ref(),
-                    "[CODEX_HOME]",
+                    "[MIKODEX_HOME]",
                 )
                 .replace(
                     terminal._codex_home.path().to_string_lossy().as_ref(),
-                    "[CODEX_HOME]",
+                    "[MIKODEX_HOME]",
                 )
                 .replace('\r', "");
             insta::assert_snapshot!("daemon_auto_start_failure", failure.trim());

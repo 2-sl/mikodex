@@ -30,7 +30,7 @@ async fn standalone_initializes_reports_version_and_runs_helpers() -> anyhow::Re
         .map_err(|()| anyhow::anyhow!("file URI"))?;
     let version = tokio::process::Command::from(background_command(&binary))
         .arg("--version")
-        .env("CODEX_HOME", directory.path())
+        .env("MIKODEX_HOME", directory.path())
         .output()
         .await?;
     assert!(version.status.success(), "{version:?}");
@@ -74,7 +74,7 @@ async fn standalone_initializes_reports_version_and_runs_helpers() -> anyhow::Re
         let mut child = tokio::process::Command::from(background_command(&binary))
             .args(["--listen", "stdio"])
             .current_dir(directory.path())
-            .env("CODEX_HOME", directory.path())
+            .env("MIKODEX_HOME", directory.path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

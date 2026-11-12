@@ -893,7 +893,7 @@ pub(crate) enum AppEvent {
         url: String,
     },
 
-    /// Open the current thread in Codex Desktop.
+    /// Open the current thread in Mikodex Desktop.
     OpenDesktopThread {
         thread_id: ThreadId,
     },

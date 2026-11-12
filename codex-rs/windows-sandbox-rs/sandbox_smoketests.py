@@ -26,15 +26,15 @@ def _resolve_codex_cmd() -> List[str]:
     cargo_target = os.environ.get("CARGO_TARGET_DIR")
 
     candidates = [
-        ws_root / "target" / "debug" / "codex.exe",
-        ws_root / "target" / "release" / "codex.exe",
+        ws_root / "target" / "debug" / "mikodex.exe",
+        ws_root / "target" / "release" / "mikodex.exe",
     ]
     if cargo_target:
         cargo_base = Path(cargo_target)
         candidates.extend(
             [
-                cargo_base / "debug" / "codex.exe",
-                cargo_base / "release" / "codex.exe",
+                cargo_base / "debug" / "mikodex.exe",
+                cargo_base / "release" / "mikodex.exe",
             ]
         )
 
@@ -511,7 +511,7 @@ def main() -> int:
             proxy_home.mkdir(parents=True, exist_ok=True)
             proxy_url = f"http://127.0.0.1:{proxy_port}"
             proxy_env = {
-                "CODEX_HOME": str(proxy_home),
+                "MIKODEX_HOME": str(proxy_home),
                 "HTTP_PROXY": proxy_url,
                 "http_proxy": proxy_url,
                 "ALL_PROXY": proxy_url,
@@ -555,7 +555,7 @@ def main() -> int:
                 "workspace-write",
                 direct_cmd,
                 WS_ROOT,
-                env_extra={"CODEX_HOME": str(proxy_home)},
+                env_extra={"MIKODEX_HOME": str(proxy_home)},
             )
             add(
                 "WS: direct loopback blocked",
@@ -764,7 +764,7 @@ def main() -> int:
     )
 
     # 34. WS: policy tamper (.codex artifacts) denied
-    codex_home = Path(os.environ["USERPROFILE"]) / ".codex"
+    codex_home = Path(os.environ["USERPROFILE"]) / ".mikodex"
     cap_sid_target = codex_home / "cap_sid"
     rc, out, err = run_sbx(
         "workspace-write",

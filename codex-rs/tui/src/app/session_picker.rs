@@ -114,9 +114,12 @@ impl App {
                     self.chat_widget.pre_draw_tick();
                 }
             }
-            SessionSelection::Exit
-            | SessionSelection::StartFresh
-            | SessionSelection::AgentsOverview => {
+            SessionSelection::AgentsOverview => {
+                self.agents_overview.sidebar_focused = true;
+                self.refresh_in_memory_config_from_disk_best_effort("closing the session picker")
+                    .await;
+            }
+            SessionSelection::Exit | SessionSelection::StartFresh => {
                 self.refresh_in_memory_config_from_disk_best_effort("closing the session picker")
                     .await;
             }

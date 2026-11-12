@@ -2493,7 +2493,7 @@ trust_level = "trusted"
             ),
         )?;
         if source == "trusted project" {
-            let project_config_dir = workspace.path().join(".codex");
+            let project_config_dir = workspace.path().join(".mikodex");
             std::fs::create_dir_all(&project_config_dir)?;
             std::fs::write(project_config_dir.join(CONFIG_TOML_FILE), feature_config)?;
         }
@@ -3597,7 +3597,7 @@ async fn workspace_profile_applies_rules_to_runtime_and_profile_workspace_roots(
     let profile_root = temp_dir.path().join("shared");
     for root in [&cwd, &runtime_root, &profile_root] {
         std::fs::create_dir_all(root.join(".git"))?;
-        std::fs::create_dir_all(root.join(".codex"))?;
+        std::fs::create_dir_all(root.join(".mikodex"))?;
     }
 
     let config = Config::load_from_base_config_with_overrides(
@@ -3622,7 +3622,7 @@ async fn workspace_profile_applies_rules_to_runtime_and_profile_workspace_roots(
                                 FilesystemPermissionToml::Scoped(BTreeMap::from([
                                     (".".to_string(), FileSystemAccessMode::Write),
                                     (".git".to_string(), FileSystemAccessMode::Read),
-                                    (".codex".to_string(), FileSystemAccessMode::Read),
+                                    (".mikodex".to_string(), FileSystemAccessMode::Read),
                                 ])),
                             )]),
                         }),
@@ -3672,7 +3672,7 @@ async fn workspace_profile_applies_rules_to_runtime_and_profile_workspace_roots(
             "expected .git carveout under {root:?}, policy: {policy:?}"
         );
         assert!(
-            !policy.can_write_local_path_with_cwd(&root.join(".codex"), cwd.as_path()),
+            !policy.can_write_local_path_with_cwd(&root.join(".mikodex"), cwd.as_path()),
             "expected .codex carveout under {root:?}, policy: {policy:?}"
         );
     }
@@ -3944,7 +3944,7 @@ async fn empty_config_defaults_to_builtin_profile_for_trusted_project(
             "expected trusted project fallback to use :workspace, policy: {policy:?}"
         );
         assert!(
-            !policy.can_write_local_path_with_cwd(&cwd.path().join(".codex"), cwd.path()),
+            !policy.can_write_local_path_with_cwd(&cwd.path().join(".mikodex"), cwd.path()),
             "expected :workspace metadata carveouts, policy: {policy:?}"
         );
     }
@@ -4003,7 +4003,7 @@ async fn empty_config_defaults_to_builtin_profile_for_untrusted_project() -> std
             "expected untrusted project fallback to use :workspace, policy: {policy:?}"
         );
         assert!(
-            !policy.can_write_local_path_with_cwd(&cwd.path().join(".codex"), cwd.path()),
+            !policy.can_write_local_path_with_cwd(&cwd.path().join(".mikodex"), cwd.path()),
             "expected :workspace metadata carveouts, policy: {policy:?}"
         );
     }
@@ -4085,7 +4085,7 @@ async fn implicit_builtin_workspace_profile_preserves_add_dir_metadata_carveouts
     let codex_home = TempDir::new()?;
     let cwd = TempDir::new()?;
     let extra_root = TempDir::new()?;
-    for subpath in [".git", ".agents", ".codex", ".aws"] {
+    for subpath in [".git", ".agents", ".mikodex", ".aws"] {
         std::fs::create_dir_all(extra_root.path().join(subpath))?;
     }
     let project_key = cwd.path().to_string_lossy().to_string();
@@ -4119,7 +4119,7 @@ async fn implicit_builtin_workspace_profile_preserves_add_dir_metadata_carveouts
         policy.can_write_local_path_with_cwd(extra_root.as_path(), cwd.path()),
         "expected implicit :workspace to preserve additional writable roots, policy: {policy:?}"
     );
-    for subpath in [".git", ".agents", ".codex", ".aws"] {
+    for subpath in [".git", ".agents", ".mikodex", ".aws"] {
         assert!(
             !policy.can_write_local_path_with_cwd(&extra_root.join(subpath), cwd.path()),
             "expected implicit :workspace to preserve legacy metadata carveout for {subpath}, \
@@ -5297,7 +5297,7 @@ exclude_slash_tmp = true
                             missing_path_behavior: None,
                         })
                 );
-                for subpath in [".git", ".agents", ".codex", ".aws"] {
+                for subpath in [".git", ".agents", ".mikodex", ".aws"] {
                     assert!(
                         file_system_policy
                             .entries
@@ -5809,7 +5809,7 @@ async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result
     let codex_home = TempDir::new()?;
     let user_file = AbsolutePathBuf::resolve_path_against_base(CONFIG_TOML_FILE, codex_home.path());
     let project_dot_codex =
-        AbsolutePathBuf::resolve_path_against_base("project/.codex", codex_home.path());
+        AbsolutePathBuf::resolve_path_against_base("project/.mikodex", codex_home.path());
     let mcp_requirements = BTreeMap::from([
         (
             "session_overrides_user".to_string(),
@@ -6770,7 +6770,7 @@ async fn project_cannot_be_the_only_xaa_opt_in_source() -> std::io::Result<()> {
     let config_layer_stack = ConfigLayerStack::new(
         vec![ConfigLayerEntry::new(
             ConfigLayerSource::Project {
-                dot_codex_folder: codex_home.path().join("project/.codex").abs(),
+                dot_codex_folder: codex_home.path().join("project/.mikodex").abs(),
             },
             toml::toml! {
                 [features]
@@ -7109,7 +7109,7 @@ trust_level = "trusted"
 "#,
         ),
     )?;
-    let project_config_dir = workspace.path().join(".codex");
+    let project_config_dir = workspace.path().join(".mikodex");
     std::fs::create_dir_all(&project_config_dir)?;
     std::fs::write(
         project_config_dir.join(CONFIG_TOML_FILE),
@@ -9316,7 +9316,7 @@ trust_level = "trusted"
     )
     .await?;
 
-    let standalone_agents_dir = repo_root.path().join(".codex").join("agents");
+    let standalone_agents_dir = repo_root.path().join(".mikodex").join("agents");
     tokio::fs::create_dir_all(&standalone_agents_dir).await?;
     tokio::fs::write(
         standalone_agents_dir.join("researcher.toml"),
@@ -9488,7 +9488,7 @@ trust_level = "trusted"
     )
     .await?;
 
-    let standalone_agents_dir = repo_root.path().join(".codex").join("agents");
+    let standalone_agents_dir = repo_root.path().join(".mikodex").join("agents");
     tokio::fs::create_dir_all(&standalone_agents_dir).await?;
     tokio::fs::write(
         standalone_agents_dir.join("researcher.toml"),
@@ -9690,7 +9690,7 @@ trust_level = "trusted"
 
     let root_agent = repo_root
         .path()
-        .join(".codex")
+        .join(".mikodex")
         .join("agents")
         .join("root.toml");
     std::fs::create_dir_all(
@@ -9710,7 +9710,7 @@ developer_instructions = "Research carefully"
     let nested_agent = repo_root
         .path()
         .join("packages")
-        .join(".codex")
+        .join(".mikodex")
         .join("agents")
         .join("review")
         .join("nested.toml");
@@ -9732,7 +9732,7 @@ developer_instructions = "Review carefully"
     let sibling_agent = repo_root
         .path()
         .join("packages")
-        .join(".codex")
+        .join(".mikodex")
         .join("agents")
         .join("writer.toml");
     std::fs::create_dir_all(
@@ -9850,7 +9850,7 @@ model = "gpt-4.1"
     )
     .await?;
 
-    let standalone_agents_dir = repo_root.path().join(".codex").join("agents");
+    let standalone_agents_dir = repo_root.path().join(".mikodex").join("agents");
     tokio::fs::create_dir_all(&standalone_agents_dir).await?;
     tokio::fs::write(
         standalone_agents_dir.join("researcher.toml"),
@@ -9983,7 +9983,7 @@ model = "gpt-5.2"
     )
     .await?;
 
-    let standalone_agents_dir = repo_root.path().join(".codex").join("agents");
+    let standalone_agents_dir = repo_root.path().join(".mikodex").join("agents");
     tokio::fs::create_dir_all(&standalone_agents_dir).await?;
     tokio::fs::write(
         standalone_agents_dir.join("researcher.toml"),
@@ -13559,7 +13559,7 @@ disabled_tools = [
         ),
     )?;
 
-    let project_config_dir = workspace.path().join(".codex");
+    let project_config_dir = workspace.path().join(".mikodex");
     std::fs::create_dir_all(&project_config_dir)?;
     std::fs::write(
         project_config_dir.join(CONFIG_TOML_FILE),
@@ -14199,7 +14199,7 @@ fn sqlite_home_env_conflict_reports_an_override() -> std::io::Result<()> {
     assert_eq!(
         warnings,
         vec![format!(
-            "Environment value for `$CODEX_SQLITE_HOME` is overridden by the required `sqlite_home` value {required:?} from {}.",
+            "Environment value for `$MIKODEX_SQLITE_HOME` is overridden by the required `sqlite_home` value {required:?} from {}.",
             RequirementSource::Unknown
         )]
     );

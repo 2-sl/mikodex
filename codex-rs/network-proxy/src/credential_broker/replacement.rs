@@ -67,7 +67,7 @@ impl CredentialRecord {
                     .any(|alias| {
                         start.checked_sub(alias.range.start).is_some_and(|offset| {
                             text.get(offset..offset + alias.len).is_some_and(|context| {
-                                <[u8; 32]>::from(Sha256::digest(context)) == alias.digest
+                                Sha256::digest(context).as_slice() == alias.digest.as_slice()
                             })
                         })
                     })

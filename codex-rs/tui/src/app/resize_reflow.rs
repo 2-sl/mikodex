@@ -2,7 +2,7 @@
 //!
 //! The app stores conversation history as `HistoryCell`s, but it also writes finalized history into
 //! terminal scrollback for the normal chat view. When the terminal width changes, this module uses
-//! the stored cells as source, clears the Codex-owned terminal history, and re-emits the transcript
+//! the stored cells as source, clears the Mikodex-owned terminal history, and re-emits the transcript
 //! for the new terminal size.
 //!
 //! Streaming output is the fragile part of this lifecycle. Active streams first appear as transient
@@ -277,7 +277,10 @@ impl App {
     }
 
     pub(super) fn update_visible_history_rows(&mut self, screen_size: Size) {
-        let width = screen_size.width.max(/*other*/ 1);
+        let viewport = ratatui::layout::Rect::new(0, 0, screen_size.width, screen_size.height);
+        let width = super::agents_overview_dock::conversation_viewport(self, viewport)
+            .width
+            .max(/*other*/ 1);
         let viewport_height = self
             .with_chat_widget_frame(width, |desired_height, _| desired_height)
             .min(screen_size.height);

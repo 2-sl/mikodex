@@ -93,7 +93,7 @@ class MacosSigningTests(ProvisioningTestCase):
         certificate.write_text(ssl.DER_cert_to_PEM_cert(certificate_der))
         (root / "certificate.der").write_bytes(certificate_der)
         package = root / "package with spaces"
-        for relative in ("bin/codex", *bundle.HELPERS):
+        for relative in ("bin/mikodex", *bundle.HELPERS):
             path = package / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("#!/bin/sh\nexit 0\n")
@@ -104,7 +104,7 @@ class MacosSigningTests(ProvisioningTestCase):
                     "variant": "codex",
                     "layoutVersion": 1,
                     "target": target,
-                    "entrypoint": "bin/codex",
+                    "entrypoint": "bin/mikodex",
                 }
             )
         )
@@ -179,7 +179,7 @@ class MacosSigningTests(ProvisioningTestCase):
                     [
                         str(package / relative)
                         for relative in (
-                            bundle.APP if provisioned else "bin/codex",
+                            bundle.APP if provisioned else "bin/mikodex",
                             *bundle.HELPERS,
                         )
                     ],
@@ -217,7 +217,7 @@ class MacosSigningTests(ProvisioningTestCase):
                             "arm64" if target.startswith("aarch64") else "x86_64",
                         ]
                         for relative in (
-                            bundle.EXECUTABLE if provisioned else "bin/codex",
+                            bundle.EXECUTABLE if provisioned else "bin/mikodex",
                             *bundle.HELPERS,
                         )
                     ],
@@ -273,7 +273,7 @@ class MacosSigningTests(ProvisioningTestCase):
                             self.configuration.profile.read_bytes(),
                         )
                         self.assertEqual(
-                            archive.read("bin/codex").decode(), bundle.LAUNCHER
+                            archive.read("bin/mikodex").decode(), bundle.LAUNCHER
                         )
                         self.assertTrue(
                             all(

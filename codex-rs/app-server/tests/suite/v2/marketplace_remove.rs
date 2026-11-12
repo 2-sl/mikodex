@@ -126,10 +126,10 @@ async fn marketplace_remove_rejects_unknown_marketplace() -> Result<()> {
 #[tokio::test]
 async fn marketplace_remove_ignores_startup_project_config() -> Result<()> {
     let codex_home = TempDir::new()?;
-    // TestAppServer starts in CODEX_HOME, so put project config there to verify
+    // TestAppServer starts in MIKODEX_HOME, so put project config there to verify
     // that the global marketplace RPC does not use it.
     std::fs::create_dir_all(codex_home.path().join(".git"))?;
-    std::fs::create_dir_all(codex_home.path().join(".codex"))?;
+    std::fs::create_dir_all(codex_home.path().join(".mikodex"))?;
     let project_config_path = codex_home.path().join(".codex/config.toml");
     let project_config = "[marketplaces.debug]\nsource_type = \"git\"\nsource = \"https://github.com/owner/repo.git\"\n";
     std::fs::write(&project_config_path, project_config)?;

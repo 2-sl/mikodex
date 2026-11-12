@@ -35,6 +35,12 @@ pub(super) struct ConversationFrame {
     caller_images: Vec<ImagePlacement>,
 }
 
+impl ConversationFrame {
+    pub(super) fn has_caller_inset(&self) -> bool {
+        self.inset.is_some()
+    }
+}
+
 pub(super) struct PreparedConversation {
     area: Rect,
     transcript_width: u16,
@@ -193,9 +199,28 @@ impl App {
         tui: &mut tui::Tui,
         screen_size: Size,
     ) -> Result<Rect> {
+        self.ensure_agents_overview_sidebar_view();
+        self.transcript_view.image_protocol = self.prepare_frame_images();
         let frames = tui.frame_requester();
-        let prepared =
-            self.prepare_conversation(screen_size.into(), self.conversation_frame.inset, &frames);
+        let caller_inset = self.conversation_frame.inset;
+        let full_viewport = Rect::new(0, 0, screen_size.width, screen_size.height);
+        let agents_overview_present = self
+            .chat_widget
+            .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
+            .is_some();
+        let agents_dock = (caller_inset.is_none() && !agents_overview_present)
+            .then(|| agents_overview_dock::layout(full_viewport))
+            .flatten();
+        let conversation_viewport = agents_dock
+            .as_ref()
+            .map_or(full_viewport, |dock| dock.conversation);
+        let command_items = agents_dock
+            .as_ref()
+            .filter(|dock| !dock.command_reference.is_empty())
+            .map(|_| self.chat_widget.command_reference_items())
+            .unwrap_or_default();
+        let command_scroll = self.agents_overview.command_reference_scroll;
+        let prepared = self.prepare_conversation(conversation_viewport, caller_inset, &frames);
         // An input refresh opens a fresh terminal buffer. Carry the outer owner's
         // completed cells through it when only the conversation is being redrawn.
         let backdrop = self.conversation_frame.inset.map(|_| {
@@ -223,6 +248,20 @@ impl App {
                 }
             }
             painted = self.paint_conversation(frame, &prepared);
+            if let Some(dock) = agents_dock {
+                if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
+                    view.render_docked(dock.sidebar, frame.buffer);
+                }
+                dock.render_divider(frame.buffer, self.agents_overview.sidebar_focused);
+                if !dock.command_reference.is_empty() {
+                    command_reference::render(
+                        dock.command_reference,
+                        frame.buffer,
+                        &command_items,
+                        command_scroll,
+                    );
+                }
+            }
             self.paint_centered_dialog(frame);
         })?;
         self.finish_conversation(tui, painted)
@@ -411,6 +450,10 @@ impl App {
             );
             needs_redraw = false;
         }
+        let background_tick = chat_widget
+            .empty_state_animation
+            .borrow_mut()
+            .render_chat_background(area, frame.buffer);
         let blossom_tick = chat_widget
             .empty_state_animation
             .borrow_mut()
@@ -424,6 +467,7 @@ impl App {
                 composer,
                 MotionMode::from_animations_enabled(self.local_settings.tui.animations),
             );
+        let blossom_tick = background_tick.or(blossom_tick);
         bottom.render(bottom_area, frame.buffer);
         if let (Some(tip), Some(area)) = (completion_tip, completion_tip_area) {
             tip.render(area, frame.buffer);
@@ -547,6 +591,9 @@ impl App {
         app_server: &mut AppServerSession,
         event: &TuiEvent,
     ) -> Result<bool> {
+        if self.agents_overview.sidebar_focused && self.overlay.is_none() {
+            return Ok(false);
+        }
         let has_modal = self.chat_widget.has_active_modal();
         let modal_transcript_mouse = has_modal
             && matches!(event, TuiEvent::Mouse(mouse)

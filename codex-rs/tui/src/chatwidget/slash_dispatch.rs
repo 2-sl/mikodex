@@ -14,6 +14,7 @@ use crate::bottom_pane::slash_commands::BuiltinCommandFlags;
 use crate::bottom_pane::slash_commands::ServiceTierCommand;
 use crate::bottom_pane::slash_commands::SlashCommandItem;
 use crate::bottom_pane::slash_commands::find_slash_command;
+use crate::empty_state_animation::BackgroundCharacter;
 use crate::goal_display::GOAL_USAGE;
 use crate::goal_files::GoalDraft;
 
@@ -583,6 +584,16 @@ impl ChatWidget {
             SlashCommand::Theme => {
                 self.open_theme_picker();
             }
+            SlashCommand::Background => {
+                let current = self.empty_state_animation.borrow().background_character();
+                self.add_info_message(
+                    format!(
+                        "Current chat background: {}. Use /background reimu.",
+                        current.label()
+                    ),
+                    /*hint*/ None,
+                );
+            }
             SlashCommand::Pets => {
                 self.open_pets_picker();
             }
@@ -1127,6 +1138,19 @@ impl ChatWidget {
             SlashCommand::Pets if !trimmed.is_empty() => {
                 self.select_pet_by_id(args);
             }
+            SlashCommand::Background => {
+                if let Some(character) = BackgroundCharacter::parse(trimmed) {
+                    self.empty_state_animation
+                        .borrow_mut()
+                        .set_background_character(character);
+                    self.add_info_message(
+                        format!("Chat background changed to {}.", character.label()),
+                        /*hint*/ None,
+                    );
+                } else {
+                    self.add_error_message("Usage: /background <reimu>".to_string());
+                }
+            }
             _ => self.dispatch_command_from_source(cmd, source),
         }
         if source == SlashCommandDispatchSource::Live && cmd != SlashCommand::Goal {
@@ -1356,6 +1380,7 @@ impl ChatWidget {
             | SlashCommand::Statusline
             | SlashCommand::Config
             | SlashCommand::Theme
+            | SlashCommand::Background
             | SlashCommand::Tui
             | SlashCommand::Pets => QueueDrain::Stop,
         }

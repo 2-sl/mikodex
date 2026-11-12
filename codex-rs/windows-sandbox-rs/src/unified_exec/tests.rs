@@ -354,13 +354,13 @@ fn elevated_non_tty_cmd_forwards_env_output_and_exit() {
 }
 
 #[test]
-#[ignore = "requires this test binary in an installed test MSIX, launched with package identity, CODEX_WINDOWS_REGISTERED_CORE=1, and CODEX_HOME provisioned by that package's service in a disposable Windows VM"]
+#[ignore = "requires this test binary in an installed test MSIX, launched with package identity, CODEX_WINDOWS_REGISTERED_CORE=1, and MIKODEX_HOME provisioned by that package's service in a disposable Windows VM"]
 fn registered_non_tty_cmd_forwards_env_output_and_exit() {
     assert!(
         crate::registered_core_requested(),
         "registered Core opt-in is required"
     );
-    let codex_home = PathBuf::from(std::env::var_os("CODEX_HOME").expect("fixture CODEX_HOME"));
+    let codex_home = PathBuf::from(std::env::var_os("MIKODEX_HOME").expect("fixture MIKODEX_HOME"));
     assert!(
         crate::app_package::registered_setup_is_ready(&codex_home)
             .expect("validate the installed package and service receipt"),

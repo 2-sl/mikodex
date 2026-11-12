@@ -57,7 +57,7 @@ impl NoiseStreamHandler for ConnectionProcessor {
             drop(tracing::info_span!(
                 target: "codex_otel.trace_safe",
                 parent: request_span,
-                "codex.exec_server.noise_request_received",
+                "mikodex.exec_server.noise_request_received",
             ));
         }
         Ok(event)

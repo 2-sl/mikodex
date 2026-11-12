@@ -1,4 +1,4 @@
-#[path = "../../src/proto/codex.exec_server.relay.v1.rs"]
+#[path = "../../src/proto/mikodex.exec_server.relay.v1.rs"]
 mod relay_proto;
 
 use std::sync::Arc;

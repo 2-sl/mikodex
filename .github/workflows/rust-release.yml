@@ -1503,7 +1503,7 @@ jobs:
           done
 
           if [[ "${{ matrix.bundle }}" == "primary" ]]; then
-            [[ "$(readlink "${mount_dir}/codex")" == "bin/codex" ]]
+            [[ "$(readlink "${mount_dir}/codex")" == "bin/mikodex" ]]
             cmp "${mount_dir}/codex-package.json" "${package_dir}/codex-package.json"
             cmp "${mount_dir}/codex-resources/voice/manifest.json" \
               "${package_dir}/codex-resources/voice/manifest.json"

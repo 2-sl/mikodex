@@ -57,10 +57,15 @@ impl App {
             return;
         }
         let Some(thread_id) = self
-            .chat_widget
-            .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
-            .and_then(|index| self.agents_overview.visible_thread_ids.get(index))
-            .copied()
+            .agents_overview
+            .sidebar_view
+            .as_ref()
+            .and_then(super::agents_overview_view::AgentsOverviewView::selected_thread_id)
+            .or_else(|| {
+                self.chat_widget
+                    .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
+                    .and_then(|index| self.agents_overview.visible_thread_ids.get(index).copied())
+            })
         else {
             return;
         };

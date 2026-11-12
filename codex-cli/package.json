@@ -1,17 +1,17 @@
 {
-  "name": "@openai/codex",
-  "version": "0.0.0-dev",
-  "description": "Codex CLI is a coding agent from OpenAI that runs locally on your computer.",
+  "name": "mikodex",
+  "version": "0.167.2",
+  "description": "Mikodex is a local coding agent fork that runs on your computer.",
   "license": "Apache-2.0",
   "bin": {
-    "codex": "bin/codex.js"
+    "mikodex": "bin/mikodex.js"
   },
   "type": "module",
   "engines": {
     "node": ">=16"
   },
   "files": [
-    "bin/codex.js"
+    "bin/mikodex.js"
   ],
   "repository": {
     "type": "git",

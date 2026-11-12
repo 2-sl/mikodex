@@ -59,7 +59,7 @@ fn adapter_preserves_trusted_tool_authority_and_scope() {
     let tool = TrustedTool {
         server: "example".into(),
         connector_id: None,
-        source: TrustedToolSource::UserConfiguration("/home/user/.codex/config.toml".into()),
+        source: TrustedToolSource::UserConfiguration("/home/user/.mikodex/config.toml".into()),
     };
     let trusted = ResponseItem::from(tool.render_fragment());
     let user: ResponseItem =

@@ -107,7 +107,7 @@ fn supports_credential_snapshot(params: &ExecParams) -> bool {
 }
 
 #[tracing::instrument(
-    name = "codex.exec_server.process_prepare_sandbox",
+    name = "mikodex.exec_server.process_prepare_sandbox",
     skip_all,
     fields(process.id = trace_process_id(params.process_id.as_str())),
 )]

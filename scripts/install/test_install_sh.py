@@ -172,7 +172,7 @@ class InstallShTest(unittest.TestCase):
             )
             pinned, _ = run_installer_in(root, VERSION, **options)
             self.assertEqual(pinned.returncode, 0, pinned.stderr)
-            visible = root / "install-bin/codex"
+            visible = root / "install-bin/mikodex"
             original = visible.resolve()
             pending = visible.with_name(".codex.12345")
             pending.symlink_to(original)
@@ -219,7 +219,7 @@ class InstallShTest(unittest.TestCase):
             self.assertEqual((daemon / "current").resolve(), local)
             self.assertFalse(marker.exists())
 
-            binary = daemon / "releases" / release_name / "bin/codex"
+            binary = daemon / "releases" / release_name / "bin/mikodex"
             contents = binary.read_text()
             binary.write_text(
                 '#!/bin/sh\n[ "$1" = "--version" ] || exit 2\n'
@@ -309,7 +309,7 @@ class InstallShTest(unittest.TestCase):
 
             managed = (
                 root
-                / f"codex-home/packages/standalone/releases/{release_name}/bin/codex"
+                / f"codex-home/packages/standalone/releases/{release_name}/bin/mikodex"
             )
             managed.unlink()
             guarded, _ = run_installer_in(
@@ -330,7 +330,7 @@ class InstallShTest(unittest.TestCase):
         )
         function = "record_standalone_releases_in_use() {" + function + "\n}\n"
         function = function.replace("/usr/sbin/lsof ", "mock_lsof ")
-        matches = "p123\nn/releases/active/bin/codex\n"
+        matches = "p123\nn/releases/active/bin/mikodex\n"
         for status, output, error, expected in (
             (0, matches, "", 0),
             (1, "", "", 0),
@@ -489,7 +489,7 @@ class InstallShTest(unittest.TestCase):
                 fake_ps = root / "bin/ps"
                 foreign_uid = 0 if os.geteuid() != 0 else 501
                 try:
-                    for executable in (oldest / "bin/codex", helper):
+                    for executable in (oldest / "bin/mikodex", helper):
                         with self.subTest(foreign_executable=executable.name):
                             fake_ps.write_text(
                                 "#!/bin/sh\n"
@@ -1141,7 +1141,7 @@ def run_installer_in(
     env = os.environ.copy()
     env.update(
         {
-            "CODEX_HOME": str(root / "codex-home"),
+            "MIKODEX_HOME": str(root / "codex-home"),
             "CODEX_INSTALL_DIR": str(root / "install-bin"),
             "CODEX_NON_INTERACTIVE": "1",
             "CODEX_RELEASE": release,
@@ -1219,7 +1219,7 @@ def create_package_release(
     package_dir = root / "package"
     (package_dir / "bin").mkdir(parents=True)
     (package_dir / "codex-path").mkdir()
-    metadata = {"version": binary_version, "target": target, "entrypoint": "bin/codex"}
+    metadata = {"version": binary_version, "target": target, "entrypoint": "bin/mikodex"}
     if include_exec_server:
         metadata["execServer"] = "bin/codex-exec-server"
         write_executable(package_dir / "bin/codex-exec-server", "#!/bin/sh\nexit 0\n")

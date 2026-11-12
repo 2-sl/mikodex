@@ -331,7 +331,7 @@ fn ensure_supported_platform() -> Result<()> {
 #[cfg(not(any(unix, windows)))]
 fn ensure_supported_platform() -> Result<()> {
     Err(anyhow!(
-        "codex app-server daemon lifecycle is only supported on Unix and Windows platforms"
+        "mikodex app-server daemon lifecycle is only supported on Unix and Windows platforms"
     ))
 }
 
@@ -350,7 +350,7 @@ struct Daemon {
 
 impl Daemon {
     fn from_environment() -> Result<Self> {
-        let codex_home = find_codex_home().context("failed to resolve CODEX_HOME")?;
+        let codex_home = find_codex_home().context("failed to resolve MIKODEX_HOME")?;
         let socket_path = app_server_control_socket_path(codex_home.as_path())?
             .as_path()
             .to_path_buf();
@@ -387,7 +387,7 @@ impl Daemon {
             self.settings_file
                 .parent()
                 .and_then(Path::parent)
-                .context("daemon settings path has no Codex home")?,
+                .context("daemon settings path has no Mikodex home")?,
         ))
     }
 
@@ -399,7 +399,7 @@ impl Daemon {
             .settings_file
             .parent()
             .and_then(Path::parent)
-            .context("daemon settings path has no Codex home")?;
+            .context("daemon settings path has no Mikodex home")?;
         let (pid, updater) = if managed_codex_bin.starts_with(home.join("packages/standalone")) {
             (LEGACY_PID_FILE_NAME, LEGACY_UPDATE_PID_FILE_NAME)
         } else {
@@ -494,7 +494,7 @@ impl Daemon {
             && self.running_backend(&settings).await?.is_none()
         {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by mikodex app-server daemon"
             ));
         }
         prepare_install::prepare(self, &settings).await?;
@@ -623,7 +623,7 @@ impl Daemon {
             }
         } else if client::probe(&self.socket_path).await.is_ok() {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by mikodex app-server daemon"
             ));
         } else {
             diagnostics::event("daemon_not_running", ());
@@ -674,7 +674,7 @@ impl Daemon {
 
         if client::probe(&self.socket_path).await.is_ok() {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by mikodex app-server daemon"
             ));
         }
 
@@ -794,7 +794,7 @@ impl Daemon {
 
         if backend.is_none() && client::probe(&self.socket_path).await.is_ok() {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by mikodex app-server daemon"
             ));
         }
 
@@ -864,7 +864,7 @@ impl Daemon {
             && self.running_backend(&settings).await?.is_none()
         {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by mikodex app-server daemon"
             ));
         }
         prepare_install::prepare(self, &settings).await?;
@@ -1033,7 +1033,7 @@ impl Daemon {
             .settings_file
             .parent()
             .and_then(Path::parent)
-            .context("daemon settings path has no Codex home")?;
+            .context("daemon settings path has no Mikodex home")?;
         Ok(managed_install::is_stable_standalone_release(
             codex_home,
             &self.current_managed_codex_bin()?,
@@ -1046,7 +1046,7 @@ impl Daemon {
             .settings_file
             .parent()
             .and_then(Path::parent)
-            .context("daemon settings path has no Codex home")?;
+            .context("daemon settings path has no Mikodex home")?;
         Ok(managed_install::managed_codex_bin(home))
     }
 
@@ -1081,7 +1081,7 @@ impl Daemon {
 
         let managed_codex_path = self.managed_codex_bin.display();
         Err(anyhow!(
-            "daemon executable not found at {managed_codex_path}; repair the existing installation, or run `codex app-server daemon start` to install a missing daemon"
+            "daemon executable not found at {managed_codex_path}; repair the existing installation, or run `mikodex app-server daemon start` to install a missing daemon"
         ))
     }
 
@@ -1491,7 +1491,7 @@ mod tests {
     async fn managed_local_backend_counts_as_bootstrapped_without_updater() {
         let home = TempDir::new().expect("home");
         let standalone = home.path().join("packages/standalone");
-        let local_bin = standalone.join("local-main/bin/codex");
+        let local_bin = standalone.join("local-main/bin/mikodex");
         tokio::fs::create_dir_all(local_bin.parent().expect("bin parent"))
             .await
             .expect("local bin directory");
@@ -1509,7 +1509,7 @@ mod tests {
             update_pid_file: state.join("app-server-updater.pid"),
             operation_lock_file: state.join("daemon.lock"),
             settings_file: state.join("settings.json"),
-            managed_codex_bin: standalone.join("current/bin/codex"),
+            managed_codex_bin: standalone.join("current/bin/mikodex"),
         };
         let settings = DaemonSettings::default();
         assert!(

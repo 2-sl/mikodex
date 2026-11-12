@@ -1293,7 +1293,7 @@ def test_default_runtime_is_resolved_from_installed_runtime_package(
 ) -> None:
     from openai_codex import client as client_module
 
-    fake_binary = tmp_path / ("codex.exe" if client_module.os.name == "nt" else "codex")
+    fake_binary = tmp_path / ("mikodex.exe" if client_module.os.name == "nt" else "codex")
     fake_binary.write_text("")
     ops = client_module.CodexBinResolverOps(
         installed_codex_path=lambda: fake_binary,
@@ -1338,7 +1338,7 @@ def test_explicit_codex_bin_override_takes_priority(tmp_path: Path) -> None:
     from openai_codex import client as client_module
 
     explicit_binary = tmp_path / (
-        "custom-codex.exe" if client_module.os.name == "nt" else "custom-codex"
+        "custom-mikodex.exe" if client_module.os.name == "nt" else "custom-codex"
     )
     explicit_binary.write_text("")
     ops = client_module.CodexBinResolverOps(

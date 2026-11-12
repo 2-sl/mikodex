@@ -41,7 +41,7 @@ pub(super) async fn server() -> wiremock::MockServer {
                 }
             }).collect::<Vec<_>>();
             let response = if route == "daily-workspace-user-credit-usage" {
-                json!({"breakdown":params["breakdown"],"series":[{"key":"codex","label":"Codex","total":data.len() as f64 * 10.0}],"data":data})
+                json!({"breakdown":params["breakdown"],"series":[{"key":"codex","label":"Mikodex","total":data.len() as f64 * 10.0}],"data":data})
             } else {
                 json!({"data":data})
             };

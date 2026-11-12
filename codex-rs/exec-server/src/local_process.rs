@@ -1057,7 +1057,7 @@ fn watch_exit(
     telemetry: ProcessTelemetry,
 ) -> impl std::future::Future<Output = ()> + Send {
     // Set the copied OTEL parent before entering; never retain the RPC tracing span.
-    let process_span = tracing::info_span!(parent: None, "codex.exec_server.process");
+    let process_span = tracing::info_span!(parent: None, "mikodex.exec_server.process");
     if let Some(launch_context) = &telemetry.launch_context {
         codex_otel::set_parent_from_context(
             &process_span,

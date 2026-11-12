@@ -12,12 +12,47 @@ use crate::keymap::keymap_action_ids;
 mod select_mode;
 
 impl App {
+    pub(super) fn handle_agents_overview_sidebar_key_event(
+        &mut self,
+        key_event: KeyEvent,
+        activation_key: Option<KeyBinding>,
+    ) -> bool {
+        if !self.agents_overview.sidebar_focused
+            || self.overlay.is_some()
+            || !self.chat_widget.no_modal_or_popup_active()
+        {
+            return false;
+        }
+        let Some(view) = self.agents_overview.sidebar_view.as_mut() else {
+            self.agents_overview.sidebar_focused = false;
+            return false;
+        };
+        if view.handle_docked_key_event(key_event, activation_key) {
+            self.agents_overview.sidebar_focused = false;
+        }
+        true
+    }
+
+    pub(super) fn handle_agents_overview_sidebar_paste(&mut self, pasted: String) -> bool {
+        if !self.agents_overview.sidebar_focused
+            || self.overlay.is_some()
+            || !self.chat_widget.no_modal_or_popup_active()
+        {
+            return false;
+        }
+        if let Some(view) = self.agents_overview.sidebar_view.as_mut() {
+            crate::bottom_pane::BottomPaneView::handle_paste(view, pasted);
+        }
+        true
+    }
+
     pub(super) fn should_recover_vim_insert_escape(&self, key_event: KeyEvent) -> bool {
         let active_contexts = self.active_keymap_contexts();
-        let rename_active = self
-            .chat_widget
-            .selected_index_for_active_view(AGENTS_OVERVIEW_VIEW_ID)
-            .is_some();
+        let rename_active = self.agents_overview.sidebar_focused
+            || self
+                .chat_widget
+                .selected_index_for_active_view(AGENTS_OVERVIEW_VIEW_ID)
+                .is_some();
         let escape = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         let insert_escape = if rename_active {
             let state = self
@@ -249,6 +284,17 @@ impl App {
                 contexts
             };
         }
+        if self.agents_overview.sidebar_focused && self.chat_widget.no_modal_or_popup_active() {
+            let contexts = self
+                .agents_overview
+                .sidebar_view
+                .as_ref()
+                .map(|view| crate::bottom_pane::BottomPaneView::keymap_contexts(view))
+                .unwrap_or_default()
+                .with(crate::keymap::KeymapContext::Global)
+                .with(crate::keymap::KeymapContext::Chat);
+            return contexts.with_voice_toggle(&self.keymap);
+        }
         if self.transcript_view.is_search_editing() && self.chat_widget.no_modal_or_popup_active() {
             return KeymapContextSet::new(KeymapContext::Editor).with_voice_toggle(&self.keymap);
         }
@@ -295,7 +341,7 @@ impl App {
             Err(external_editor::EditorError::MissingEditor) => {
                 self.chat_widget
                     .add_to_history(history_cell::new_error_event(
-                    "Cannot open external editor: set $VISUAL or $EDITOR before starting Codex."
+                    "Cannot open external editor: set $VISUAL or $EDITOR before starting Mikodex."
                         .to_string(),
                 ));
                 self.reset_external_editor_state(tui);
@@ -407,7 +453,8 @@ impl App {
         if self.chat_widget.fork_in_progress {
             return;
         }
-        if self.chat_widget.has_provider_error()
+        if !self.agents_overview.sidebar_focused
+            && self.chat_widget.has_provider_error()
             && self.overlay.is_none()
             && self.chat_widget.no_modal_or_popup_active()
             && key_event.kind == KeyEventKind::Press
@@ -432,7 +479,8 @@ impl App {
                 _ => {}
             }
         }
-        if self.chat_widget.is_external_writer_view()
+        if !self.agents_overview.sidebar_focused
+            && self.chat_widget.is_external_writer_view()
             && self.overlay.is_none()
             && self.chat_widget.no_modal_or_popup_active()
             && key_event.kind == KeyEventKind::Press
@@ -492,7 +540,8 @@ impl App {
         // editing behavior for moving across words inside a draft.
         let allow_agent_word_motion_fallback = !self.enhanced_keys_supported
             && self.chat_widget.composer_text_with_pending().is_empty();
-        if self.overlay.is_none()
+        if !self.agents_overview.sidebar_focused
+            && self.overlay.is_none()
             && self.chat_widget.no_modal_or_popup_active()
             // Alt+Left/Right are also natural word-motion keys in the composer. Keep agent
             // fast-switch available only once the draft is empty so editing behavior wins whenever
@@ -508,7 +557,8 @@ impl App {
             }
             return;
         }
-        if self.overlay.is_none()
+        if !self.agents_overview.sidebar_focused
+            && self.overlay.is_none()
             && self.chat_widget.no_modal_or_popup_active()
             // Mirror the previous-agent rule above: empty drafts may use these keys for thread
             // switching, but non-empty drafts keep them for expected word-wise cursor motion.
@@ -562,17 +612,17 @@ impl App {
                     items: [
                         (
                             "Cancel task",
-                            "Stop the current task and stay in Codex",
+                            "Stop the current task and stay in Mikodex",
                             RunningTaskExitAction::CancelTask,
                         ),
                         (
                             "Run in background",
-                            "Exit Codex and leave the task running",
+                            "Exit Mikodex and leave the task running",
                             RunningTaskExitAction::RunInBackground,
                         ),
                         (
                             "Exit",
-                            "Stop the current task and exit Codex",
+                            "Stop the current task and exit Mikodex",
                             RunningTaskExitAction::Exit,
                         ),
                     ]
@@ -596,7 +646,8 @@ impl App {
             }
         }
 
-        if side_return_shortcut_matches(key_event)
+        if !self.agents_overview.sidebar_focused
+            && side_return_shortcut_matches(key_event)
             && self.maybe_return_from_side(tui, app_server).await
         {
             return;
@@ -634,7 +685,13 @@ impl App {
             return;
         }
 
-        if self.chat_widget.is_external_writer_view()
+        if self.handle_agents_overview_sidebar_key_event(key_event, activation_key) {
+            tui.frame_requester().schedule_frame();
+            return;
+        }
+
+        if !self.agents_overview.sidebar_focused
+            && self.chat_widget.is_external_writer_view()
             && self.overlay.is_none()
             && self.chat_widget.no_modal_or_popup_active()
         {
@@ -761,6 +818,7 @@ impl App {
 
         if self.keymap.app.open_agents.is_pressed(key_event) {
             self.open_agents_overview(app_server);
+            tui.frame_requester().schedule_frame();
             return true;
         }
 

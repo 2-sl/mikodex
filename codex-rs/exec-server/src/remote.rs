@@ -142,11 +142,11 @@ impl EnvironmentRegistryClient {
     /// Register the executor public key and obtain the rendezvous allocation.
     /// The returned registration ID is included in each stream's Noise prologue.
     #[tracing::instrument(
-        name = "codex.exec_server.remote.register",
+        name = "mikodex.exec_server.remote.register",
         skip_all,
         fields(
             otel.kind = "client",
-            otel.name = "codex.exec_server.remote.register",
+            otel.name = "mikodex.exec_server.remote.register",
             result = tracing::field::Empty,
         )
     )]
@@ -239,11 +239,11 @@ impl EnvironmentRegistryClient {
 
     /// Authorize one Noise harness key and obtain the full rendezvous bundle.
     #[tracing::instrument(
-        name = "codex.exec_server.remote.environment_registry.connect",
+        name = "mikodex.exec_server.remote.environment_registry.connect",
         skip_all,
         fields(
             otel.kind = "client",
-            otel.name = "codex.exec_server.remote.environment_registry.connect",
+            otel.name = "mikodex.exec_server.remote.environment_registry.connect",
             environment_id = %environment_id,
         )
     )]
@@ -386,11 +386,11 @@ impl HarnessKeyValidator for RegistryHarnessKeyValidator {
     /// Noise proves key possession; the registry decides whether that key may use
     /// this executor. The authorization token and public key are checked together.
     #[tracing::instrument(
-        name = "codex.exec_server.remote.environment_registry.validate_harness_key",
+        name = "mikodex.exec_server.remote.environment_registry.validate_harness_key",
         skip_all,
         fields(
             otel.kind = "client",
-            otel.name = "codex.exec_server.remote.environment_registry.validate_harness_key",
+            otel.name = "mikodex.exec_server.remote.environment_registry.validate_harness_key",
             environment_id = %self.environment_id,
             executor_registration_id = %self.executor_registration_id,
         )
@@ -897,11 +897,11 @@ async fn run_remote_environment_connections<H: NoiseStreamHandler>(
 }
 
 #[tracing::instrument(
-    name = "codex.exec_server.remote.rendezvous.connect",
+    name = "mikodex.exec_server.remote.rendezvous.connect",
     skip_all,
     fields(
         otel.kind = "client",
-        otel.name = "codex.exec_server.remote.rendezvous.connect",
+        otel.name = "mikodex.exec_server.remote.rendezvous.connect",
         request_id = request_id,
         result = tracing::field::Empty,
     )

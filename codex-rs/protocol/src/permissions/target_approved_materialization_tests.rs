@@ -114,7 +114,7 @@ fn approved_command_grants_root_metadata_unless_explicitly_denied() {
             ),
         ]);
         let approved = ordinary.for_approved_command(&context);
-        let metadata_paths = [".git", ".agents", ".codex"].map(root_path);
+        let metadata_paths = [".git", ".agents", ".mikodex"].map(root_path);
         assert_eq!(
             metadata_paths
                 .each_ref()

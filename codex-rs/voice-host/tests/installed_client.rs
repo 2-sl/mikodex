@@ -87,7 +87,7 @@ fn install_helper(root: &Path) -> Result<CodexPackageLayout> {
     fs::create_dir_all(&bin)?;
     fs::create_dir_all(&helper_dir)?;
     fs::write(root.join("codex-package.json"), "{}")?;
-    let app = bin.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+    let app = bin.join(if cfg!(windows) { "mikodex.exe" } else { "codex" });
     fs::write(&app, [])?;
     let source = cargo_bin("codex-voice-host")?;
     let helper = helper_dir.join(source.file_name().context("helper binary file name")?);

@@ -76,7 +76,7 @@ pub(crate) enum StatusLineItem {
     )]
     ProjectRoot,
 
-    /// Hostname of the machine running Codex.
+    /// Hostname of the machine running Mikodex.
     Hostname,
 
     /// Current git branch name (if in a repository).
@@ -114,7 +114,7 @@ pub(crate) enum StatusLineItem {
     /// Remaining usage on the secondary rate limit.
     WeeklyLimit,
 
-    /// Codex application version.
+    /// Mikodex application version.
     CodexVersion,
 
     /// Total context window size in tokens.
@@ -204,7 +204,7 @@ impl StatusLineItem {
             StatusLineItem::WeeklyLimit => {
                 "Remaining usage on the secondary usage limit (omitted when unavailable)"
             }
-            StatusLineItem::CodexVersion => "Codex application version",
+            StatusLineItem::CodexVersion => "Mikodex application version",
             StatusLineItem::ContextWindowSize => {
                 "Total context window size in tokens (omitted when unknown)"
             }

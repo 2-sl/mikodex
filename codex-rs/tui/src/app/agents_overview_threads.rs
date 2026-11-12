@@ -3,7 +3,6 @@
 //! Discovery merges into retained membership without evicting rows.
 
 use super::App;
-use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
 use super::agents_overview_details::preview_agent_message;
 use super::agents_overview_discovery::list_pinned_threads;
 use super::app_server_event_targets::ServerNotificationThreadTarget;
@@ -249,25 +248,13 @@ impl App {
         &mut self,
         app_server: &AppServerSession,
     ) {
-        if self
-            .chat_widget
-            .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
-            .is_none()
-            || (!self.agents_overview.initialized && self.agents_overview.request_id.is_none())
-        {
+        if !self.agents_overview.initialized && self.agents_overview.request_id.is_none() {
             return;
         }
         self.start_agents_overview_refresh(app_server);
     }
 
     fn start_agents_overview_refresh(&mut self, app_server: &AppServerSession) {
-        let visible = self
-            .chat_widget
-            .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
-            .is_some();
-        if !visible && self.agents_overview.initialized {
-            return;
-        }
         if self.agents_overview.request_id.is_some() {
             self.agents_overview.refresh_pending = true;
             return;

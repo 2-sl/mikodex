@@ -40,13 +40,13 @@ test(
         path.join(directory, "package.json"),
         '{"type":"module"}',
       );
-      const wrapper = path.join(directory, "bin", "codex.js");
-      await copyFile(new URL("../bin/codex.js", import.meta.url), wrapper);
+      const wrapper = path.join(directory, "bin", "mikodex.js");
+      await copyFile(new URL("../bin/mikodex.js", import.meta.url), wrapper);
       await symlink(
         path.resolve(process.env.CODEX_TEST_BINARY),
         path.join(bin, "codex"),
       );
-      const env = { ...process.env, CODEX_HOME: home, CODEX_SQLITE_HOME: home };
+      const env = { ...process.env, MIKODEX_HOME: home, MIKODEX_SQLITE_HOME: home };
 
       // A normal CLI argument error must retain its numeric exit status.
       const invalid = spawnSync(

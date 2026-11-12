@@ -159,7 +159,7 @@ pub struct TestAppServer {
     auto_env: Option<TestEnv>,
     json_logs: JsonLogCapture,
     // Fields drop in declaration order. Tear down the delayed child before
-    // removing an owned CODEX_HOME that may still be its cwd on Windows.
+    // removing an owned MIKODEX_HOME that may still be its cwd on Windows.
     _delayed_exec_server: Option<(LocalWebsocketExecServer, WebsocketDelayInterposer)>,
     _attribution_settings_server: Option<MockServer>,
     _owned_install_dir: Option<TempDir>,
@@ -175,7 +175,7 @@ const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl TestAppServer {
-    /// Starts building a server with a temporary CODEX_HOME and the standard
+    /// Starts building a server with a temporary MIKODEX_HOME and the standard
     /// automatic test environment.
     pub fn builder() -> TestAppServerBuilder {
         TestAppServerBuilder {
@@ -282,7 +282,7 @@ impl TestAppServer {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.current_dir(codex_home);
-        cmd.env("CODEX_HOME", codex_home);
+        cmd.env("MIKODEX_HOME", codex_home);
         cmd.env("RUST_LOG", "warn");
         // Keep integration tests isolated from host managed configuration.
         cmd.env(
@@ -1899,7 +1899,7 @@ impl TestAppServerBuilder {
         self
     }
 
-    /// Uses this existing CODEX_HOME instead of a temporary one.
+    /// Uses this existing MIKODEX_HOME instead of a temporary one.
     pub fn with_codex_home(mut self, codex_home: &Path) -> Self {
         self.codex_home = Some(codex_home.to_path_buf());
         self
@@ -1983,7 +1983,7 @@ impl TestAppServerBuilder {
         Ok(server)
     }
 
-    /// Builds a server with a temporary CODEX_HOME and automatic environment
+    /// Builds a server with a temporary MIKODEX_HOME and automatic environment
     /// by default.
     pub async fn build(self) -> anyhow::Result<TestAppServer> {
         let Self {

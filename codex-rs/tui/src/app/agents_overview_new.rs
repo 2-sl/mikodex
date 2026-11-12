@@ -183,10 +183,13 @@ impl App {
                     );
                     if !matches!(self.app_server_target, AppServerTarget::Embedded) {
                         message.push_str(
-                            " If the server restarts, Codex will reconnect automatically.",
+                            " If the server restarts, Mikodex will reconnect automatically.",
                         );
                     }
-                    (Some("Codex's background server is shutting down"), message)
+                    (
+                        Some("Mikodex's background server is shutting down"),
+                        message,
+                    )
                 } else {
                     (None, format!("Failed to start session: {error}"))
                 };
@@ -243,6 +246,8 @@ impl App {
                     "Could not open the new session.",
                 );
             }
+        } else {
+            self.agents_overview.sidebar_focused = false;
         }
         Ok(control)
     }

@@ -351,7 +351,7 @@ async fn deferred_initialize_timeout_reports_configured_budget() {
         /*reconnect_strategy*/ None,
         NoiseInitializeContext {
             executor_registration_id: "registration".to_string(),
-            span: tracing::info_span!("codex.exec_server.request"),
+            span: tracing::info_span!("mikodex.exec_server.request"),
             timeout_for_error: configured_timeout,
         },
     )

@@ -31,10 +31,10 @@ impl RpcCompletion {
             ) => return,
         };
         tracing::event!(
-            name: "codex.exec_server.response_received",
+            name: "mikodex.exec_server.response_received",
             target: "codex_otel.trace_safe",
             tracing::Level::INFO,
-            event.name = "codex.exec_server.response_received",
+            event.name = "mikodex.exec_server.response_received",
             rpc.method = method,
             outcome,
             reader_to_caller_ns = i64::try_from(self.completed_at.elapsed().as_nanos())

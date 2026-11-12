@@ -235,10 +235,10 @@ mod tests {
 
     #[test]
     fn helper_bin_dir_is_under_sandbox_bin() {
-        let codex_home = Path::new(r"C:\Users\example\.codex");
+        let codex_home = Path::new(r"C:\Users\example\.mikodex");
 
         assert_eq!(
-            PathBuf::from(r"C:\Users\example\.codex\.sandbox-bin"),
+            PathBuf::from(r"C:\Users\example\.mikodex\.sandbox-bin"),
             helper_bin_dir(codex_home)
         );
     }
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn registered_request_does_not_materialize_or_replace_a_missing_source() {
         let tmp = TempDir::new().expect("tempdir");
-        let executable = tmp.path().join("codex.exe");
+        let executable = tmp.path().join("mikodex.exe");
         let home = tmp.path().join("home");
         for content in [None, Some(b"fixture".as_slice())] {
             if let Some(content) = content {
@@ -263,10 +263,10 @@ mod tests {
     #[test]
     fn legacy_request_materializes_the_same_source() {
         let tmp = TempDir::new().expect("tempdir");
-        let executable = tmp.path().join("codex.exe");
+        let executable = tmp.path().join("mikodex.exe");
         let home = tmp.path().join("home");
         fs::write(&executable, b"fixture").expect("write source");
-        let destination = helper_bin_dir(&home).join("codex.exe");
+        let destination = helper_bin_dir(&home).join("mikodex.exe");
         assert_eq!(
             resolve_exe_for_runtime(&executable, &home, SetupRuntime::Legacy),
             destination
@@ -302,7 +302,7 @@ mod tests {
         let release_dir = tmp.path().join("release");
         let resources_dir = release_dir.join(RESOURCES_DIRNAME);
         fs::create_dir_all(&resources_dir).expect("create resources dir");
-        let exe = release_dir.join("codex.exe");
+        let exe = release_dir.join("mikodex.exe");
         let helper = resources_dir.join("codex-command-runner.exe");
         fs::write(&exe, b"codex").expect("write exe");
         fs::write(&helper, b"runner").expect("write helper");
@@ -322,7 +322,7 @@ mod tests {
         let resources_dir = package_dir.join(RESOURCES_DIRNAME);
         fs::create_dir_all(&bin_dir).expect("create bin dir");
         fs::create_dir_all(&resources_dir).expect("create resources dir");
-        let exe = bin_dir.join("codex.exe");
+        let exe = bin_dir.join("mikodex.exe");
         let helper = resources_dir.join("codex-command-runner.exe");
         fs::write(&exe, b"codex").expect("write exe");
         fs::write(&helper, b"runner").expect("write helper");
@@ -344,7 +344,7 @@ mod tests {
         fs::create_dir_all(&bin_dir).expect("create bin dir");
         fs::create_dir_all(&resources_dir).expect("create resources dir");
         fs::create_dir_all(&install_dir).expect("create install dir");
-        fs::write(bin_dir.join("codex.exe"), b"codex").expect("write exe");
+        fs::write(bin_dir.join("mikodex.exe"), b"codex").expect("write exe");
         let helper = resources_dir.join("codex-windows-sandbox-setup.exe");
         fs::write(&helper, b"setup").expect("write helper");
 
@@ -359,7 +359,7 @@ mod tests {
 
         assert_eq!(
             bundled_executable_path_for_exe(
-                &junction.join("codex.exe"),
+                &junction.join("mikodex.exe"),
                 /*file_name*/ "codex-windows-sandbox-setup.exe"
             ),
             Some(dunce::canonicalize(&helper).expect("canonical helper"))
@@ -375,7 +375,7 @@ mod tests {
         let bin_resources_dir = bin_dir.join(RESOURCES_DIRNAME);
         fs::create_dir_all(&package_resources_dir).expect("create package resources dir");
         fs::create_dir_all(&bin_resources_dir).expect("create bin resources dir");
-        let exe = bin_dir.join("codex.exe");
+        let exe = bin_dir.join("mikodex.exe");
         let package_helper = package_resources_dir.join("codex-command-runner.exe");
         let bin_helper = bin_resources_dir.join("codex-command-runner.exe");
         fs::write(&exe, b"codex").expect("write exe");
@@ -395,7 +395,7 @@ mod tests {
         let release_dir = tmp.path().join("release");
         let resources_dir = release_dir.join(RESOURCES_DIRNAME);
         fs::create_dir_all(&resources_dir).expect("create resources dir");
-        let exe = release_dir.join("codex.exe");
+        let exe = release_dir.join("mikodex.exe");
         let sibling_helper = release_dir.join("codex-command-runner.exe");
         let resource_helper = resources_dir.join("codex-command-runner.exe");
         fs::write(&exe, b"codex").expect("write exe");

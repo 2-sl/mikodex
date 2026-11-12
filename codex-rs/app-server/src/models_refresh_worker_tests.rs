@@ -329,7 +329,7 @@ async fn catalog_reload_recovers_original_project_after_startup_fallback() -> an
     let project_path = AbsolutePathBuf::from_absolute_path(project.path())?
         .canonicalize()?
         .to_path_buf();
-    std::fs::create_dir(project_path.join(".codex"))?;
+    std::fs::create_dir(project_path.join(".mikodex"))?;
     std::fs::write(
         home.path().join("config.toml"),
         toml::to_string(&serde_json::json!({

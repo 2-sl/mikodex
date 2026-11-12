@@ -50,7 +50,7 @@ impl Fixture {
             // Translate the fixture before the timed diagnostic command.
             anyhow::ensure!(
                 std::process::Command::new(&program)
-                    .env("CODEX_HOME", &home)
+                    .env("MIKODEX_HOME", &home)
                     .arg("--version")
                     .output()?
                     .status
@@ -119,14 +119,14 @@ wire_api = "responses"
         let mut command = assert_cmd::Command::new(&self.program);
         command
             .current_dir(&self.workspace)
-            .env("CODEX_HOME", &self.home)
+            .env("MIKODEX_HOME", &self.home)
             .env("HOME", self.root.path())
             .env("PATH", &self.path)
             .env("CODEX_TEST_HELPER_MARKER", &self.marker)
-            .env("CODEX_MANAGED_BY_NPM", "1")
+            .env("MIKODEX_MANAGED_BY_NPM", "1")
             .env(
-                "CODEX_MANAGED_PACKAGE_ROOT",
-                self.workspace.join("node_modules/@openai/codex"),
+                "MIKODEX_MANAGED_PACKAGE_ROOT",
+                self.workspace.join("node_modules/mikodex"),
             )
             .env(
                 "CODEX_APP_SERVER_MANAGED_CONFIG_PATH",
@@ -348,7 +348,7 @@ fn doctor_reports_only_safe_config_error_metadata() -> Result<()> {
     // macOS temp directories can use a symlinked path; trust the canonical workspace.
     let project_key = toml::Value::String(project_trust_key(&fixture.workspace));
     let original = format!("{original}\n[projects.{project_key}]\ntrust_level = \"trusted\"\n");
-    let project_config_dir = fixture.workspace.join(".codex");
+    let project_config_dir = fixture.workspace.join(".mikodex");
     std::fs::create_dir(&project_config_dir)?;
     for (snapshot_name, config_file, config) in [
         (
@@ -510,7 +510,7 @@ fn filesystem_probe_does_not_load_configuration() -> Result<()> {
 #[tokio::test]
 async fn interactive_tmux_startup_does_not_execute_workspace_helpers() -> Result<()> {
     let fixture = Fixture::new()?;
-    std::fs::create_dir(fixture.workspace.join(".codex"))?;
+    std::fs::create_dir(fixture.workspace.join(".mikodex"))?;
     let command = fixture.command()?;
     let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
     for (key, value) in command.get_envs() {
@@ -630,7 +630,7 @@ async fn feedback_with_logs_does_not_execute_path_helpers() -> Result<()> {
     let path = fixture.path.to_string_lossy();
     let marker = fixture.marker.to_string_lossy();
     let home = fixture.root.path().to_string_lossy();
-    let package_root = fixture.workspace.join("node_modules/@openai/codex");
+    let package_root = fixture.workspace.join("node_modules/mikodex");
     let package_root = package_root.to_string_lossy();
     let mut app_server = TestAppServer::builder()
         .with_program(&fixture.program)
@@ -643,8 +643,8 @@ async fn feedback_with_logs_does_not_execute_path_helpers() -> Result<()> {
             ("PATH", Some(path.as_ref())),
             ("HOME", Some(home.as_ref())),
             ("CODEX_TEST_HELPER_MARKER", Some(marker.as_ref())),
-            ("CODEX_MANAGED_BY_NPM", Some("1")),
-            ("CODEX_MANAGED_PACKAGE_ROOT", Some(package_root.as_ref())),
+            ("MIKODEX_MANAGED_BY_NPM", Some("1")),
+            ("MIKODEX_MANAGED_PACKAGE_ROOT", Some(package_root.as_ref())),
             ("ZELLIJ", Some("0")),
             ("ZELLIJ_VERSION", None),
             ("TMUX", None),

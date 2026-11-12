@@ -16,7 +16,7 @@ This crate owns the transport, protocol, and filesystem/process handlers. The
 use `codex-arg0` for hidden filesystem, process, and platform sandbox dispatch.
 The standalone executable accepts the same executor arguments and `-c` config
 overrides, including `--listen stdio`. Build it with
-`cargo build -p codex-exec-server-cli --bin codex-exec-server`.
+`cargo build -p codex-exec-server-cli --bin mikodex-exec-server`.
 Canonical packages place it in `bin/` beside the entrypoint, with platform
 sandbox resources in `codex-resources/`.
 
@@ -133,8 +133,8 @@ Wire framing:
 ## Remote Relay Message Format
 
 In remote mode, the harness and environment communicate through rendezvous using
-`codex.exec_server.relay.v1.RelayMessageFrame`; the checked-in schema is in
-`src/proto/codex.exec_server.relay.v1.proto`. The relay frame carries stream
+`mikodex.exec_server.relay.v1.RelayMessageFrame`; the checked-in schema is in
+`src/proto/mikodex.exec_server.relay.v1.proto`. The relay frame carries stream
 identity plus endpoint-owned reliability metadata:
 
 ```text

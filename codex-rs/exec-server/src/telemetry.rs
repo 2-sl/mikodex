@@ -268,7 +268,7 @@ impl ExecServerTelemetry {
         // the spans without retaining the request span.
         let span = tracing::info_span!(
             parent: None,
-            "codex.exec_server.process",
+            "mikodex.exec_server.process",
             otel.kind = "internal",
             process.id = process_id,
             result = tracing::field::Empty,

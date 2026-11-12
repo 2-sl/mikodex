@@ -76,7 +76,7 @@ async fn isolated_test_home(test_name: &str) -> anyhow::Result<Option<PathBuf>> 
     }
 
     // Only the child receives the temporary home; the production loader resolves
-    // CODEX_HOME normally and the parent test process keeps its environment.
+    // MIKODEX_HOME normally and the parent test process keeps its environment.
     let home = tempfile::tempdir()?;
     let output = timeout(
         Duration::from_secs(45),
@@ -84,7 +84,7 @@ async fn isolated_test_home(test_name: &str) -> anyhow::Result<Option<PathBuf>> 
             .args(["--exact", &test_name, "--nocapture"])
             .kill_on_drop(true)
             .env(CHILD, &test_name)
-            .env("CODEX_HOME", home.path())
+            .env("MIKODEX_HOME", home.path())
             .env("NO_PROXY", "127.0.0.1,localhost")
             .env("no_proxy", "127.0.0.1,localhost")
             .env_remove("OPENAI_API_KEY")

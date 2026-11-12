@@ -44,6 +44,7 @@ use codex_protocol::ThreadId;
 use codex_protocol::openai_models::ReasoningEffort;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
@@ -199,6 +200,7 @@ impl AgentsOverviewViewState {
 
 pub(super) struct AgentsOverviewView {
     use_theme_colors: bool,
+    docked_focus: bool,
     pub(super) rows: Vec<AgentsOverviewRow>,
     project_groups: Vec<AgentsOverviewProjectGroup>,
     directory_group_keys: Vec<PathBuf>,
@@ -276,6 +278,7 @@ impl AgentsOverviewView {
         let mut view = Self {
             editor_keymap: keymap.clone(),
             use_theme_colors,
+            docked_focus: true,
             rows,
             project_groups,
             directory_group_keys,
@@ -299,6 +302,44 @@ impl AgentsOverviewView {
 
     pub(super) fn thread_ids(&self) -> Vec<ThreadId> {
         self.rows.iter().map(|row| row.thread_id).collect()
+    }
+
+    pub(super) fn selected_thread_id(&self) -> Option<ThreadId> {
+        self.selected_row().map(|row| row.thread_id)
+    }
+
+    pub(super) fn set_docked_focus(&mut self, focused: bool) {
+        self.docked_focus = focused;
+    }
+
+    /// Handle a key while the view is docked beside the conversation.
+    /// Returns true when the command should move focus back to the conversation.
+    pub(super) fn handle_docked_key_event(
+        &mut self,
+        key: KeyEvent,
+        activation_key: Option<crate::key_hint::KeyBinding>,
+    ) -> bool {
+        if key.kind == KeyEventKind::Release {
+            self.handle_key_release(key);
+            return false;
+        }
+        let state = self.state();
+        let editing_metadata = state.editing_metadata();
+        let help = state.help;
+        let renaming = state.rename_target.is_some();
+        drop(state);
+
+        let action = self.keymap.action_for(key);
+        if action == Some(ListAction::Cancel) && !editing_metadata && !help {
+            return true;
+        }
+        let focus_conversation = !help
+            && !renaming
+            && self.selected != usize::MAX
+            && self.selected_row().is_some()
+            && matches!(action, Some(ListAction::Accept | ListAction::MoveRight));
+        self.handle_key_event_with_activation_key(key, activation_key);
+        focus_conversation
     }
 
     pub(super) fn selection_after_removal(

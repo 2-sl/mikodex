@@ -313,10 +313,10 @@ impl ExecServerHandler {
         }
         // This response bypasses the dispatcher; record it before body-stream setup.
         tracing::event!(
-            name: "codex.exec_server.response_enqueued",
+            name: "mikodex.exec_server.response_enqueued",
             target: "codex_otel.trace_safe",
             tracing::Level::INFO,
-            event.name = "codex.exec_server.response_enqueued",
+            event.name = "mikodex.exec_server.response_enqueued",
             rpc.method = HTTP_REQUEST_METHOD,
             outcome = "success",
         );

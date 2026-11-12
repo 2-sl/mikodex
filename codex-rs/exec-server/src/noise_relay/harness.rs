@@ -128,10 +128,10 @@ where
         // Readiness only carries success; record failures before that signal is dropped.
         let record_handshake_failure = |reason: &'static str| {
             tracing::event!(
-                name: "codex.exec_server.noise_handshake_failed",
+                name: "mikodex.exec_server.noise_handshake_failed",
                 target: "codex_otel.trace_safe",
                 tracing::Level::WARN,
-                event.name = "codex.exec_server.noise_handshake_failed",
+                event.name = "mikodex.exec_server.noise_handshake_failed",
                 noise_event = "handshake",
                 noise_outcome = "failed",
                 noise_side = "harness",
@@ -420,7 +420,7 @@ where
                     if let codex_exec_server_protocol::JSONRPCMessage::Request(request) = &message {
                         // Link transport progress to the existing RPC trace without copying
                         // its method, ID, payload or unvalidated trace carrier into fields.
-                        let span = tracing::info_span!("codex.exec_server.noise_request_write", stream_id);
+                        let span = tracing::info_span!("mikodex.exec_server.noise_request_write", stream_id);
                         if let Some(trace) = &request.trace {
                             codex_otel::set_parent_from_w3c_trace_context(&span, trace);
                         }
@@ -428,11 +428,11 @@ where
                         // Setting a remote parent alone leaves its trace ID lazy.
                         let _ = codex_otel::span_w3c_trace_context(&span);
                         tracing::event!(
-                            name: "codex.exec_server.request_dequeued",
+                            name: "mikodex.exec_server.request_dequeued",
                             target: "codex_otel.trace_safe",
                             parent: &span,
                             tracing::Level::INFO,
-                            event.name = "codex.exec_server.request_dequeued",
+                            event.name = "mikodex.exec_server.request_dequeued",
                             stream_id,
                             message_sequence = messages_dequeued,
                             outgoing_queue_depth = outgoing_rx.len(),
@@ -506,11 +506,11 @@ where
                         messages_written += 1;
                         if let Some((span, started_at)) = pending_request.take() {
                             tracing::event!(
-                                name: "codex.exec_server.request_written",
+                                name: "mikodex.exec_server.request_written",
                                 target: "codex_otel.trace_safe",
                                 parent: &span,
                                 tracing::Level::INFO,
-                                event.name = "codex.exec_server.request_written",
+                                event.name = "mikodex.exec_server.request_written",
                                 stream_id,
                                 message_sequence = messages_dequeued,
                                 write_elapsed_ms = started_at.elapsed().as_millis() as u64,
@@ -648,10 +648,10 @@ where
         // Fixed reasons and local counters only. Raw errors, frames and peer-provided
         // close/reset text must remain outside the trace-safe target.
         tracing::event!(
-            name: "codex.exec_server.noise_transport_closed",
+            name: "mikodex.exec_server.noise_transport_closed",
             target: "codex_otel.trace_safe",
             tracing::Level::INFO,
-            event.name = "codex.exec_server.noise_transport_closed",
+            event.name = "mikodex.exec_server.noise_transport_closed",
             noise_side = "harness",
             noise_reason = exit_reason.as_str(),
             read_reason,
@@ -796,10 +796,10 @@ async fn send_incoming_event(
         Ok(Err(_)) => Err(ExecServerError::Closed),
         Err(_) => {
             tracing::event!(
-                name: "codex.exec_server.noise_application_backpressure",
+                name: "mikodex.exec_server.noise_application_backpressure",
                 target: "codex_otel.trace_safe",
                 tracing::Level::WARN,
-                event.name = "codex.exec_server.noise_application_backpressure",
+                event.name = "mikodex.exec_server.noise_application_backpressure",
                 noise_side = "harness",
                 noise_reason = "application_backpressure",
                 delivery_wait_ms = delivery_started.elapsed().as_millis() as u64,

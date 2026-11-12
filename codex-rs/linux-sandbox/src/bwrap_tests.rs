@@ -342,7 +342,7 @@ fn writable_roots_under_symlinked_ancestors_bind_real_target() {
     let temp_dir = TempDir::new().expect("temp dir");
     let logical_home = temp_dir.path().join("home");
     let real_codex = temp_dir.path().join("real-codex");
-    let logical_codex = logical_home.join(".codex");
+    let logical_codex = logical_home.join(".mikodex");
     let real_memories = real_codex.join("memories");
     let logical_memories = logical_codex.join("memories");
     std::fs::create_dir_all(&logical_home).expect("create logical home");
@@ -527,7 +527,7 @@ fn missing_read_only_subpath_uses_empty_file_bind_data() {
     assert_empty_file_bound_without_perms(&args.args, &second_blocked);
     assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".git"));
     assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".agents"));
-    assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".codex"));
+    assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".mikodex"));
     assert_eq!(args.preserved_files.len(), 2);
     assert_bind_data_uses_distinct_preserved_fds(&args);
     assert_eq!(
@@ -537,7 +537,7 @@ fn missing_read_only_subpath_uses_empty_file_bind_data() {
             second_blocked.clone(),
             workspace.join(".git"),
             workspace.join(".agents"),
-            workspace.join(".codex"),
+            workspace.join(".mikodex"),
             workspace.join(".aws"),
         ]
     );
@@ -569,13 +569,13 @@ fn transient_empty_preserved_file_uses_empty_file_bind_data() {
 
     assert_empty_file_bound_without_perms(&args.args, &dot_git);
     assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".agents"));
-    assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".codex"));
+    assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".mikodex"));
     assert_eq!(
         synthetic_mount_target_paths(&args),
         vec![
             dot_git.clone(),
             workspace.join(".agents"),
-            workspace.join(".codex"),
+            workspace.join(".mikodex"),
             workspace.join(".aws"),
         ]
     );
@@ -615,11 +615,11 @@ fn missing_child_git_under_parent_repo_is_mounted_read_only() {
         .expect("filesystem args");
     assert_empty_directory_mounted_read_only(&args.args, &dot_git);
     assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".agents"));
-    assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".codex"));
+    assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".mikodex"));
     assert_eq!(
         synthetic_mount_target_paths(&args),
         vec![
-            workspace.join(".codex"),
+            workspace.join(".mikodex"),
             dot_git,
             workspace.join(".agents"),
             workspace.join(".aws"),
@@ -653,11 +653,11 @@ fn symlinked_missing_child_git_under_parent_repo_mounts_effective_path_read_only
         .expect("filesystem args");
     assert_empty_directory_mounted_read_only(&args.args, &dot_git);
     assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".agents"));
-    assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".codex"));
+    assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".mikodex"));
     assert_eq!(
         synthetic_mount_target_paths(&args),
         vec![
-            workspace.join(".codex"),
+            workspace.join(".mikodex"),
             dot_git,
             workspace.join(".agents"),
             workspace.join(".aws"),
@@ -732,7 +732,7 @@ fn missing_project_root_metadata_carveouts_use_metadata_path_masks() {
         },
         FileSystemSandboxEntry {
             path: FileSystemPath::Special {
-                value: FileSystemSpecialPath::project_roots(Some(".codex".into())),
+                value: FileSystemSpecialPath::project_roots(Some(".mikodex".into())),
             },
             access: FileSystemAccessMode::Read,
             missing_path_behavior: None,
@@ -743,7 +743,7 @@ fn missing_project_root_metadata_carveouts_use_metadata_path_masks() {
         .expect("filesystem args");
     let dot_git = path_to_string(&temp_dir.path().join(".git"));
     let dot_agents = path_to_string(&temp_dir.path().join(".agents"));
-    let dot_codex = path_to_string(&temp_dir.path().join(".codex"));
+    let dot_codex = path_to_string(&temp_dir.path().join(".mikodex"));
 
     assert_empty_directory_mounted_read_only(&args.args, Path::new(&dot_git));
     assert_empty_directory_mounted_read_only(&args.args, Path::new(&dot_agents));
@@ -815,10 +815,10 @@ fn mounts_dev_before_writable_dev_binds() {
             PathBuf::from("/.aws"),
             PathBuf::from("/.git"),
             PathBuf::from("/.agents"),
-            PathBuf::from("/.codex"),
+            PathBuf::from("/.mikodex"),
             PathBuf::from("/dev/.git"),
             PathBuf::from("/dev/.agents"),
-            PathBuf::from("/dev/.codex"),
+            PathBuf::from("/dev/.mikodex"),
             PathBuf::from("/dev/.aws"),
         ]
     );
@@ -1041,7 +1041,7 @@ fn split_policy_reenables_nested_writable_subpaths_after_read_only_parent() {
         FileSystemSandboxEntry::new(docs.clone().into(), FileSystemAccessMode::Read),
         FileSystemSandboxEntry::new(docs_public.clone().into(), FileSystemAccessMode::Write),
     ];
-    for name in [".git", ".agents", ".codex", ".aws"] {
+    for name in [".git", ".agents", ".mikodex", ".aws"] {
         entries.push(FileSystemSandboxEntry::skip_missing_path(
             docs_public.join(name).into(),
             FileSystemAccessMode::Read,
@@ -1069,7 +1069,7 @@ fn split_policy_reenables_nested_writable_subpaths_after_read_only_parent() {
         "expected read-only parent remount before nested writable bind: {:#?}",
         args.args
     );
-    for name in [".git", ".agents", ".codex", ".aws"] {
+    for name in [".git", ".agents", ".mikodex", ".aws"] {
         let metadata_path = path_to_string(docs_public.join(name).as_path());
         let mount_indices = args
             .args

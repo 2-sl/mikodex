@@ -1,4 +1,4 @@
-//! Deterministic surface projection and Braille rasterization of the Codex logo morph.
+//! Deterministic surface projection and Braille rasterization of the Mikodex logo morph.
 //!
 //! Fields and depth use Float32 sampling; all other math uses Float64.
 
@@ -10,8 +10,8 @@ use super::geometry::GRID;
 use super::geometry::STEP;
 use super::lighting::Lighting;
 
-pub(super) const MAX_COLUMNS: u16 = 60;
-pub(super) const MAX_ROWS: u16 = 24;
+pub(super) const MAX_COLUMNS: u16 = 180;
+pub(super) const MAX_ROWS: u16 = 72;
 const DOT_BITS: [u8; 8] = [1, 8, 2, 16, 4, 32, 64, 128];
 // First three mulberry32 samples with the reference's seed 3371.
 const HALF_DEPTH: f64 = 0.1642880353482906;

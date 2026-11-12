@@ -67,11 +67,11 @@ impl EnvironmentRegistryClient {
     }
 
     #[tracing::instrument(
-        name = "codex.exec_server.remote.register",
+        name = "mikodex.exec_server.remote.register",
         skip_all,
         fields(
             otel.kind = "client",
-            otel.name = "codex.exec_server.remote.register",
+            otel.name = "mikodex.exec_server.remote.register",
             result = tracing::field::Empty,
         )
     )]

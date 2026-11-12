@@ -153,7 +153,7 @@ fn exported_process_and_network_logs_keep_the_validated_launch_reference() {
             let trace = attribute(record, "launch.trace_id");
             let span = attribute(record, "launch.span_id");
             if export_traces
-                && name.starts_with("codex.exec_server.process_")
+                && name.starts_with("mikodex.exec_server.process_")
                 && let Some(span) = span
             {
                 assert_eq!(record["traceId"].as_str(), trace);
@@ -175,8 +175,8 @@ fn exported_process_and_network_logs_keep_the_validated_launch_reference() {
             .enumerate()
         {
             for name in [
-                "codex.exec_server.process_start",
-                "codex.exec_server.process_exit",
+                "mikodex.exec_server.process_start",
+                "mikodex.exec_server.process_exit",
                 "codex.network_proxy.policy_decision",
             ] {
                 expected.push((
@@ -270,7 +270,7 @@ fn launch_rpc_span_finishes_before_its_process_exits() {
     );
     let exit_record = records
         .iter()
-        .find(|record| attribute(record, "event.name") == Some("codex.exec_server.process_exit"))
+        .find(|record| attribute(record, "event.name") == Some("mikodex.exec_server.process_exit"))
         .expect("process exit log");
     let exit_span_id = exit_record["spanId"]
         .as_str()
@@ -286,7 +286,7 @@ fn launch_rpc_span_finishes_before_its_process_exits() {
         "process completion has its own span"
     );
     let process_span = process_spans[0];
-    assert_eq!(process_span["name"], "codex.exec_server.process");
+    assert_eq!(process_span["name"], "mikodex.exec_server.process");
     assert_eq!(
         (
             process_span["traceId"].as_str(),
@@ -296,7 +296,7 @@ fn launch_rpc_span_finishes_before_its_process_exits() {
     );
     assert_ne!(process_span["spanId"], launch_span["spanId"]);
     let mut expected_exit =
-        expected_process_attributes("codex.exec_server.process_exit", /*index*/ 0, "None");
+        expected_process_attributes("mikodex.exec_server.process_exit", /*index*/ 0, "None");
     expected_exit["process.exit_code"] =
         json!({"intValue": exited.exit_code.expect("exit code").to_string()});
     expected_exit["process.termination_requested"] = json!({"boolValue": true});
@@ -304,7 +304,7 @@ fn launch_rpc_span_finishes_before_its_process_exits() {
         &records,
         vec![
             expected_process_attributes(
-                "codex.exec_server.process_start",
+                "mikodex.exec_server.process_start",
                 /*index*/ 0,
                 "None",
             ),
@@ -313,7 +313,7 @@ fn launch_rpc_span_finishes_before_its_process_exits() {
     );
     for record in &records {
         assert_eq!(record["traceId"].as_str(), Some(TRACE_ID));
-        let span = if attribute(record, "event.name") == Some("codex.exec_server.process_start") {
+        let span = if attribute(record, "event.name") == Some("mikodex.exec_server.process_start") {
             launch_span
         } else {
             process_span
@@ -389,7 +389,7 @@ fn exported_spawn_failure_keeps_launch_identity_without_outcome_or_error_text() 
     assert_exported_attributes(
         &records,
         vec![expected_process_attributes(
-            "codex.exec_server.process_spawn_failed",
+            "mikodex.exec_server.process_spawn_failed",
             /*index*/ 0,
             "None",
         )],
@@ -454,18 +454,18 @@ fn exported_sandbox_denial_keeps_launch_identity_and_separate_exit_outcome() {
     let mut expected = Vec::new();
     for index in 0..2 {
         expected.push(expected_process_attributes(
-            "codex.exec_server.process_start",
+            "mikodex.exec_server.process_start",
             index,
             "MacosSeatbelt",
         ));
         let mut exited =
-            expected_process_attributes("codex.exec_server.process_exit", index, "MacosSeatbelt");
+            expected_process_attributes("mikodex.exec_server.process_exit", index, "MacosSeatbelt");
         exited["process.exit_code"] = json!({"intValue": if index == 0 { "0" } else { "23" }});
         exited["process.termination_requested"] = json!({"boolValue": false});
         expected.push(exited);
     }
     let mut denied = expected_process_attributes(
-        "codex.exec_server.sandbox_denied",
+        "mikodex.exec_server.sandbox_denied",
         /*index*/ 1,
         "MacosSeatbelt",
     );

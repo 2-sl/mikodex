@@ -151,7 +151,7 @@ async fn startup_reloads_the_callers_selected_project() -> anyhow::Result<()> {
     let home = root.join("home");
     let selected = root.join("selected");
     std::fs::create_dir(&home)?;
-    std::fs::create_dir_all(selected.join(".codex"))?;
+    std::fs::create_dir_all(selected.join(".mikodex"))?;
     std::fs::create_dir(selected.join(".git"))?;
     set_project_trust_level(&home, &selected, TrustLevel::Trusted)?;
     let selected_url = "https://selected.example/backend-api/";

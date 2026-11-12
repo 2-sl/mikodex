@@ -124,7 +124,7 @@ async fn codex_home_symlink_opt_out_respects_host_config_and_scope() -> Result<(
     let target = TempDir::new()?;
     let alias = home.path().join("visualizations");
     let other_alias = workspace.path().join(".codex/visualizations");
-    std::fs::create_dir(workspace.path().join(".codex"))?;
+    std::fs::create_dir(workspace.path().join(".mikodex"))?;
     symlink(target.path(), &alias)?;
     symlink(target.path(), &other_alias)?;
     std::fs::write(
@@ -139,7 +139,7 @@ async fn codex_home_symlink_opt_out_respects_host_config_and_scope() -> Result<(
                 format!("allow_symlinked_codex_home = {enabled}\n")
             }),
         )?;
-        let mut server = exec_server_with_env([("CODEX_HOME", home.path())], &[]).await?;
+        let mut server = exec_server_with_env([("MIKODEX_HOME", home.path())], &[]).await?;
         let environment = Environment::create_for_tests(Some(server.websocket_url().to_string()))?;
         for root in [alias.as_path(), other_alias.as_path(), workspace.path()] {
             let mut policy = FileSystemSandboxPolicy::read_only();

@@ -213,15 +213,15 @@ jobs:
               --target "${CODEX_CI_TARGET}" \
               --profile "${CODEX_CI_PROFILE}" \
               -p codex-linux-sandbox \
-              --bin codex-linux-sandbox
+              --bin mikodex-linux-sandbox
             cp "${CARGO_TARGET_DIR}/${CODEX_CI_TARGET}/${CODEX_CI_PROFILE}/codex-linux-sandbox" "${helper_dir}/"
           else
             cargo build \
               --target "${CODEX_CI_TARGET}" \
               --profile "${CODEX_CI_PROFILE}" \
               -p codex-windows-sandbox \
-              --bin codex-windows-sandbox-setup \
-              --bin codex-command-runner
+              --bin mikodex-windows-sandbox-setup \
+              --bin mikodex-command-runner
             cp "${CARGO_TARGET_DIR}/${CODEX_CI_TARGET}/${CODEX_CI_PROFILE}/codex-windows-sandbox-setup.exe" "${helper_dir}/"
             cp "${CARGO_TARGET_DIR}/${CODEX_CI_TARGET}/${CODEX_CI_PROFILE}/codex-command-runner.exe" "${helper_dir}/"
           fi
@@ -407,8 +407,8 @@ jobs:
             sandbox_helper="${helper_target_dir}/codex-linux-sandbox"
             test_command=(
               env
-              "CARGO_BIN_EXE_codex-linux-sandbox=${sandbox_helper}"
-              "CARGO_BIN_EXE_codex_linux_sandbox=${sandbox_helper}"
+              "CARGO_BIN_EXE_mikodex-linux-sandbox=${sandbox_helper}"
+              "CARGO_BIN_EXE_mikodex_linux_sandbox=${sandbox_helper}"
               cargo nextest "${nextest_args[@]}"
             )
           elif [[ "${RUNNER_OS}" == "Windows" ]]; then
@@ -416,8 +416,8 @@ jobs:
             command_runner="$(cygpath -w "${helper_target_dir}/codex-command-runner.exe")"
             test_command=(
               env
-              "CARGO_BIN_EXE_codex_windows_sandbox_setup=${setup_helper}"
-              "CARGO_BIN_EXE_codex_command_runner=${command_runner}"
+              "CARGO_BIN_EXE_mikodex_windows_sandbox_setup=${setup_helper}"
+              "CARGO_BIN_EXE_mikodex_command_runner=${command_runner}"
               cargo nextest "${nextest_args[@]}"
             )
           fi

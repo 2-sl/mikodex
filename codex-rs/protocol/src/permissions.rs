@@ -39,7 +39,7 @@ pub use windows_glob::windows_deny_read_glob_scan;
 
 const PROTECTED_METADATA_GIT_PATH_NAME: &str = ".git";
 const PROTECTED_METADATA_AGENTS_PATH_NAME: &str = ".agents";
-const PROTECTED_METADATA_CODEX_PATH_NAME: &str = ".codex";
+const PROTECTED_METADATA_CODEX_PATH_NAME: &str = ".mikodex";
 const PROTECTED_METADATA_AWS_PATH_NAME: &str = ".aws";
 
 /// Top-level workspace metadata paths that stay protected under writable roots.
@@ -859,7 +859,7 @@ impl FileSystemSandboxPolicy {
 
         append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".git");
         append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".agents");
-        append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".codex");
+        append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".mikodex");
         append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".aws");
         for writable_root in writable_roots {
             for protected_path in default_read_only_subpaths_for_writable_root(
@@ -1691,8 +1691,8 @@ impl FileSystemSandboxPolicy {
             // as separate WritableRoot values and are checked independently.
             // Preserve symlink path components that live under the writable root
             // so downstream sandboxes can still mask the symlink inode itself.
-            // Example: if `<root>/.codex -> <root>/decoy`, bwrap must still see
-            // `<root>/.codex`, not only the resolved `<root>/decoy`.
+            // Example: if `<root>/.mikodex -> <root>/decoy`, bwrap must still see
+            // `<root>/.mikodex`, not only the resolved `<root>/decoy`.
             read_only_subpaths.extend(
                 prepared_entries
                     .iter()
@@ -1748,7 +1748,7 @@ impl FileSystemSandboxPolicy {
                 protected_metadata_names,
                 root,
                 // Preserve literal in-root protected paths like `.git` and
-                // `.codex` so downstream sandboxes can still detect and mask
+                // `.mikodex` so downstream sandboxes can still detect and mask
                 // the symlink itself instead of only its resolved target.
                 read_only_subpaths: dedup_absolute_paths(
                     read_only_subpaths,

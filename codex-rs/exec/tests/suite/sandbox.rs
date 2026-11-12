@@ -366,7 +366,7 @@ async fn sandbox_blocks_first_time_dot_codex_creation() {
     let temp = tempfile::tempdir().expect("should be able to create temp dir");
     let repo_root = temp.path().join("repo").abs();
     create_dir_all(&repo_root).await.expect("mkdir repo");
-    let dot_codex = repo_root.join(".codex");
+    let dot_codex = repo_root.join(".mikodex");
     let config_toml = dot_codex.join("config.toml");
     let permission_profile = PermissionProfile::workspace_write_with(
         &[],

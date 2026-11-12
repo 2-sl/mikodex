@@ -169,6 +169,8 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
+use crossterm::event::MouseButton;
+use crossterm::event::MouseEventKind;
 use ratatui::layout::Rect;
 use ratatui::layout::Size;
 use ratatui::style::Stylize;
@@ -205,9 +207,11 @@ mod agents_overview;
 mod agents_overview_actions;
 mod agents_overview_details;
 pub(crate) mod agents_overview_discovery;
+mod agents_overview_dock;
 mod agents_overview_threads;
 mod agents_overview_usage;
 mod agents_overview_view;
+mod command_reference;
 pub(crate) use agents_overview::AGENTS_OVERVIEW_VIEW_ID;
 mod activity_groups;
 mod app_server_event_targets;
@@ -887,6 +891,9 @@ impl App {
             self.discard_startup_modal_input(tui)?;
             return Ok(AppRunControl::Continue);
         }
+        if self.handle_command_reference_scroll(tui, &event) {
+            return Ok(AppRunControl::Continue);
+        }
         if matches!(&event, TuiEvent::Key(key) if key.kind != KeyEventKind::Release)
             || matches!(&event, TuiEvent::Paste(text) if !text.is_empty())
             || matches!(&event, TuiEvent::Mouse(mouse) if mouse.kind != crossterm::event::MouseEventKind::Moved)
@@ -894,10 +901,13 @@ impl App {
             self.chat_widget.acknowledge_program_status();
         }
         let idle_draw = matches!(event, TuiEvent::Draw);
-        if let TuiEvent::Key(key) = &event {
+        if !self.agents_overview.sidebar_focused
+            && let TuiEvent::Key(key) = &event
+        {
             self.backtrack.observe_pending_select_exit_key(*key);
         }
-        if let TuiEvent::Key(key) = &event
+        if !self.agents_overview.sidebar_focused
+            && let TuiEvent::Key(key) = &event
             && let Some(binding) = self.backtrack.select_exit_key
         {
             if binding.parts() == crate::key_hint::KeyBinding::from_event(*key).parts() {
@@ -914,7 +924,8 @@ impl App {
         if self.handle_rendered_selection_event(tui, &event)? {
             return Ok(AppRunControl::Continue);
         }
-        if matches!(&event, TuiEvent::Key(_))
+        if !self.agents_overview.sidebar_focused
+            && matches!(&event, TuiEvent::Key(_))
             && self.handle_composer_copy_event(tui, &event, |tui, text| {
                 tui.copy_transcript_selection(text, crate::clipboard_copy::CopyFormat::PlainText)
             })
@@ -928,18 +939,20 @@ impl App {
                 .borrow_mut()
                 .pause_clock();
         }
-        let transcript_owns_input = match (&event, &self.overlay) {
-            (TuiEvent::Key(key), Some(Overlay::Transcript(overlay))) => {
-                overlay.owns_interaction_key(*key)
-            }
-            (TuiEvent::Key(key), None) => {
-                tui.is_owned_screen()
-                    && self.chat_widget.no_modal_or_popup_active()
-                    && self.transcript_view.owns_interaction_key(*key)
-            }
-            _ => false,
-        };
+        let transcript_owns_input = !self.agents_overview.sidebar_focused
+            && match (&event, &self.overlay) {
+                (TuiEvent::Key(key), Some(Overlay::Transcript(overlay))) => {
+                    overlay.owns_interaction_key(*key)
+                }
+                (TuiEvent::Key(key), None) => {
+                    tui.is_owned_screen()
+                        && self.chat_widget.no_modal_or_popup_active()
+                        && self.transcript_view.owns_interaction_key(*key)
+                }
+                _ => false,
+            };
         if self.reconnect.offline
+            && !self.agents_overview.sidebar_focused
             && !transcript_owns_input
             && !self.chat_widget.keymap_contexts().is_warnings()
             && !self
@@ -1006,7 +1019,26 @@ impl App {
             event
         };
 
-        self.cancel_primed_browsing_for_event(&event);
+        if let TuiEvent::Mouse(mouse) = &event
+            && mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && let Some(dock) = agents_overview_dock::layout(tui.terminal.viewport_area)
+        {
+            let position = (mouse.column, mouse.row).into();
+            if dock.sidebar.contains(position) && !self.agents_overview.sidebar_focused {
+                self.agents_overview.sidebar_focused = true;
+                tui.frame_requester().schedule_frame();
+                return Ok(AppRunControl::Continue);
+            }
+            if (dock.conversation.contains(position) || dock.command_reference.contains(position))
+                && self.agents_overview.sidebar_focused
+            {
+                self.agents_overview.sidebar_focused = false;
+                tui.frame_requester().schedule_frame();
+            }
+        }
+        if !self.agents_overview.sidebar_focused {
+            self.cancel_primed_browsing_for_event(&event);
+        }
         let voice_toggle = |app: &Self, key: KeyEvent| {
             key.kind == KeyEventKind::Press
                 && app
@@ -1030,6 +1062,7 @@ impl App {
         // Leave browsing before unhandled editing input reaches shortcuts or offline input.
         // Offline Enter cannot confirm a rewind and leaves the preview available to read.
         if tui.is_owned_screen()
+            && !self.agents_overview.sidebar_focused
             && self.overlay.is_none()
             && self.backtrack.overlay_preview_active
             && (matches!(&event, TuiEvent::Key(key)
@@ -1071,6 +1104,7 @@ impl App {
             return Ok(AppRunControl::Continue);
         }
         if self.reconnect.offline
+            && !self.agents_overview.sidebar_focused
             && !self.chat_widget.keymap_contexts().is_warnings()
             && !matches!(&self.overlay, Some(Overlay::Transcript(_)))
             && let TuiEvent::Key(key) = &event
@@ -1169,7 +1203,11 @@ impl App {
                         && !self
                             .chat_widget
                             .active_view_accepts_input_when_disconnected();
-                    self.chat_widget.handle_paste(pasted);
+                    if self.handle_agents_overview_sidebar_paste(pasted.clone()) {
+                        tui.frame_requester().schedule_frame();
+                    } else {
+                        self.chat_widget.handle_paste(pasted);
+                    }
                     if restrict_disconnected_input {
                         self.chat_widget.handle_restricted_key(
                             KeyEvent::new(KeyCode::Null, KeyModifiers::NONE),
@@ -1305,6 +1343,10 @@ impl App {
     }
 
     fn render_chat_widget_frame(&mut self, tui: &mut tui::Tui, screen_size: Size) -> Result<Rect> {
+        self.ensure_agents_overview_sidebar_view();
+        if let Some(view) = self.agents_overview.sidebar_view.as_mut() {
+            view.set_docked_focus(self.agents_overview.sidebar_focused);
+        }
         self.chat_widget
             .set_sparkle_terminal_focus(tui.is_terminal_focused());
         if tui.is_owned_screen() {
@@ -1320,6 +1362,20 @@ impl App {
             .chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
             .is_some();
+        let dock = (!dashboard_visible)
+            .then(|| {
+                agents_overview_dock::layout(Rect::new(0, 0, screen_size.width, screen_size.height))
+            })
+            .flatten();
+        let conversation_width = dock
+            .as_ref()
+            .map_or(screen_size.width, |dock| dock.conversation.width);
+        let command_items = dock
+            .as_ref()
+            .filter(|dock| !dock.command_reference.is_empty())
+            .map(|_| self.chat_widget.command_reference_items())
+            .unwrap_or_default();
+        let command_scroll = self.agents_overview.command_reference_scroll;
         let dashboard_was_visible = std::mem::replace(
             &mut self.agents_overview.rendered_full_screen,
             dashboard_visible,
@@ -1328,13 +1384,13 @@ impl App {
         // Rebuild it once when returning to a content-height chat viewport.
         let restoring_inline_viewport = !tui.is_alt_screen_active()
             && tui.terminal.viewport_area.height == screen_size.height
-            && self.with_chat_widget_frame(screen_size.width, |height, _| height)
+            && self.with_chat_widget_frame(conversation_width, |height, _| height)
                 < screen_size.height;
         if !dashboard_visible && (dashboard_was_visible || restoring_inline_viewport) {
             self.schedule_immediate_resize_reflow(tui);
             self.maybe_run_resize_reflow(tui, screen_size)?;
         }
-        self.with_chat_widget_frame(screen_size.width, |desired_height, chat_widget| {
+        self.with_chat_widget_frame(conversation_width, |desired_height, chat_widget| {
             let desired_height = if dashboard_visible {
                 screen_size.height
             } else {
@@ -1342,20 +1398,73 @@ impl App {
             };
             let mut rendered_area = Rect::default();
             tui.draw_with_resize_reflow(desired_height, screen_size, |frame| {
-                let area = frame.area();
-                rendered_area = area;
-                chat_widget.render(area, frame.buffer);
+                let frame_area = frame.area();
+                let dock = if dashboard_visible {
+                    None
+                } else {
+                    agents_overview_dock::layout(frame_area)
+                };
+                let conversation_area = dock.as_ref().map_or(frame_area, |dock| dock.conversation);
+                rendered_area = conversation_area;
+                chat_widget.render(conversation_area, frame.buffer);
+                if let Some(dock) = dock {
+                    if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
+                        view.render_docked(dock.sidebar, frame.buffer);
+                    }
+                    dock.render_divider(frame.buffer, self.agents_overview.sidebar_focused);
+                    if !dock.command_reference.is_empty() {
+                        command_reference::render(
+                            dock.command_reference,
+                            frame.buffer,
+                            &command_items,
+                            command_scroll,
+                        );
+                    }
+                }
                 if let Some(previews) = &self.chat_widget.composer_images {
                     frame.image_placements = previews.placements.take();
                 }
-                self.chat_widget.note_rendered_width(area.width);
-                if let Some((x, y)) = chat_widget.cursor_pos(area) {
-                    frame.set_cursor_style(chat_widget.cursor_style(area));
+                self.chat_widget
+                    .note_rendered_width(conversation_area.width);
+                if let Some((x, y)) = chat_widget.cursor_pos(conversation_area) {
+                    frame.set_cursor_style(chat_widget.cursor_style(conversation_area));
                     frame.set_cursor_position((x, y));
                 }
             })?;
             Ok(rendered_area)
         })
+    }
+
+    fn handle_command_reference_scroll(&mut self, tui: &tui::Tui, event: &TuiEvent) -> bool {
+        if self.overlay.is_some() || self.chat_widget.has_active_modal() {
+            return false;
+        }
+        let TuiEvent::Mouse(mouse) = event else {
+            return false;
+        };
+        let delta = match mouse.kind {
+            MouseEventKind::ScrollUp => -3_isize,
+            MouseEventKind::ScrollDown => 3_isize,
+            _ => return false,
+        };
+        let Some(dock) = agents_overview_dock::layout(tui.terminal.viewport_area) else {
+            return false;
+        };
+        if !dock
+            .command_reference
+            .contains((mouse.column, mouse.row).into())
+        {
+            return false;
+        }
+        let items = self.chat_widget.command_reference_items();
+        let max_scroll = command_reference::max_scroll(&items, dock.command_reference);
+        self.agents_overview.command_reference_scroll = self
+            .agents_overview
+            .command_reference_scroll
+            .saturating_add_signed(delta)
+            .min(max_scroll);
+        tui.frame_requester().schedule_frame();
+        true
     }
 
     fn with_chat_widget_frame<T>(

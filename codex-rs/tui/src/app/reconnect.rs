@@ -264,6 +264,7 @@ impl App {
                 .chat_widget
                 .selected_index_for_active_view(agents_overview::AGENTS_OVERVIEW_VIEW_ID)
                 .is_some()
+                || self.agents_overview.sidebar_focused
                 || (self.current_displayed_thread_id().is_none()
                     && self
                         .chat_widget
@@ -352,9 +353,15 @@ impl App {
         } = connected;
         session.model_provider_override = self.harness_overrides.model_provider.clone();
         let selected = self
-            .chat_widget
-            .selected_index_for_present_view(agents_overview::AGENTS_OVERVIEW_VIEW_ID)
-            .and_then(|index| self.agents_overview.visible_thread_ids.get(index).copied());
+            .agents_overview
+            .sidebar_view
+            .as_ref()
+            .and_then(super::agents_overview_view::AgentsOverviewView::selected_thread_id)
+            .or_else(|| {
+                self.chat_widget
+                    .selected_index_for_present_view(agents_overview::AGENTS_OVERVIEW_VIEW_ID)
+                    .and_then(|index| self.agents_overview.visible_thread_ids.get(index).copied())
+            });
         let displayed = self.current_displayed_thread_id();
         let mut input = self.chat_widget.capture_thread_input_state();
         if let Some(input) = input.as_mut() {
@@ -571,7 +578,7 @@ impl App {
         #[cfg(any(target_os = "windows", test))]
         if interrupted_windows_setup {
             self.chat_widget.add_error_message(
-                "Windows sandbox setup was interrupted. Restart Codex before using Agent mode."
+                "Windows sandbox setup was interrupted. Restart Mikodex before using Agent mode."
                     .to_string(),
             );
         }

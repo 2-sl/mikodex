@@ -237,7 +237,7 @@ impl ChatWidget {
         }
     }
 
-    /// Clears the terminal title Codex most recently wrote, if any.
+    /// Clears the terminal title Mikodex most recently wrote, if any.
     ///
     /// This does not attempt to restore the shell or terminal's previous title;
     /// it only clears the managed title and updates the cache after a successful

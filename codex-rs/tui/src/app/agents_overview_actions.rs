@@ -68,18 +68,33 @@ async fn run_lifecycle_modal<T>(
                 if matches!(&event, tui::TuiEvent::Paste(_) | tui::TuiEvent::FocusLost) {
                     app.cancel_pending_key_chord();
                 }
-                let dashboard_active = app.chat_widget
-                    .selected_index_for_active_view(AGENTS_OVERVIEW_VIEW_ID)
-                    .is_some();
+                let dashboard_active = app.agents_overview.sidebar_focused
+                    || app
+                        .chat_widget
+                        .selected_index_for_active_view(AGENTS_OVERVIEW_VIEW_ID)
+                        .is_some();
                 match event {
                     tui::TuiEvent::Key(key) if dashboard_active => {
                         if let Some(key) = app.route_key_chord_event(tui, key) {
-                            app.chat_widget.handle_key_event_with_activation_key(key, app.routed_key_activation);
+                            let activation_key = app.routed_key_activation.take();
+                            if app.agents_overview.sidebar_focused
+                                && app.chat_widget.no_modal_or_popup_active()
+                            {
+                                app.handle_agents_overview_sidebar_key_event(
+                                    key,
+                                    activation_key,
+                                );
+                            } else {
+                                app.chat_widget
+                                    .handle_key_event_with_activation_key(key, activation_key);
+                            }
                         }
                         tui.frame_requester().schedule_frame();
                     }
                     tui::TuiEvent::Paste(text) if dashboard_active => {
-                        app.chat_widget.handle_paste(text);
+                        if !app.handle_agents_overview_sidebar_paste(text.clone()) {
+                            app.chat_widget.handle_paste(text);
+                        }
                         tui.frame_requester().schedule_frame();
                     }
                     tui::TuiEvent::Key(_) | tui::TuiEvent::Paste(_) | tui::TuiEvent::FocusLost | tui::TuiEvent::Mouse(_) => {}
@@ -389,10 +404,18 @@ impl App {
         if detach_primary {
             self.agents_overview.selection_after_removal =
                 self.agents_overview.selection_after_removal.or_else(|| {
-                    self.chat_widget
-                        .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
-                        .and_then(|index| {
-                            self.agents_overview.visible_thread_ids.get(index).copied()
+                    self.agents_overview
+                        .sidebar_view
+                        .as_ref()
+                        .and_then(
+                            super::agents_overview_view::AgentsOverviewView::selected_thread_id,
+                        )
+                        .or_else(|| {
+                            self.chat_widget
+                                .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
+                                .and_then(|index| {
+                                    self.agents_overview.visible_thread_ids.get(index).copied()
+                                })
                         })
                 });
             self.reset_for_thread_switch(tui)?;

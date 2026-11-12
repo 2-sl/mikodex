@@ -22,7 +22,6 @@ use super::app_server_requests::BufferedServerRequest;
 use super::session_lifecycle::ThreadAttachPresentation;
 use super::*;
 use crate::app_event::AgentsOverviewThreadRefresh;
-use crate::bottom_pane::BottomPaneView;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::chatwidget::ThreadInputStateRestoreMode;
@@ -65,6 +64,12 @@ pub(super) struct AgentsOverviewState {
     pub(super) refresh_notifications: HashMap<ThreadId, Vec<ServerNotification>>,
     pub(super) rendered_full_screen: bool,
     pub(super) visible_thread_ids: Vec<ThreadId>,
+    /// The persistent left-rail view, separate from the chat widget's full-screen view stack.
+    pub(super) sidebar_view: Option<AgentsOverviewView>,
+    /// Keyboard focus belongs to the command-center rail while its list is being operated.
+    pub(super) sidebar_focused: bool,
+    /// First slash-command entry shown by the right reference rail.
+    pub(super) command_reference_scroll: usize,
     /// One-shot successor selected before a removal invalidates the displayed rows.
     pub(super) selection_after_removal: Option<ThreadId>,
     pub(super) view_state:
@@ -90,19 +95,15 @@ impl Drop for AgentsOverviewState {
 
 impl App {
     pub(super) fn open_agents_overview(&mut self, app_server: &AppServerSession) {
-        let threads = self
-            .agents_overview
-            .threads
-            .values()
-            .flatten()
-            .cloned()
-            .collect();
-        let selected_thread_id = self.agents_overview.selection_after_removal.take();
-        let view = self.agents_overview_view(threads, selected_thread_id);
-        self.agents_overview.visible_thread_ids = view.thread_ids();
-        self.chat_widget.show_bottom_pane_view(Box::new(view));
+        if !self.agents_overview.sidebar_focused {
+            self.cancel_pending_key_chord();
+        }
+        self.agents_overview.sidebar_focused = true;
+        self.ensure_agents_overview_sidebar_view();
+        if let Some(view) = self.agents_overview.sidebar_view.as_mut() {
+            view.set_docked_focus(true);
+        }
         if self.reconnect.offline {
-            self.reconnect.presentation = reconnect::ReconnectPresentation::Overview;
             let mut state = self
                 .agents_overview
                 .view_state
@@ -117,6 +118,22 @@ impl App {
         } else {
             self.refresh_agents_overview_threads(app_server);
         }
+    }
+
+    pub(super) fn ensure_agents_overview_sidebar_view(&mut self) {
+        if self.agents_overview.sidebar_view.is_some() {
+            return;
+        }
+        let threads: Vec<Thread> = self
+            .agents_overview
+            .threads
+            .values()
+            .flatten()
+            .cloned()
+            .collect();
+        let view = self.agents_overview_view(threads, self.primary_thread_id);
+        self.agents_overview.visible_thread_ids = view.thread_ids();
+        self.agents_overview.sidebar_view = Some(view);
     }
 
     pub(super) fn apply_agents_overview_thread_refresh(
@@ -237,17 +254,21 @@ impl App {
     }
 
     pub(super) fn repaint_agents_overview(&mut self) {
-        let Some(selected) = self
+        let full_screen_selected = self
             .chat_widget
-            .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
-        else {
-            return;
-        };
-        let previous_thread_id = self
+            .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID);
+        let full_screen_thread_id = full_screen_selected.and_then(|selected| {
+            self.agents_overview
+                .visible_thread_ids
+                .get(selected)
+                .copied()
+        });
+        let sidebar_thread_id = self
             .agents_overview
-            .visible_thread_ids
-            .get(selected)
-            .copied();
+            .sidebar_view
+            .as_ref()
+            .and_then(AgentsOverviewView::selected_thread_id);
+        let previous_thread_id = full_screen_thread_id.or(sidebar_thread_id);
         let selected_thread_id = self
             .agents_overview
             .view_state
@@ -259,24 +280,25 @@ impl App {
                     && !self.agents_overview.hidden_threads.contains(id)
             })
             .or(self.agents_overview.selection_after_removal.take())
-            .or(previous_thread_id);
-        let threads = self
+            .or(previous_thread_id)
+            .or(self.primary_thread_id);
+        let threads: Vec<Thread> = self
             .agents_overview
             .threads
             .values()
             .flatten()
             .cloned()
             .collect();
-        let view = self.agents_overview_view(threads, selected_thread_id);
-        self.agents_overview.visible_thread_ids = view.thread_ids();
-        let next_thread_id = view
-            .selected_index()
-            .and_then(|index| self.agents_overview.visible_thread_ids.get(index).copied());
+        let sidebar_view = self.agents_overview_view(threads.clone(), selected_thread_id);
+        let next_thread_id = sidebar_view.selected_thread_id();
+        self.agents_overview.visible_thread_ids = sidebar_view.thread_ids();
+        self.agents_overview.sidebar_view = Some(sidebar_view);
         if (previous_thread_id.is_none() || previous_thread_id != next_thread_id)
-            && self
-                .chat_widget
-                .selected_index_for_active_view(AGENTS_OVERVIEW_VIEW_ID)
-                .is_some()
+            && (self.agents_overview.sidebar_focused
+                || self
+                    .chat_widget
+                    .selected_index_for_active_view(AGENTS_OVERVIEW_VIEW_ID)
+                    .is_some())
         {
             self.cancel_pending_key_chord();
         }
@@ -295,8 +317,11 @@ impl App {
             state.rename_target = None;
             state.input.set_text_clearing_elements("");
         }
-        self.chat_widget
-            .replace_bottom_pane_view_if_present(AGENTS_OVERVIEW_VIEW_ID, Box::new(view));
+        if full_screen_selected.is_some() {
+            let view = self.agents_overview_view(threads, selected_thread_id);
+            self.chat_widget
+                .replace_bottom_pane_view_if_present(AGENTS_OVERVIEW_VIEW_ID, Box::new(view));
+        }
     }
 
     pub(super) fn agents_overview_view(
@@ -376,6 +401,7 @@ impl App {
             self.keymap.clone(),
             Arc::clone(&self.agents_overview.view_state),
         );
+        view.set_docked_focus(self.agents_overview.sidebar_focused);
         view.pinned_thread_ranks = self.agents_overview.pinned_thread_ids.as_ref().map(|ids| {
             ids.iter()
                 .copied()

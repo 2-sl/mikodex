@@ -775,7 +775,7 @@ async fn read_stderr_log_tail_returns_recent_complete_lines() {
 async fn stale_creation_time_never_stops_reused_pid() {
     let temp = TempDir::new().expect("temp");
     let backend = PidBackend::new(
-        temp.path().join("codex.exe"),
+        temp.path().join("mikodex.exe"),
         temp.path().join("server.pid"),
         /*remote_control_enabled*/ false,
     );
@@ -885,7 +885,7 @@ async fn failed_updater_handoff_preserves_predecessor_record() {
         .await
         .expect("private state directory");
     let backend = PidBackend::new_update_loop(
-        temp.path().join("missing-codex.exe"),
+        temp.path().join("missing-mikodex.exe"),
         state_dir.join("updater.pid"),
         /*restore_release*/ None,
     );
@@ -933,7 +933,7 @@ async fn updater_readiness_and_post_publication_failure_preserve_ownership() {
 
     let temp = TempDir::new().expect("temp");
     let backend = PidBackend::new_update_loop(
-        temp.path().join("codex.exe"),
+        temp.path().join("mikodex.exe"),
         temp.path().join("updater.pid"),
         /*restore_release*/ None,
     );

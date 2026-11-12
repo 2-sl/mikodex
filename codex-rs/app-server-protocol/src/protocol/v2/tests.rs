@@ -2237,9 +2237,9 @@ fn config_requirements_granular_allowed_approval_policy_is_marked_experimental()
 fn config_requirements_read_accepts_foreign_path_uris() {
     let response: ConfigRequirementsReadResponse = serde_json::from_value(json!({
         "requirements": {
-            "sqliteHome": "file:///C:/Users/alice/.codex/state",
-            "logDir": "file:///C:/Users/alice/.codex/logs",
-            "modelCatalogJson": "file:///C:/Users/alice/.codex/models.json"
+            "sqliteHome": "file:///C:/Users/alice/.mikodex/state",
+            "logDir": "file:///C:/Users/alice/.mikodex/logs",
+            "modelCatalogJson": "file:///C:/Users/alice/.mikodex/models.json"
         }
     }))
     .expect("requirements response with foreign paths should deserialize");
@@ -2249,15 +2249,15 @@ fn config_requirements_read_accepts_foreign_path_uris() {
 
     assert_eq!(
         requirements.sqlite_home,
-        Some(PathUri::parse("file:///C:/Users/alice/.codex/state").expect("valid URI"))
+        Some(PathUri::parse("file:///C:/Users/alice/.mikodex/state").expect("valid URI"))
     );
     assert_eq!(
         requirements.log_dir,
-        Some(PathUri::parse("file:///C:/Users/alice/.codex/logs").expect("valid URI"))
+        Some(PathUri::parse("file:///C:/Users/alice/.mikodex/logs").expect("valid URI"))
     );
     assert_eq!(
         requirements.model_catalog_json,
-        Some(PathUri::parse("file:///C:/Users/alice/.codex/models.json").expect("valid URI"))
+        Some(PathUri::parse("file:///C:/Users/alice/.mikodex/models.json").expect("valid URI"))
     );
 }
 
@@ -3200,7 +3200,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
             },
             CoreUserInput::Skill {
                 name: "skill-creator".to_string(),
-                path: PathBuf::from("/repo/.codex/skills/skill-creator/SKILL.md"),
+                path: PathBuf::from("/repo/.mikodex/skills/skill-creator/SKILL.md"),
             },
             CoreUserInput::Mention {
                 name: "Demo App".to_string(),
@@ -3244,7 +3244,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
                 },
                 UserInput::Skill {
                     name: "skill-creator".to_string(),
-                    path: PathBuf::from("/repo/.codex/skills/skill-creator/SKILL.md"),
+                    path: PathBuf::from("/repo/.mikodex/skills/skill-creator/SKILL.md"),
                 },
                 UserInput::Mention {
                     name: "Demo App".to_string(),

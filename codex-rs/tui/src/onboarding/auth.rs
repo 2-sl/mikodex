@@ -500,12 +500,12 @@ impl AuthModeWidget {
         let mut lines: Vec<Line> = if self.highlighted_mode.is_alternative() {
             vec!["  Sign in another way".into(), "".into()]
         } else if self.bedrock_setup_enabled || self.gcp_setup_enabled {
-            vec!["  Choose how you want to use Codex.".into(), "".into()]
+            vec!["  Choose how you want to use Mikodex.".into(), "".into()]
         } else {
             vec![
                 Line::from(vec![
                     "  ".into(),
-                    "Sign in with ChatGPT to use Codex as part of your paid plan".into(),
+                    "Sign in with ChatGPT to use Mikodex as part of your paid plan".into(),
                 ]),
                 Line::from(vec![
                     "  ".into(),
@@ -719,7 +719,7 @@ impl AuthModeWidget {
         let mut docs_line =
             HyperlinkLine::new(Line::from("  Learn about permissions and approvals in the ").dim());
         docs_line.push_span(
-            "Codex docs".underlined(),
+            "Mikodex docs".underlined(),
             Some("https://developers.openai.com/codex/security"),
         );
         let mut preferences_line =
@@ -740,7 +740,7 @@ impl AuthModeWidget {
             "  You're in control".into(),
             docs_line,
             "".into(),
-            "  Codex can make mistakes".into(),
+            "  Mikodex can make mistakes".into(),
             HyperlinkLine::new(
                 "  Review the code it writes and commands it runs"
                     .dim()
@@ -779,7 +779,7 @@ impl AuthModeWidget {
         let lines = vec![
             "✓ API key configured".fg(Color::Green).into(),
             "".into(),
-            "  Codex will use usage-based billing with your API key.".into(),
+            "  Mikodex will use usage-based billing with your API key.".into(),
         ];
 
         Paragraph::new(lines)
@@ -1483,7 +1483,7 @@ mod tests {
             rows.pop();
         }
         insta::assert_snapshot!(rows.join("\n"), @r###"
-          Choose how you want to use Codex.
+          Choose how you want to use Mikodex.
 
         > 1. Sign in with ChatGPT
              Usage included with Plus, Pro, Business, and Enterprise plans
@@ -1646,7 +1646,7 @@ mod tests {
 
         assert_eq!(
             collect_osc8_chars(&buf, area, "https://developers.openai.com/codex/security"),
-            "Codex docs"
+            "Mikodex docs"
         );
         assert_eq!(
             collect_osc8_chars(&buf, area, "https://chatgpt.com/#settings"),
@@ -1685,9 +1685,9 @@ mod tests {
         ✓ Signed in with your ChatGPT account
 
           You're in control
-          Learn about permissions and approvals in the Codex docs
+          Learn about permissions and approvals in the Mikodex docs
 
-          Codex can make mistakes
+          Mikodex can make mistakes
           Review the code it writes and commands it runs
 
           Included with your ChatGPT plan
