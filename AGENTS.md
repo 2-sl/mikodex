@@ -4,7 +4,8 @@
 
 - Never push, publish, or open a pull request against `https://github.com/openai/codex.git`.
 - Treat the upstream Codex repository as read-only; fetching releases is allowed.
-- Push only to a user-owned remote when the user explicitly asks for that push.
+- After committing changes on the active Mikodex branch, immediately push that branch to `origin` when it points to `https://github.com/2-sl/mikodex.git`, unless the user explicitly says to hold the push. Do not force-push.
+- Do not push to any other remote unless the user explicitly asks for that push.
 - Make descriptive local Git commits at meaningful milestones.
 
 ## Stable-release updates
