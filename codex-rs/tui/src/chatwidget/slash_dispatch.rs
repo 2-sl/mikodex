@@ -1187,12 +1187,15 @@ impl ChatWidget {
                 self.select_pet_by_id(args);
             }
             SlashCommand::Background => {
-                if matches!(trimmed.to_ascii_lowercase().as_str(), "off" | "none" | "disable") {
-                    match self
+                if matches!(
+                    trimmed.to_ascii_lowercase().as_str(),
+                    "off" | "none" | "disable"
+                ) {
+                    let result = self
                         .empty_state_animation
                         .borrow_mut()
-                        .clear_background_image(self.config.codex_home.as_path())
-                    {
+                        .clear_background_image(self.config.codex_home.as_path());
+                    match result {
                         Ok(()) => self.add_info_message(
                             "Chat background image cleared.".to_string(),
                             /*hint*/ None,
@@ -1201,20 +1204,22 @@ impl ChatWidget {
                     }
                 } else {
                     match background_image_source_path(trimmed) {
-                        Ok(path) => match self
-                            .empty_state_animation
-                            .borrow_mut()
-                            .set_background_image(&path, self.config.codex_home.as_path())
-                        {
-                            Ok(destination) => self.add_info_message(
-                                format!(
-                                    "Chat background image saved to {}.",
-                                    destination.display()
+                        Ok(path) => {
+                            let result = self
+                                .empty_state_animation
+                                .borrow_mut()
+                                .set_background_image(&path, self.config.codex_home.as_path());
+                            match result {
+                                Ok(destination) => self.add_info_message(
+                                    format!(
+                                        "Chat background image saved to {}.",
+                                        destination.display()
+                                    ),
+                                    /*hint*/ None,
                                 ),
-                                /*hint*/ None,
-                            ),
-                            Err(error) => self.add_error_message(error),
-                        },
+                                Err(error) => self.add_error_message(error),
+                            }
+                        }
                         Err(error) => self.add_error_message(error),
                     }
                 }

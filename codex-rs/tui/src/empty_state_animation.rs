@@ -14,6 +14,7 @@ mod sequence;
 
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -139,10 +140,16 @@ impl EmptyStateAnimation {
         home: &Path,
     ) -> Result<PathBuf, String> {
         let source = source.canonicalize().map_err(|error| {
-            format!("Could not open background image {}: {error}", source.display())
+            format!(
+                "Could not open background image {}: {error}",
+                source.display()
+            )
         })?;
         let image = image::open(&source).map_err(|error| {
-            format!("Could not read background image {}: {error}", source.display())
+            format!(
+                "Could not read background image {}: {error}",
+                source.display()
+            )
         })?;
         let directory = home.join(BACKGROUND_IMAGE_DIRECTORY);
         std::fs::create_dir_all(&directory).map_err(|error| {
@@ -291,12 +298,7 @@ impl EmptyStateAnimation {
                 + (self.opacity - self.fade_from)
                     * sequence::progress(self.fade_elapsed, sequence::STATIC_FADE) as f32;
         }
-        self.paint_frame(
-            area,
-            buffer,
-            self.image_elapsed.as_secs_f64(),
-            self.opacity,
-        );
+        self.paint_frame(area, buffer, self.image_elapsed.as_secs_f64(), self.opacity);
         Some(FRAME_INTERVAL)
     }
 
@@ -489,11 +491,7 @@ impl EmptyStateAnimation {
         );
     }
 
-    fn ensure_sprite_frame(
-        &mut self,
-        area_width: u16,
-        area_height: u16,
-    ) -> bool {
+    fn ensure_sprite_frame(&mut self, area_width: u16, area_height: u16) -> bool {
         let image_revision = BACKGROUND_IMAGE_REVISION.load(Ordering::Relaxed);
         let matches = self.sprite_frame.as_ref().is_some_and(|frame| {
             frame.area_width == area_width
@@ -543,14 +541,7 @@ fn build_image_frame(
     );
     const MAX_BOB_SUBPIXEL_ROWS: i16 = 6;
     let portrait_frames = (-MAX_BOB_SUBPIXEL_ROWS..=MAX_BOB_SUBPIXEL_ROWS)
-        .map(|offset| {
-            rasterize_sprite(
-                &resized_portrait,
-                portrait_size.0,
-                portrait_size.1,
-                offset,
-            )
-        })
+        .map(|offset| rasterize_sprite(&resized_portrait, portrait_size.0, portrait_size.1, offset))
         .collect();
     Some(SpriteFrame {
         area_width,
