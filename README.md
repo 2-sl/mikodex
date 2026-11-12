@@ -29,6 +29,14 @@ repository with:
 cargo run --manifest-path codex-rs/Cargo.toml -p codex-cli --bin mikodex
 ```
 
+Native Windows x64 builds are also supported. Install the Rust
+`x86_64-pc-windows-msvc` toolchain and Visual Studio 2022 Build Tools with the
+**Desktop development with C++** workload and a Windows SDK. Run the same Cargo
+command from an x64 Native Tools Command Prompt or Developer PowerShell so the
+MSVC environment is configured. See [Rust installation](https://rust-lang.org/tools/install/),
+[MSVC command-line setup](https://learn.microsoft.com/en-us/cpp/build/building-on-the-command-line?view=msvc-170),
+and the repository [build instructions](docs/install.md).
+
 To sign in, run `mikodex login` and choose the ChatGPT sign-in option. Mikodex
 uses the upstream Codex authentication implementation.
 

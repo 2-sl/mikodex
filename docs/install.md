@@ -4,11 +4,23 @@
 
 | Requirement                 | Details                                                         |
 | --------------------------- | --------------------------------------------------------------- |
-| Operating systems           | macOS 12+, Ubuntu 20.04+/Debian 10+, or Windows 11 **via WSL2** |
+| Operating systems           | macOS 12+, Ubuntu 20.04+/Debian 10+, or Windows 11 (native x64/MSVC or WSL2) |
 | Git (optional, recommended) | 2.23+ for built-in PR helpers                                   |
 | RAM                         | 4-GB minimum (8-GB recommended)                                 |
 
 ### Build from source
+
+Native Windows x64 builds use the `x86_64-pc-windows-msvc` Rust toolchain and
+Visual Studio 2022 Build Tools with the **Desktop development with C++**
+workload and a Windows SDK. Run Cargo commands from an x64 Native Tools Command
+Prompt or Developer PowerShell so the MSVC environment is configured. Install
+Rust with the [Windows rustup installer](https://rust-lang.org/tools/install/)
+and select the MSVC toolchain. See Microsoft's guide to [MSVC command-line
+builds](https://learn.microsoft.com/en-us/cpp/build/building-on-the-command-line?view=msvc-170).
+
+On Windows, install Rust with rustup-init.exe and run the Rust and Cargo
+commands from the block below in the Developer shell; skip the `curl` and
+`source` lines. The shell installer lines are for macOS, Linux, and WSL2.
 
 ```bash
 # Run these commands from the repository root.
