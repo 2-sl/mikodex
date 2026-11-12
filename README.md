@@ -22,18 +22,31 @@ state with an installed Codex.
 
 ## Build and run
 
-On macOS, Linux, or Windows through WSL2, build and start the CLI from this
-repository with:
+For quick source development on macOS, Linux, or Windows through WSL2, run:
 
 ```sh
 cargo run --manifest-path codex-rs/Cargo.toml -p codex-cli --bin mikodex
 ```
 
+That command builds a development executable, not a complete local package. To
+build the complete package with its runtime helpers, use the canonical package
+builder:
+
+```sh
+just assemble-codex-package --variant codex --cargo-profile release --package-dir codex-rs/target/mikodex-package --force
+```
+
+Run `codex-rs/target/mikodex-package/bin/mikodex.exe` on Windows or
+`codex-rs/target/mikodex-package/bin/mikodex` on macOS and Linux. The package
+includes the metadata and helper binaries required by daemon installation and
+sandbox setup.
+
 Native Windows x64 builds are also supported. Install the Rust
 `x86_64-pc-windows-msvc` toolchain and Visual Studio 2022 Build Tools with the
 **Desktop development with C++** workload and a Windows SDK. Run the same Cargo
-command from an x64 Native Tools Command Prompt or Developer PowerShell so the
-MSVC environment is configured. See [Rust installation](https://rust-lang.org/tools/install/),
+package build from an x64 Native Tools Command Prompt or Developer PowerShell so
+the MSVC environment is configured. The local `.toolchain/build-mikodex.cmd`
+script runs this canonical package build. See [Rust installation](https://rust-lang.org/tools/install/),
 [MSVC command-line setup](https://learn.microsoft.com/en-us/cpp/build/building-on-the-command-line?view=msvc-170),
 and the repository [build instructions](docs/install.md).
 

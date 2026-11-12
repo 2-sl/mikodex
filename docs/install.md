@@ -37,10 +37,13 @@ cargo install --locked dotslash
 # Install nextest for the `just test` helper.
 cargo install --locked cargo-nextest
 
-# Build Mikodex.
-cargo build --manifest-path codex-rs/Cargo.toml -p codex-cli --bin mikodex
+# Build the complete local package, including platform helper binaries.
+just assemble-codex-package --variant codex --cargo-profile release --package-dir codex-rs/target/mikodex-package --force
 
-# Launch the TUI with a sample prompt.
+# Launch the packaged TUI with a sample prompt (Windows path shown).
+./codex-rs/target/mikodex-package/bin/mikodex.exe "explain this codebase to me"
+
+# For quick source iteration only (does not create a complete CLI package).
 cargo run --manifest-path codex-rs/Cargo.toml -p codex-cli --bin mikodex -- "explain this codebase to me"
 
 # After making changes, use the root justfile helpers (they default to codex-rs):
