@@ -1,14 +1,9 @@
-//! The user-selected image animation. Visible time pauses while hidden.
+//! The built-in logo animation and user-selected background image.
 
-// Keep the original logo geometry and renderer source available, but don't draw it in the TUI.
-#[allow(dead_code)]
 mod geometry;
-#[allow(dead_code)]
 mod lighting;
-#[allow(dead_code)]
 mod paths;
 mod policy;
-#[allow(dead_code)]
 mod renderer;
 mod sequence;
 
@@ -36,13 +31,11 @@ use ratatui::widgets::Widget;
 
 use crate::motion::MotionMode;
 use crate::terminal_palette;
-#[cfg(test)]
 use lighting::Lighting;
 pub(crate) use policy::Presentation;
 pub(crate) use policy::is_startup_cell;
 use renderer::MAX_COLUMNS;
 use renderer::MAX_ROWS;
-#[cfg(test)]
 use renderer::Renderer;
 
 pub(crate) const FRAME_INTERVAL: Duration = Duration::from_millis(/*millis*/ 50);
@@ -83,6 +76,7 @@ pub(crate) struct EmptyStateAnimation {
     image_elapsed: Duration,
     chat_background_elapsed: Duration,
     chat_background_last_frame: Option<Instant>,
+    logo_renderer: Renderer,
     background_image_path: Option<PathBuf>,
     sprite_frame: Option<SpriteFrame>,
     stage: Option<Rect>,
@@ -230,7 +224,7 @@ impl EmptyStateAnimation {
         self.last_frame = None;
     }
 
-    /// Paint the selected image inside a caller-owned, reserved rectangle.
+    /// Paint the user image or built-in logo inside a caller-owned, reserved rectangle.
     /// The caller clears the stage and schedules another frame while it stays visible.
     pub(crate) fn render_in(
         &mut self,
@@ -255,7 +249,6 @@ impl EmptyStateAnimation {
             || area.width > MAX_COLUMNS
             || area.height > MAX_ROWS
             || area.intersection(buffer.area) != area
-            || !self.has_background_image()
         {
             self.pause_clock();
             return None;
@@ -298,11 +291,21 @@ impl EmptyStateAnimation {
                 + (self.opacity - self.fade_from)
                     * sequence::progress(self.fade_elapsed, sequence::STATIC_FADE) as f32;
         }
-        self.paint_frame(area, buffer, self.image_elapsed.as_secs_f64(), self.opacity);
+        if self.has_custom_background_image() {
+            self.paint_frame(area, buffer, self.image_elapsed.as_secs_f64(), self.opacity);
+        } else {
+            self.paint_default_logo(
+                area,
+                buffer,
+                self.image_elapsed.as_secs_f64() / sequence::LOOP_SECONDS,
+                self.opacity.max(0.72),
+                /*only_blank_cells*/ false,
+            );
+        }
         Some(FRAME_INTERVAL)
     }
 
-    /// Draw only in space the caller has cleared and owns, while the sprite keeps floating.
+    /// Draw only in space the caller has cleared and owns, while the animation keeps running.
     pub(crate) fn render_first_screen(
         &mut self,
         screen: Rect,
@@ -313,10 +316,6 @@ impl EmptyStateAnimation {
     ) -> Option<Duration> {
         const STAGE_ROWS: u16 = 63;
         const MIN_STAGE_ROWS: u16 = 14;
-        if !self.has_background_image() {
-            self.cancel_replay();
-            return None;
-        }
         let height_limited_width = (u32::from(screen.height) * u32::from(MAX_COLUMNS)
             / u32::from(STAGE_ROWS))
         .min(u32::from(MAX_COLUMNS)) as u16;
@@ -351,7 +350,7 @@ impl EmptyStateAnimation {
         self.render_in(stage, buffer, Presentation::Animated)
     }
 
-    /// Paint the selected image as a faint watermark in unused transcript cells.
+    /// Paint the selected image or built-in logo as a faint watermark in unused transcript cells.
     pub(crate) fn render_chat_background(
         &mut self,
         area: Rect,
@@ -359,10 +358,6 @@ impl EmptyStateAnimation {
     ) -> Option<Duration> {
         const STAGE_ROWS: u16 = 63;
         const MIN_STAGE_ROWS: u16 = 14;
-        if !self.has_background_image() {
-            self.chat_background_last_frame = None;
-            return None;
-        }
         let height_limited_width = (u32::from(area.height) * u32::from(MAX_COLUMNS)
             / u32::from(STAGE_ROWS))
         .min(u32::from(MAX_COLUMNS)) as u16;
@@ -394,7 +389,17 @@ impl EmptyStateAnimation {
             .map(|previous| now.saturating_duration_since(previous))
             .unwrap_or_default();
         self.chat_background_elapsed += elapsed;
-        self.paint_background_frame(stage, buffer, self.chat_background_elapsed.as_secs_f64());
+        if self.has_custom_background_image() {
+            self.paint_background_frame(stage, buffer, self.chat_background_elapsed.as_secs_f64());
+        } else {
+            self.paint_default_logo(
+                stage,
+                buffer,
+                self.chat_background_elapsed.as_secs_f64() / sequence::LOOP_SECONDS,
+                /*opacity*/ 0.5,
+                /*only_blank_cells*/ true,
+            );
+        }
         Some(FRAME_INTERVAL)
     }
 
@@ -418,6 +423,57 @@ impl EmptyStateAnimation {
             /*only_blank_cells*/ true,
             /*paint_cell_backgrounds*/ false,
         );
+    }
+
+    fn paint_default_logo(
+        &mut self,
+        area: Rect,
+        buffer: &mut Buffer,
+        phase: f64,
+        opacity: f32,
+        only_blank_cells: bool,
+    ) {
+        if area.is_empty() || area.width > MAX_COLUMNS || area.height > MAX_ROWS {
+            return;
+        }
+        let default_background = terminal_palette::default_bg();
+        let color_level = if default_background.is_some() {
+            terminal_palette::effective_stdout_color_level()
+        } else {
+            terminal_palette::StdoutColorLevel::Unknown
+        };
+        let background = default_background.unwrap_or((15, 20, 37));
+        let foreground = terminal_palette::default_fg().unwrap_or((210, 221, 235));
+        let lighting = Lighting::terminal(foreground, background);
+        let cells = self
+            .logo_renderer
+            .frame(area.width, area.height, phase, &lighting);
+        let width = usize::from(area.width);
+        for (index, cell) in cells.iter().enumerate() {
+            if cell.dots == 0 {
+                continue;
+            }
+            let x = area.x + (index % width) as u16;
+            let y = area.y + (index / width) as u16;
+            if !area.contains(Position::new(x, y)) {
+                continue;
+            }
+            let target = &mut buffer[(x, y)];
+            if only_blank_cells && target.symbol() != " " {
+                continue;
+            }
+            if only_blank_cells {
+                target.set_style(target.style().remove_modifier(Modifier::DIM));
+            }
+            let [_, red, green, blue] = cell.rgb.to_be_bytes();
+            target.set_char(char::from_u32(0x2800 + u32::from(cell.dots)).unwrap_or(' '));
+            target.set_fg(terminal_color(
+                (red, green, blue),
+                background,
+                opacity,
+                color_level,
+            ));
+        }
     }
 
     fn paint_frame_with_options(
@@ -507,7 +563,7 @@ impl EmptyStateAnimation {
         self.sprite_frame.is_some()
     }
 
-    fn has_background_image(&self) -> bool {
+    fn has_custom_background_image(&self) -> bool {
         self.background_image_path
             .as_deref()
             .is_some_and(Path::is_file)
