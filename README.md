@@ -47,10 +47,13 @@ and `~/.mikodex` on macOS and Linux. Set `MIKODEX_HOME` to use another directory
 
 ## Animated chat background
 
-Set a personal image with `/background "<image path>"`. Mikodex copies it to
+Set a personal image with `/background "<image path>"` or its `/bga` alias.
+Mikodex copies it to
 `$MIKODEX_HOME/background/custom.png` (normally `%USERPROFILE%\.mikodex\background\custom.png`)
 and reuses that copy on later launches. PNG, JPEG, GIF, and WebP input files are
-supported. Use `/background off` to remove the saved image.
+supported. Use `/background off` to disable the animation, `/background on` to
+enable it again, and `/background clear` to remove the saved image while keeping
+the current enabled or disabled state. The off/on setting persists across launches.
 
 This repository is licensed under the [Apache-2.0 License](LICENSE). See
 [contributing](docs/contributing.md) and [build instructions](docs/install.md)

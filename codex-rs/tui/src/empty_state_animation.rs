@@ -42,6 +42,7 @@ pub(crate) const FRAME_INTERVAL: Duration = Duration::from_millis(/*millis*/ 50)
 const MAX_BOB_SUBPIXEL_ROWS: i16 = 6;
 const BACKGROUND_IMAGE_DIRECTORY: &str = "background";
 const BACKGROUND_IMAGE_FILENAME: &str = "custom.png";
+const BACKGROUND_DISABLED_FILENAME: &str = "disabled";
 static BACKGROUND_IMAGE_REVISION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy)]
@@ -78,6 +79,7 @@ pub(crate) struct EmptyStateAnimation {
     chat_background_last_frame: Option<Instant>,
     logo_renderer: Renderer,
     background_image_path: Option<PathBuf>,
+    background_disabled_path: Option<PathBuf>,
     sprite_frame: Option<SpriteFrame>,
     stage: Option<Rect>,
     replaying: bool,
@@ -87,6 +89,7 @@ impl EmptyStateAnimation {
     pub(crate) fn for_home(home: &Path) -> Self {
         Self {
             background_image_path: Some(background_image_path(home)),
+            background_disabled_path: Some(background_disabled_path(home)),
             ..Self::default()
         }
     }
@@ -171,6 +174,7 @@ impl EmptyStateAnimation {
                 destination.display()
             )
         })?;
+        self.set_background_enabled(true, home)?;
         self.background_image_path = Some(destination.clone());
         self.reset_background_image_frame();
         Ok(destination)
@@ -189,6 +193,49 @@ impl EmptyStateAnimation {
             }
         }
         self.background_image_path = Some(path);
+        self.reset_background_image_frame();
+        Ok(())
+    }
+
+    pub(crate) fn is_background_enabled(&self) -> bool {
+        self.background_disabled_path
+            .as_deref()
+            .is_none_or(|path| !path.exists())
+    }
+
+    pub(crate) fn set_background_enabled(
+        &mut self,
+        enabled: bool,
+        home: &Path,
+    ) -> Result<(), String> {
+        let path = background_disabled_path(home);
+        if enabled {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!(
+                        "Could not enable the chat background ({}): {error}",
+                        path.display()
+                    ));
+                }
+            }
+        } else {
+            let directory = home.join(BACKGROUND_IMAGE_DIRECTORY);
+            std::fs::create_dir_all(&directory).map_err(|error| {
+                format!(
+                    "Could not create chat background settings directory {}: {error}",
+                    directory.display()
+                )
+            })?;
+            std::fs::write(&path, b"disabled\n").map_err(|error| {
+                format!(
+                    "Could not disable the chat background ({}): {error}",
+                    path.display()
+                )
+            })?;
+        }
+        self.background_disabled_path = Some(path);
         self.reset_background_image_frame();
         Ok(())
     }
@@ -244,6 +291,7 @@ impl EmptyStateAnimation {
         now: Instant,
     ) -> Option<Duration> {
         if !self.eligible
+            || !self.is_background_enabled()
             || presentation == Presentation::Hidden
             || area.is_empty()
             || area.width > MAX_COLUMNS
@@ -356,6 +404,10 @@ impl EmptyStateAnimation {
         area: Rect,
         buffer: &mut Buffer,
     ) -> Option<Duration> {
+        if !self.is_background_enabled() {
+            self.chat_background_last_frame = None;
+            return None;
+        }
         const STAGE_ROWS: u16 = 63;
         const MIN_STAGE_ROWS: u16 = 14;
         let height_limited_width = (u32::from(area.height) * u32::from(MAX_COLUMNS)
@@ -573,6 +625,11 @@ impl EmptyStateAnimation {
 fn background_image_path(home: &Path) -> PathBuf {
     home.join(BACKGROUND_IMAGE_DIRECTORY)
         .join(BACKGROUND_IMAGE_FILENAME)
+}
+
+fn background_disabled_path(home: &Path) -> PathBuf {
+    home.join(BACKGROUND_IMAGE_DIRECTORY)
+        .join(BACKGROUND_DISABLED_FILENAME)
 }
 
 fn build_image_frame(

@@ -52,7 +52,10 @@ fn background_image_source_path(argument: &str) -> Result<PathBuf, String> {
         argument
     };
     if argument.is_empty() {
-        return Err("Usage: /background \"<image path>\" | /background off".to_string());
+        return Err(
+            "Usage: /background \"<image path>\" | /background on|off|clear (alias: /bga)"
+                .to_string(),
+        );
     }
 
     let mut expanded = String::with_capacity(argument.len());
@@ -629,15 +632,22 @@ impl ChatWidget {
                 self.open_theme_picker();
             }
             SlashCommand::Background => {
-                let current = self
-                    .empty_state_animation
-                    .borrow()
-                    .background_image_path()
-                    .map(|path| path.display().to_string());
-                let status = current.unwrap_or_else(|| "none".to_string());
+                let (status, image) = {
+                    let animation = self.empty_state_animation.borrow();
+                    let status = if animation.is_background_enabled() {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    };
+                    let image = animation
+                        .background_image_path()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| "built-in logo".to_string());
+                    (status, image)
+                };
                 self.add_info_message(
                     format!(
-                        "Current chat background image: {status}. Set one with /background \"<image path>\"; clear it with /background off."
+                        "Animated chat background: {status}; image: {image}. Use /background on|off|clear or /background \"<image path>\" (/bga is an alias)."
                     ),
                     /*hint*/ None,
                 );
@@ -1187,17 +1197,40 @@ impl ChatWidget {
                 self.select_pet_by_id(args);
             }
             SlashCommand::Background => {
-                if matches!(
-                    trimmed.to_ascii_lowercase().as_str(),
-                    "off" | "none" | "disable"
-                ) {
+                let action = trimmed.to_ascii_lowercase();
+                if matches!(action.as_str(), "off" | "disable" | "disabled") {
+                    let result = self
+                        .empty_state_animation
+                        .borrow_mut()
+                        .set_background_enabled(false, self.config.codex_home.as_path());
+                    match result {
+                        Ok(()) => self.add_info_message(
+                            "Animated chat background disabled. Use /background on to show it again."
+                                .to_string(),
+                            /*hint*/ None,
+                        ),
+                        Err(error) => self.add_error_message(error),
+                    }
+                } else if matches!(action.as_str(), "on" | "enable" | "enabled") {
+                    let result = self
+                        .empty_state_animation
+                        .borrow_mut()
+                        .set_background_enabled(true, self.config.codex_home.as_path());
+                    match result {
+                        Ok(()) => self.add_info_message(
+                            "Animated chat background enabled.".to_string(),
+                            /*hint*/ None,
+                        ),
+                        Err(error) => self.add_error_message(error),
+                    }
+                } else if matches!(action.as_str(), "clear" | "remove" | "none") {
                     let result = self
                         .empty_state_animation
                         .borrow_mut()
                         .clear_background_image(self.config.codex_home.as_path());
                     match result {
                         Ok(()) => self.add_info_message(
-                            "Chat background image cleared.".to_string(),
+                            "Saved chat background image cleared.".to_string(),
                             /*hint*/ None,
                         ),
                         Err(error) => self.add_error_message(error),
