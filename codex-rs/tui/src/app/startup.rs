@@ -1076,6 +1076,8 @@ See the Mikodex keymap documentation for supported actions and examples."
             exact_sidebar_width: None,
             divider_drag: None,
             pane_resize: None,
+            agents_overview_dock_drag: None,
+            agents_overview_dock_resize: None,
             passive_link_drag: None,
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,

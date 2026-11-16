@@ -259,7 +259,7 @@ impl App {
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
             .is_some();
         let agents_dock = (caller_inset.is_none() && !agents_overview_present)
-            .then(|| agents_overview_dock::layout(full_viewport))
+            .then(|| agents_overview_dock::layout(self, full_viewport))
             .flatten();
         let conversation_viewport = agents_dock
             .as_ref()
@@ -494,7 +494,7 @@ impl App {
                 if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
                     view.render_docked(dock.sidebar, frame.buffer);
                 }
-                dock.render_divider(frame.buffer, self.agents_overview.sidebar_focused);
+                dock.render_divider(frame.buffer, self);
                 if !dock.command_reference.is_empty() {
                     command_reference::render(
                         dock.command_reference,
@@ -596,7 +596,13 @@ impl App {
         let mut composer_gap = (!self.chat_widget.has_active_view()
             && !self.chat_widget.is_external_writer_view())
         .then(crate::bottom_pane::ComposerGap::default);
-        let prompt_footer = if self.pane_resize.is_some() {
+        let prompt_footer = if self.agents_overview_dock_resize.is_some() {
+            Some(crate::bottom_pane::TranscriptFooter {
+                text: agents_overview_dock::RESIZE_HINT.into(),
+                cursor_column: None,
+                is_interactive: true,
+            })
+        } else if self.pane_resize.is_some() {
             Some(crate::bottom_pane::TranscriptFooter {
                 text: side_pane::RESIZE_HINT.into(),
                 cursor_column: None,

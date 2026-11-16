@@ -674,6 +674,8 @@ pub(crate) struct App {
     exact_sidebar_width: Option<(u16, u16)>,
     divider_drag: Option<side_pane::DividerDrag>,
     pane_resize: Option<side_pane::PaneResize>,
+    agents_overview_dock_drag: Option<agents_overview_dock::DockDividerDrag>,
+    agents_overview_dock_resize: Option<agents_overview_dock::DockResizeMode>,
     passive_link_drag: Option<(ThreadId, Rect)>,
     abandoned_side_threads: HashSet<ThreadId>,
     active_thread_id: Option<ThreadId>,
@@ -893,6 +895,9 @@ impl App {
         if self.handle_pane_resize(tui, &event).await {
             return Ok(AppRunControl::Continue);
         }
+        if self.handle_agents_overview_dock_resize(tui, &event).await? {
+            return Ok(AppRunControl::Continue);
+        }
         if let TuiEvent::Mouse(mouse) = &event
             && (self.key_chord_matcher.is_pending() || self.chat_widget.quick_dial_menu_open())
             && !matches!(
@@ -1084,6 +1089,9 @@ impl App {
             event
         };
 
+        if self.handle_agents_overview_dock_resize(tui, &event).await? {
+            return Ok(AppRunControl::Continue);
+        }
         if let TuiEvent::Key(key) = &event
             && self.handle_side_focus_key(tui, app_server, *key).await
         {
@@ -1144,7 +1152,7 @@ impl App {
         }
         if let TuiEvent::Mouse(mouse) = &event
             && mouse.kind == MouseEventKind::Down(MouseButton::Left)
-            && let Some(dock) = agents_overview_dock::layout(tui.terminal.viewport_area)
+            && let Some(dock) = agents_overview_dock::layout(self, tui.terminal.viewport_area)
         {
             let position = (mouse.column, mouse.row).into();
             if dock.sidebar.contains(position) && !self.agents_overview.sidebar_focused {
@@ -1473,7 +1481,10 @@ impl App {
             .is_some();
         let dock = (!dashboard_visible)
             .then(|| {
-                agents_overview_dock::layout(Rect::new(0, 0, screen_size.width, screen_size.height))
+                agents_overview_dock::layout(
+                    self,
+                    Rect::new(0, 0, screen_size.width, screen_size.height),
+                )
             })
             .flatten();
         let conversation_width = dock
@@ -1512,7 +1523,7 @@ impl App {
                 let dock = if dashboard_visible {
                     None
                 } else {
-                    agents_overview_dock::layout(frame_area)
+                    agents_overview_dock::layout(self, frame_area)
                 };
                 let conversation_area = dock.as_ref().map_or(frame_area, |dock| dock.conversation);
                 rendered_area = conversation_area;
@@ -1521,7 +1532,7 @@ impl App {
                     if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
                         view.render_docked(dock.sidebar, frame.buffer);
                     }
-                    dock.render_divider(frame.buffer, self.agents_overview.sidebar_focused);
+                    dock.render_divider(frame.buffer, self);
                     if !dock.command_reference.is_empty() {
                         command_reference::render(
                             dock.command_reference,
@@ -1557,7 +1568,7 @@ impl App {
             MouseEventKind::ScrollDown => 3_isize,
             _ => return false,
         };
-        let Some(dock) = agents_overview_dock::layout(tui.terminal.viewport_area) else {
+        let Some(dock) = agents_overview_dock::layout(self, tui.terminal.viewport_area) else {
             return false;
         };
         if !dock

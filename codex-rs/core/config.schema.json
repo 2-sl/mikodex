@@ -5224,6 +5224,14 @@
           "default": "project",
           "description": "Last selected grouping in Agent Command Center."
         },
+        "agents_overview_width_percent": {
+          "default": null,
+          "description": "Preferred Agent Command Center rail width as a percentage of the terminal. Defaults to one fifth, bounded by the available conversation width.",
+          "format": "uint8",
+          "maximum": 99.0,
+          "minimum": 1.0,
+          "type": "integer"
+        },
         "alternate_screen": {
           "allOf": [
             {
@@ -5247,6 +5255,14 @@
           "default": false,
           "description": "Summarize tool calls and collapse completed turns in the full-screen transcript. Defaults to `false`.",
           "type": "boolean"
+        },
+        "command_reference_width_percent": {
+          "default": null,
+          "description": "Preferred command reference rail width as a percentage of the terminal. Defaults to one fifth, bounded by the available conversation width.",
+          "format": "uint8",
+          "maximum": 99.0,
+          "minimum": 1.0,
+          "type": "integer"
         },
         "copy_on_select": {
           "allOf": [
