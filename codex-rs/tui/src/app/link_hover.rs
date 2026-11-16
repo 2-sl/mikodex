@@ -12,6 +12,8 @@ use crossterm::event::MouseEventKind::ScrollUp;
 use crossterm::event::MouseEventKind::Up;
 
 use super::App;
+use super::App;
+use super::agents_overview_dock;
 use super::side_companion::SideCompanion;
 use crate::app_event::AppEvent;
 use crate::terminal_hyperlinks::ReaderLink;
@@ -161,7 +163,17 @@ impl App {
         {
             PointerShape::Default
         } else if self.conversation_focus_available(tui)
-            && (self.divider_drag.is_some()
+            && (self.agents_overview_dock_drag.is_some()
+                || tui.link_hover.mouse.is_some_and(|mouse| {
+                    agents_overview_dock::layout(self, tui.terminal.last_known_screen_size.into())
+                        .is_some_and(|dock| {
+                            let point = (mouse.column, mouse.row).into();
+                            dock.divider.contains(point)
+                                || (!dock.command_divider.is_empty()
+                                    && dock.command_divider.contains(point))
+                        })
+                })
+                || self.divider_drag.is_some()
                 || tui.link_hover.mouse.is_some_and(|mouse| {
                     self.conversation_frame
                         .divider_area()
