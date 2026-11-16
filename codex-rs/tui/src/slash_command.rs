@@ -72,7 +72,9 @@ pub enum SlashCommand {
     Apps,
     Plugins,
     Logout,
+    #[strum(to_string = "quit", serialize = "벼ㅑㅅ")]
     Quit,
+    #[strum(to_string = "exit", serialize = "ㄷ턋")]
     Exit,
     Feedback,
     Rollout,
