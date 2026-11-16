@@ -7,7 +7,6 @@ fn call(id: &str, title: &str) -> McpToolCallCell {
     McpToolCallCell::new(
         id.to_string(),
         McpInvocation {
-            environment_id: None,
             server: "cua_repl".to_string(),
             tool: "js".to_string(),
             arguments: Some(json!({"title": title, "code": "await cua.getState()"})),

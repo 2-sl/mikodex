@@ -2,13 +2,13 @@
 
 use super::App;
 use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
+use super::agents_overview_dock;
 use super::side_companion::SideCompanion;
 use super::sidebar;
 use super::sidebar::PaneFocus;
 use super::sidebar::SidebarContent;
 use super::sidebar::SidebarLayout;
-use crate::bottom_pane::FooterLayout;
-use crate::bottom_pane::StatusLineFocus;
+use crate::bottom_pane::render_unfocused_status;
 use crate::custom_terminal::Frame;
 use crate::legacy_core::config::edit::ConfigEdit;
 use crate::legacy_core::config::edit::ConfigEditsBuilder;
@@ -94,9 +94,10 @@ pub(super) struct SidePaneLayout {
 
 /// The settled chat split used to check pointer events against the last painted frame.
 pub(super) fn layout(app: &App, tui: &Tui, area: Rect) -> Option<SidePaneLayout> {
+    let area = agents_overview_dock::conversation_viewport(app, area);
     match visible_split(app, tui, area)? {
         SidebarLayout::Chat(panes) => Some(panes),
-        SidebarLayout::Panel { .. } => None,
+        SidebarLayout::Chooser { .. } => None,
     }
 }
 
@@ -118,7 +119,7 @@ pub(super) fn split_layout(app: &App, tui: &Tui, area: Rect) -> Option<SidebarLa
     sidebar::content_layout(
         app,
         content,
-        app.panel_focus().unwrap_or(PaneFocus::Main),
+        app.chooser_focus().unwrap_or(PaneFocus::Main),
         sidebar_areas(app, tui, area, /*fraction*/ 1.0)?,
     )
 }
@@ -201,10 +202,8 @@ impl App {
     }
 
     pub(super) fn begin_pane_resize(&mut self, tui: &mut Tui) -> Result<()> {
-        let screen = super::agents_overview_dock::conversation_viewport(
-            self,
-            tui.prepare_draw_size()?.into(),
-        );
+        let screen =
+            agents_overview_dock::conversation_viewport(self, tui.prepare_draw_size()?.into());
         if split_layout(self, tui, screen).is_some() {
             self.divider_drag = None;
             self.passive_link_drag = None;
@@ -228,7 +227,7 @@ impl App {
             _ => tui.terminal.last_known_screen_size,
         }
         .into();
-        let screen = super::agents_overview_dock::conversation_viewport(self, screen);
+        let screen = agents_overview_dock::conversation_viewport(self, screen);
         let divider = visible_split(self, tui, screen).and_then(|layout| layout.divider_area());
         let Some(divider) = divider.filter(|_| {
             !matches!(event, TuiEvent::FocusLost)
@@ -286,10 +285,8 @@ impl App {
         tui: &mut Tui,
         focused_percent: u8,
     ) -> Result<()> {
-        let screen = super::agents_overview_dock::conversation_viewport(
-            self,
-            tui.prepare_draw_size()?.into(),
-        );
+        let screen =
+            agents_overview_dock::conversation_viewport(self, tui.prepare_draw_size()?.into());
         if split_layout(self, tui, screen).is_none() {
             return Ok(());
         }
@@ -313,7 +310,7 @@ impl App {
     }
 
     pub(super) fn can_resize_sidebar(&self, tui: &Tui) -> bool {
-        let screen = super::agents_overview_dock::conversation_viewport(
+        let screen = agents_overview_dock::conversation_viewport(
             self,
             tui.terminal.last_known_screen_size.into(),
         );
@@ -321,13 +318,13 @@ impl App {
     }
 
     pub(super) fn divider_is_settled(&self, tui: &Tui, screen: Rect) -> bool {
-        let screen = super::agents_overview_dock::conversation_viewport(self, screen);
+        let screen = agents_overview_dock::conversation_viewport(self, screen);
         self.conversation_frame.sidebar.is_some()
             && visible_split(self, tui, screen) == self.conversation_frame.sidebar
     }
 
     pub(super) fn can_nudge_side_width(&self, tui: &Tui) -> bool {
-        let screen = super::agents_overview_dock::conversation_viewport(
+        let screen = agents_overview_dock::conversation_viewport(
             self,
             tui.terminal.last_known_screen_size.into(),
         );
@@ -336,10 +333,8 @@ impl App {
 
     pub(super) async fn nudge_side_width(&mut self, tui: &mut Tui, percent: i32) -> Result<()> {
         if self.sidebar_has_focus() {
-            let screen = super::agents_overview_dock::conversation_viewport(
-                self,
-                tui.prepare_draw_size()?.into(),
-            );
+            let screen =
+                agents_overview_dock::conversation_viewport(self, tui.prepare_draw_size()?.into());
             if let Some(divider) =
                 visible_split(self, tui, screen).and_then(|layout| layout.divider_area())
             {
@@ -403,13 +398,12 @@ impl App {
                 else {
                     return Ok(false);
                 };
-                let screen = tui.prepare_draw_size()?.into();
-                if !self.divider_is_settled(tui, screen) {
+                let full_screen = tui.prepare_draw_size()?.into();
+                if !self.divider_is_settled(tui, full_screen) {
                     // The painted divider still owns this press while it moves.
                     return Ok(true);
                 }
-                let screen =
-                    super::agents_overview_dock::conversation_viewport(self, screen);
+                let screen = agents_overview_dock::conversation_viewport(self, full_screen);
                 let Some(target) = self.sidebar_resize_target() else {
                     return Ok(false);
                 };
@@ -430,7 +424,7 @@ impl App {
                 let Some(mut drag) = self.divider_drag.take() else {
                     return Ok(false);
                 };
-                let screen = super::agents_overview_dock::conversation_viewport(
+                let screen = agents_overview_dock::conversation_viewport(
                     self,
                     tui.prepare_draw_size()?.into(),
                 );
@@ -452,13 +446,6 @@ impl App {
     }
 }
 
-/// Allow up to two-thirds of the pane, or eight rows on short panes when they fit.
-pub(super) fn composer_height_limit(pane_height: u16) -> u16 {
-    ((u32::from(pane_height) * 2 / 3) as u16)
-        .max(8)
-        .min(pane_height)
-}
-
 impl SidePaneLayout {
     /// Paint the divider, retained transcript and draft without claiming the terminal cursor.
     pub(super) fn paint_companion(
@@ -471,20 +458,11 @@ impl SidePaneLayout {
         companion.flush_answer();
         let area = self.passive;
         // Keep the live composer's bottom hint row blank on the inactive side.
-        let hint_rows = 1;
-        let composer_height = area.height.saturating_sub(hint_rows).min(3);
-        let available = area.height - composer_height;
-        let footer = FooterLayout::new(
-            Some(composer_height_limit(area.height)),
-            hint_rows,
-            /*priority_hint_rows*/ hint_rows,
-        );
-        let status = companion.display.status_line.as_ref();
-        let wanted_status = status.map_or(0, |status| {
-            status.height(footer.status_bounds(area.width, available))
-        });
-        let footer = footer.allocate(available, wanted_status);
-        let above = available - footer.height();
+        let available = area.height.saturating_sub(1);
+        let composer_height = available.min(3);
+        let status_height =
+            u16::from(companion.display.status.is_some() && available > composer_height);
+        let above = available - composer_height - status_height;
         let mut transcript = Rect {
             height: above.saturating_sub(1),
             ..area
@@ -535,11 +513,15 @@ impl SidePaneLayout {
                 &mut Default::default(),
             );
         }
-        if let Some(status) = status {
-            status.render(
-                footer.status_area(area),
+        if let Some(status) = &companion.display.status {
+            render_unfocused_status(
+                status.clone(),
+                Rect {
+                    y: composer.bottom(),
+                    height: status_height,
+                    ..area
+                },
                 frame.buffer,
-                StatusLineFocus::Unfocused,
             );
         }
     }

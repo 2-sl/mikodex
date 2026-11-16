@@ -63,7 +63,7 @@ impl ModelCatalog {
         self.config_manager.load_config_layers(cwd).await
     }
 
-    /// Reloads catalog configuration on the next read.
+    /// Marks catalog configuration stale after an account transition.
     pub(crate) async fn invalidate(&self) {
         self.state.lock().await.needs_reload = true;
     }

@@ -1053,7 +1053,6 @@ async fn auto_declined_mcp_elicitations_do_not_leave_startup_quarantine_armed() 
             let request = ServerRequest::McpServerElicitationRequest {
                 request_id: AppServerRequestId::Integer(10),
                 params: McpServerElicitationRequestParams {
-                    environment_id: None,
                     thread_id: thread_id.to_string(),
                     turn_id: Some("turn-auth".to_string()),
                     server_name: "payments".to_string(),
@@ -1545,7 +1544,6 @@ async fn startup_thread_started_discards_another_threads_buffered_events() {
     let other_thread_id = ThreadId::new();
     app.enqueue_primary_thread_notification(ServerNotification::McpServerStatusUpdated(
         McpServerStatusUpdatedNotification {
-            environment_id: None,
             thread_id: Some(other_thread_id.to_string()),
             name: "other".to_string(),
             status: McpServerStartupState::Starting,
@@ -1760,7 +1758,6 @@ async fn send_failed_mcp_startup(
         app_server,
         codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
-                environment_id: None,
                 thread_id: Some(thread_id.to_string()),
                 name: "fixture".to_string(),
                 status: McpServerStartupState::Failed,

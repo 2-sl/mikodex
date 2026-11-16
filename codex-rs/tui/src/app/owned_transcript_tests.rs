@@ -35,9 +35,6 @@ pub(in crate::app) fn user_cell(message: &str) -> Arc<dyn HistoryCell> {
 
 pub(in crate::app) fn attach_thread(app: &mut App, thread_id: ThreadId) {
     app.chat_widget.handle_thread_session(ThreadSessionState {
-        read_only_history: false,
-        thread_settings_confirmed: true,
-        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -124,7 +121,7 @@ async fn external_writer_escape_returns_to_command_center_without_editing() -> R
             (false, false, String::new()),
         );
         if offline {
-            assert!(app.agents_overview.active_refresh.is_none());
+            assert!(app.agents_overview.request_id.is_none());
             assert!(app.reconnect.presentation == reconnect::ReconnectPresentation::Overview);
             insta::assert_snapshot!(
                 "external_writer_escape_offline_command_center",

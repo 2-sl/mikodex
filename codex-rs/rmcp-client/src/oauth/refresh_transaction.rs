@@ -249,7 +249,6 @@ impl OAuthPersistor {
         let result = self.inner.credential_store.save_with_refresh_telemetry(
             keyring_store,
             &self.inner.server_name,
-            Some(&latest),
             &refreshed,
         );
         if let Err(error) = result {
@@ -391,7 +390,7 @@ fn refreshed_tokens(
         token_response.set_scopes(previous.token_response.0.scopes().cloned());
     }
     StoredOAuthTokens {
-        server_name: inner.refreshed_server_name(Some(previous)),
+        server_name: inner.server_name.clone(),
         url: inner.url.clone(),
         issuer: previous.issuer.clone(),
         client_id: previous.client_id.clone(),

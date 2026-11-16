@@ -9,7 +9,6 @@ mod waits;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::Instant;
 
 use codex_code_mode_protocol::CellId;
@@ -26,7 +25,6 @@ use codex_protocol::protocol::W3cTraceContext;
 use futures::Stream;
 use futures::StreamExt;
 use tokio::sync::mpsc;
-use tokio::time::MissedTickBehavior;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Request;
 use tonic::Response;
@@ -39,21 +37,6 @@ use self::waits::WaitRegistration;
 
 type GrpcStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 type GrpcFuture<'a, T> = Pin<Box<dyn Future<Output = Result<Response<T>, Status>> + Send + 'a>>;
-
-fn with_heartbeats<T: Send + 'static>(
-    stream: GrpcStream<T>,
-    interval_s: u32,
-    heartbeat: impl Fn() -> T + Send + 'static,
-) -> GrpcStream<T> {
-    if interval_s == 0 {
-        return stream;
-    }
-    let duration = Duration::from_secs(u64::from(interval_s));
-    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + duration, duration);
-    interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let stream = tokio_stream::StreamExt::timeout_repeating(stream, interval);
-    Box::pin(stream.map(move |item| item.unwrap_or_else(|_| Ok(heartbeat()))))
-}
 
 fn trace_context_from_request<T>(request: &Request<T>) -> Option<W3cTraceContext> {
     request
@@ -119,23 +102,13 @@ impl GrpcCodeModeHost {
             }
             Some(proto::OutputTruncation::Server) => CodeModeOutputTruncation::Server,
         };
-        let events = self.state.open_session(
+        Ok(Response::new(self.state.open_session(
             CodeModeSessionOptions {
                 cell_execution_limits: limits,
                 output_truncation,
-                ..Default::default()
             },
             max_pending_delegate_calls,
-        )?;
-        Ok(Response::new(with_heartbeats(
-            events,
-            request.heartbeat_interval_s,
-            || proto::SessionEvent {
-                event: Some(proto::session_event::Event::Heartbeat(
-                    proto::StreamHeartbeat {},
-                )),
-            },
-        )))
+        )?))
     }
 
     #[tracing::instrument(
@@ -162,17 +135,7 @@ impl GrpcCodeModeHost {
     ) -> Result<Response<GrpcStream<proto::ToolCall>>, Status> {
         let _permit = self.state.request_permit()?;
         let session = self.state.session(&request.session_id)?;
-        let calls = session.subscribe(request.tool_names)?;
-        let session_id = session.id;
-        Ok(Response::new(with_heartbeats(
-            calls,
-            request.heartbeat_interval_s,
-            move || proto::ToolCall {
-                session_id: session_id.to_string(),
-                heartbeat: Some(proto::StreamHeartbeat {}),
-                ..Default::default()
-            },
-        )))
+        Ok(Response::new(session.subscribe(request.tool_names)?))
     }
 
     async fn complete_tool_request(

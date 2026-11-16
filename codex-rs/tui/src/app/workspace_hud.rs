@@ -25,9 +25,9 @@ impl App {
             return pending.guide(&self.keymap.chords, |_| true);
         }
         let side = self.sidebar_has_focus();
-        let can_switch = self.panel_focus().is_some() || self.switchable_side_child().is_some();
-        let conversation = super::agents_overview_dock::conversation_viewport(self, area);
-        let can_size = super::side_pane::split_layout(self, tui, conversation).is_some();
+        let can_switch = self.chooser_focus().is_some() || self.switchable_side_child().is_some();
+        let viewport = super::agents_overview_dock::conversation_viewport(self, area);
+        let can_size = super::side_pane::split_layout(self, tui, viewport).is_some();
         let can_resize = can_size && side && self.zoomed_thread.is_none();
         let mut groups = [
             ("Panes", Vec::new()),
@@ -67,7 +67,6 @@ impl App {
                 "open_presets" => (2, "Presets ›"),
                 "find_transcript" => (2, "Find text"),
                 "select_transcript" => (2, "Select transcript"),
-                "mark_markdown" => (2, "Mark table cell"),
                 "focus_conversation_composer" => (2, "Composer"),
                 other => (2, other),
             };

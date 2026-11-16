@@ -63,7 +63,6 @@ const FOCUSED_SIDE_PANE: u32 = 1 << 26;
 const SIDEBAR_CHOOSER: u32 = 1 << 27;
 const SIDEBAR_RESIZE: u32 = 1 << 28;
 const FOCUSED_SIDEBAR: u32 = 1 << 29;
-const TRANSCRIPT_SELECT: u32 = 1 << 30;
 
 const TRANSCRIPT_BROWSING: u32 = 1 << 14;
 
@@ -105,11 +104,6 @@ impl KeymapContextSet {
                 | context_bit(KeymapContext::Global)
                 | TRANSCRIPT_ACTIONS,
         )
-    }
-
-    /// Enable Markdown marking while the transcript owns the selection caret.
-    pub(crate) const fn with_transcript_select(self) -> Self {
-        Self(self.0 | TRANSCRIPT_SELECT)
     }
 
     /// Warning pages admit navigation plus their own toggle and copy.
@@ -211,9 +205,6 @@ impl KeymapContextSet {
 
     /// Whether this input path can dispatch the action, including focus-specific exclusions.
     pub(crate) fn contains_action(self, action: KeymapActionId) -> bool {
-        if action.context == KeymapContext::Pager && action.action == "mark_markdown" {
-            return self.0 & TRANSCRIPT_SELECT != 0;
-        }
         if action.context == KeymapContext::Global && action.action == "change_host" {
             return self.0 & BACKEND_CYCLING != 0;
         }
@@ -313,18 +304,15 @@ impl RuntimeChordBinding {
 
     /// Transcript selection remains active beside pager actions on native transcript surfaces.
     fn overlaps(&self, action: KeymapActionId) -> bool {
-        let transcript = KeymapContextSet::transcript().with_transcript_select();
-        let selection_action = |action: KeymapActionId| {
-            matches!(
+        self.action.overlaps(action)
+            || (matches!(
+                (self.action.context, self.action.action),
+                (KeymapContext::Global, "select_transcript")
+            ) || matches!(
                 (action.context, action.action),
                 (KeymapContext::Global, "select_transcript")
-                    | (KeymapContext::Pager, "mark_markdown")
-            )
-        };
-        self.action.overlaps(action)
-            || (selection_action(self.action) || selection_action(action))
-                && transcript.contains_action(self.action)
-                && transcript.contains_action(action)
+            )) && KeymapContextSet::transcript().contains_action(self.action)
+                && KeymapContextSet::transcript().contains_action(action)
             || self.is_leader()
                 && [
                     KeymapContextSet::browsing(),

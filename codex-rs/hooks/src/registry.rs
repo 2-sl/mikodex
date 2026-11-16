@@ -33,7 +33,6 @@ use codex_config::ConfigLayerStack;
 use codex_plugin::ExecutorPluginHookSource;
 use codex_plugin::PluginHookSource;
 use codex_protocol::ThreadId;
-use codex_protocol::protocol::HookCompletedEvent;
 use codex_protocol::protocol::HookEventName;
 use codex_protocol::protocol::HookExecutionMode;
 use codex_protocol::shell_environment::scrub_non_inheritable_env_vars;
@@ -381,12 +380,8 @@ impl Hooks {
     pub async fn run_model_request(
         &self,
         request: crate::ModelRequestHookInput,
-        on_completed: impl FnMut(&HookCompletedEvent) + Send,
-    ) -> (
-        Vec<codex_protocol::protocol::HookCompletedEvent>,
-        crate::ModelRequestHookOutcome,
-    ) {
-        crate::events::model_request::run(&self.engine, request, on_completed).await
+    ) -> Vec<codex_protocol::protocol::HookCompletedEvent> {
+        crate::events::model_request::run(&self.engine, request).await
     }
 }
 

@@ -11,9 +11,8 @@ use tracing_subscriber::EnvFilter;
 #[test]
 fn login_default_filter_records_sanitized_storage_fallback() -> anyhow::Result<()> {
     let home = tempdir()?;
-    let secrets_path = home.path().join("secrets").join("codex_auth.age");
-    // Reading a directory fails before accessing the real keyring on every platform.
-    std::fs::create_dir_all(&secrets_path)?;
+    // Fail before accessing the real keyring, then allow the plaintext fallback to succeed.
+    std::fs::write(home.path().join("secrets"), "not a directory")?;
     let log_path = home.path().join("login.log");
     let subscriber = tracing_subscriber::fmt()
         .without_time()
@@ -37,7 +36,7 @@ fn login_default_filter_records_sanitized_storage_fallback() -> anyhow::Result<(
         failure.contains("failed to save auth to keyring, falling back to file storage"),
         "{logs}"
     );
-    assert!(failure.contains("failed to read secrets file"), "{logs}");
+    assert!(failure.contains("failed to create secrets dir"), "{logs}");
     assert!(
         logs.contains("credential storage file fallback completed"),
         "{logs}"
@@ -47,19 +46,15 @@ fn login_default_filter_records_sanitized_storage_fallback() -> anyhow::Result<(
     assert!(!logs.contains("private-api-key"));
     let completion = logs.lines().last().unwrap();
     assert!(!completion.contains(home.path().to_str().unwrap()));
-    let cause = std::fs::read(&secrets_path).unwrap_err().to_string();
-    // Windows reports access denied for directory reads; Unix reports a directory error.
+    let cause = std::fs::create_dir_all(home.path().join("secrets"))
+        .unwrap_err()
+        .to_string();
     insta::assert_snapshot!(
-        logs.replace(secrets_path.to_str().unwrap(), "[SECRETS_PATH]")
-            .replace(&cause, "[OS_ERROR]")
-            .replace(
-                "secure_error=\"access_denied\"",
-                "secure_error=\"[OS_ERROR_CATEGORY]\""
-            )
-            .replace(
-                "secure_error=\"other\"",
-                "secure_error=\"[OS_ERROR_CATEGORY]\""
-            )
+        logs.replace(
+            home.path().join("secrets").to_str().unwrap(),
+            "[SECRETS_PATH]"
+        )
+        .replace(&cause, "[OS_ERROR]")
     );
     Ok(())
 }
@@ -67,9 +62,11 @@ fn login_default_filter_records_sanitized_storage_fallback() -> anyhow::Result<(
 #[test]
 fn login_storage_error_displays_context_and_cause() -> anyhow::Result<()> {
     let home = tempdir()?;
-    let secrets_path = home.path().join("secrets").join("codex_auth.age");
-    std::fs::create_dir_all(&secrets_path)?;
-    let cause = std::fs::read(&secrets_path).unwrap_err().to_string();
+    let secrets_path = home.path().join("secrets");
+    std::fs::write(&secrets_path, "not a directory")?;
+    let cause = std::fs::create_dir_all(&secrets_path)
+        .unwrap_err()
+        .to_string();
     let error = login_with_api_key(
         home.path(),
         "private-api-key",

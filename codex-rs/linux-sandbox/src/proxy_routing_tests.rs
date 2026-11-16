@@ -11,8 +11,6 @@ use super::parse_loopback_proxy_endpoint;
 use super::plan_proxy_routes;
 use super::proxy_bidirectional;
 use super::rewrite_proxy_env_value;
-use crate::seccomp::ProxyRouting;
-use async_lock::Semaphore;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::io::Read;
@@ -24,6 +22,7 @@ use std::net::TcpListener;
 use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 
 #[tokio::test]
 async fn a_reset_on_either_side_releases_the_bridge_permit() {
@@ -42,7 +41,7 @@ async fn a_reset_on_either_side_releases_the_bridge_permit() {
             (idle_socket, reset_socket)
         };
         let (done, result) = tokio::sync::oneshot::channel();
-        slots.spawn(ProxyRouting::Explicit, move || {
+        slots.spawn(move || {
             let _ = done.send(proxy_bidirectional(upstream, client));
         });
         rustix::net::sockopt::set_socket_linger(&reset_peer, Some(Duration::ZERO)).unwrap();
@@ -50,7 +49,8 @@ async fn a_reset_on_either_side_releases_the_bridge_permit() {
 
         let _permit = tokio::time::timeout(Duration::from_secs(5), slots.0.acquire())
             .await
-            .expect("bridge must release its permit while the other peer is still open");
+            .expect("bridge must release its permit while the other peer is still open")
+            .unwrap();
         assert!(result.await.unwrap().is_err());
         drop(idle_peer);
     }

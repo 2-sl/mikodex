@@ -56,20 +56,20 @@ impl ConversationFrame {
         }
     }
 
-    pub(super) fn panel_covers_transcript(&self) -> bool {
-        matches!(self.sidebar, Some(sidebar::SidebarLayout::Panel { main, .. }) if main.is_empty())
+    pub(super) fn chooser_covers_transcript(&self) -> bool {
+        matches!(self.sidebar, Some(sidebar::SidebarLayout::Chooser { main, .. }) if main.is_empty())
     }
 
-    pub(super) fn panel_area(&self) -> Option<Rect> {
+    pub(super) fn chooser_area(&self) -> Option<Rect> {
         match self.sidebar {
-            Some(sidebar::SidebarLayout::Panel { sidebar, .. }) => Some(sidebar),
+            Some(sidebar::SidebarLayout::Chooser { sidebar, .. }) => Some(sidebar),
             _ => None,
         }
     }
 
     pub(super) fn sidebar_tab_strip(&self) -> Option<Rect> {
         self.chat_strip.or_else(|| {
-            self.panel_area()
+            self.chooser_area()
                 .map(|area| side_pane::tab_and_body(area)[0])
         })
     }
@@ -253,12 +253,6 @@ impl App {
             self.conversation_frame = ConversationFrame::default();
         }
         let caller_inset = self.conversation_frame.inset;
-        let parent = self.sidebar_parent();
-        if !self.conversation_focus_available(tui)
-            && let Some(pane) = self.sidebars.get_mut(&parent)
-        {
-            pane.close = None;
-        }
         let full_viewport = Rect::new(0, 0, screen_size.width, screen_size.height);
         let agents_overview_present = self
             .chat_widget
@@ -276,6 +270,12 @@ impl App {
             .map(|_| self.chat_widget.command_reference_items())
             .unwrap_or_default();
         let command_scroll = self.agents_overview.command_reference_scroll;
+        let parent = self.sidebar_parent();
+        if !self.conversation_focus_available(tui)
+            && let Some(pane) = self.sidebars.get_mut(&parent)
+        {
+            pane.close = None;
+        }
         let layout = sidebar::paint_layout(self, tui, conversation_viewport);
         let displayed = self.current_displayed_thread_id();
         let chat = match displayed.and_then(|id| self.side_pair_key(id)) {
@@ -287,7 +287,7 @@ impl App {
             Some(sidebar::SidebarLayout::Chat(panes)) => {
                 (Some(panes.focused), Some(panes.tab_strip))
             }
-            Some(sidebar::SidebarLayout::Panel { main, .. }) => {
+            Some(sidebar::SidebarLayout::Chooser { main, .. }) => {
                 ((!main.is_empty()).then_some(*main), None)
             }
             None if chat == TabState::Active
@@ -308,7 +308,7 @@ impl App {
         let divider = self.conversation_frame.divider_area();
         if self.divider_drag.is_some_and(|drag| {
             divider.is_none()
-                || !drag.matches(conversation_viewport, self)
+                || !drag.matches(screen_size.into(), self)
                 || !self.conversation_focus_available(tui)
         }) {
             self.divider_drag = None;
@@ -348,11 +348,6 @@ impl App {
                 }
             }
             painted = self.paint_conversation(frame, &prepared);
-            let label_style = parent
-                .and_then(|id| self.backend_registry.owner(id))
-                .or(self.app_server_backend_id)
-                .map(|owner| self.backend_registry.thread_label_style(owner))
-                .unwrap_or_default();
             match &self.conversation_frame.sidebar {
                 Some(sidebar::SidebarLayout::Chat(panes)) => {
                     if let Some(companion) = self.side_companions.get_mut(&panes.passive_thread) {
@@ -365,7 +360,7 @@ impl App {
                         );
                     }
                 }
-                Some(sidebar::SidebarLayout::Panel { sidebar, focus, .. }) => {
+                Some(sidebar::SidebarLayout::Chooser { sidebar, focus, .. }) => {
                     let focused = *focus == PaneFocus::Sidebar;
                     let resize_hint = self.pane_resize.map(|_| side_pane::RESIZE_HINT);
                     if let Some(creation) = self.sidebar().and_then(|pane| pane.creation.as_ref()) {
@@ -406,10 +401,6 @@ impl App {
                             .wrap(ratatui::widgets::Wrap { trim: false })
                             .render(body, frame.buffer);
                     } else if let Some(pane) = self.sidebar() {
-                        let tabs = crate::sidebar_chooser::ChatTabs {
-                            label_style,
-                            ..pane.chat_tabs()
-                        };
                         let footer = if let Some(hint) = resize_hint {
                             let row = crate::sidebar_chooser::body_row(*sidebar, sidebar.y);
                             crate::sidebar_chooser::resize_hint(hint, row.width)
@@ -418,7 +409,7 @@ impl App {
                                 &self.keymap,
                                 *sidebar,
                                 pane.choice,
-                                tabs,
+                                pane.chat_tabs(),
                                 self.chat_widget.side_chat_creation_state(),
                             )
                             .0
@@ -429,7 +420,7 @@ impl App {
                             *sidebar,
                             frame.buffer,
                             footer,
-                            tabs,
+                            pane.chat_tabs(),
                             pane.choice,
                             &crate::sidebar_chooser::SidebarStyle {
                                 new_chat: self.chat_widget.side_chat_creation_state(),
@@ -449,7 +440,7 @@ impl App {
                             *sidebar,
                             chooser,
                             TabState::Absent,
-                            tabs,
+                            pane.chat_tabs(),
                             hovered_target,
                             frame.buffer,
                         );
@@ -470,10 +461,7 @@ impl App {
                     strip,
                     TabState::Absent,
                     chat,
-                    crate::sidebar_chooser::ChatTabs {
-                        label_style,
-                        ..pane.chat_tabs()
-                    },
+                    pane.chat_tabs(),
                     hovered_target,
                     frame.buffer,
                 );
@@ -487,7 +475,7 @@ impl App {
                 let viewport = frame.area();
                 let column = self
                     .conversation_frame
-                    .panel_area()
+                    .chooser_area()
                     .or(strip)
                     .unwrap_or(viewport);
                 let area = Rect {
@@ -514,7 +502,7 @@ impl App {
                         &command_items,
                         command_scroll,
                     );
-            }
+                }
             }
             self.paint_centered_dialog(frame);
         })?;
@@ -606,7 +594,7 @@ impl App {
             None => (None, None),
         };
         let mut composer_gap = (!self.chat_widget.has_active_view()
-            && !self.chat_widget.is_read_only_view())
+            && !self.chat_widget.is_external_writer_view())
         .then(crate::bottom_pane::ComposerGap::default);
         let prompt_footer = if self.pane_resize.is_some() {
             Some(crate::bottom_pane::TranscriptFooter {
@@ -625,10 +613,13 @@ impl App {
         // Painting those rows tells us whether newer activity is still hidden,
         // which can change the footer hint and the composer's measured height.
         let footer = view.footer_with_navigation(footer_width, motion, latest_navigation);
-        let max_composer_height = side_pane::composer_height_limit(area.height);
+        // Allow up to two-thirds of the pane, or eight rows on short panes when they fit.
+        let max_composer_height = ((u32::from(area.height) * 2 / 3) as u16)
+            .max(8)
+            .min(area.height);
         let unfocused = matches!(
             self.conversation_frame.sidebar,
-            Some(sidebar::SidebarLayout::Panel {
+            Some(sidebar::SidebarLayout::Chooser {
                 focus: PaneFocus::Sidebar,
                 ..
             })
@@ -717,7 +708,6 @@ impl App {
             );
             needs_redraw = false;
         }
-        view.finish_collapse_layout(&self.transcript_cells);
         let background_tick = chat_widget
             .empty_state_animation
             .borrow_mut()
@@ -927,7 +917,7 @@ impl App {
             }
             if self
                 .conversation_frame
-                .panel_area()
+                .chooser_area()
                 .is_some_and(|area| area.contains((mouse.column, mouse.row).into()))
             {
                 return Ok(true);
@@ -1039,7 +1029,7 @@ impl App {
         // Search and selection still consume Escape first to dismiss their interaction.
         if let TuiEvent::Key(key) = event
             && !self.transcript_view.has_active_interaction()
-            && (self.chat_widget.is_read_only_view() || self.chat_widget.has_provider_error())
+            && (self.chat_widget.is_external_writer_view() || self.chat_widget.has_provider_error())
             && crate::key_hint::plain(KeyCode::Esc).is_press(*key)
         {
             return Ok(false);

@@ -23,7 +23,7 @@ use serde_json::Value;
 pub type RawEventSeq = u64;
 
 /// Current raw event envelope schema version.
-pub(crate) const RAW_TRACE_EVENT_SCHEMA_VERSION: u32 = 3;
+pub(crate) const RAW_TRACE_EVENT_SCHEMA_VERSION: u32 = 2;
 
 /// One append-only raw trace event.
 ///
@@ -47,16 +47,6 @@ pub struct RawTraceEvent {
 pub struct RawTraceEventContext {
     pub thread_id: Option<AgentThreadId>,
     pub codex_turn_id: Option<CodexTurnId>,
-}
-
-impl RawTraceEventContext {
-    /// Scopes an observation to a model or tool turn.
-    pub(crate) fn turn(thread_id: &str, codex_turn_id: &str) -> Self {
-        Self {
-            thread_id: Some(thread_id.to_owned()),
-            codex_turn_id: Some(codex_turn_id.to_owned()),
-        }
-    }
 }
 
 /// Runtime requester as observed at the raw tool boundary.
@@ -122,13 +112,7 @@ pub enum RawTraceEventPayload {
         codex_turn_id: CodexTurnId,
         model: String,
         provider_name: String,
-        /// Actual outgoing HTTP body or WebSocket message.
         request_payload: RawPayloadRef,
-        /// Core prompt before provider formatting.
-        prepared_prompt_payload: RawPayloadRef,
-        /// Full provider-formatted context only when the previous response was an untraced warmup.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        warmup_context_payload: Option<RawPayloadRef>,
     },
     InferenceCompleted {
         inference_call_id: InferenceCallId,
@@ -178,11 +162,6 @@ pub enum RawTraceEventPayload {
     StdinTargetResolved {
         tool_call_id: ToolCallId,
         exec_tool_call_id: ToolCallId,
-    },
-    /// Live Code Mode cell reached by a wait or terminate call.
-    CodeCellWaitTargetResolved {
-        tool_call_id: ToolCallId,
-        runtime_cell_id: String,
     },
     ToolCallRuntimeStarted {
         tool_call_id: ToolCallId,
@@ -288,7 +267,6 @@ impl RawTraceEventPayload {
             | RawTraceEventPayload::CodeCellStarted { .. }
             | RawTraceEventPayload::McpToolCallCorrelationAssigned { .. }
             | RawTraceEventPayload::StdinTargetResolved { .. }
-            | RawTraceEventPayload::CodeCellWaitTargetResolved { .. }
             | RawTraceEventPayload::AgentResultObserved {
                 carried_payload: None,
                 ..
@@ -301,15 +279,9 @@ impl RawTraceEventPayload {
                 metadata_payload, ..
             } => metadata_payload.iter().collect(),
             RawTraceEventPayload::InferenceStarted {
-                request_payload,
-                prepared_prompt_payload,
-                warmup_context_payload,
-                ..
-            } => [request_payload, prepared_prompt_payload]
-                .into_iter()
-                .chain(warmup_context_payload)
-                .collect(),
-            RawTraceEventPayload::InferenceCompleted {
+                request_payload, ..
+            }
+            | RawTraceEventPayload::InferenceCompleted {
                 response_payload: request_payload,
                 ..
             }

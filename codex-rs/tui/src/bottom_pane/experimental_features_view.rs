@@ -366,6 +366,13 @@ impl BottomPaneView for ExperimentalFeaturesView {
     }
 
     fn on_ctrl_c(&mut self) -> CancellationEvent {
+        // After an attempted save, cancellation must remain possible even if the
+        // server rejects retries immediately. Explicit accept retries dirty keys.
+        if !self.unconfirmed.is_empty() {
+            self.save_special_controls();
+        } else {
+            self.save_changes();
+        }
         self.complete = true;
         CancellationEvent::Handled
     }
@@ -450,7 +457,7 @@ fn experimental_popup_hint_line(keymap: &ListKeymap) -> Line<'static> {
     if let Some(cancel) = keymap.primary_hint(ListAction::Cancel) {
         spans.push(" · ".into());
         spans.extend(cancel.spans());
-        spans.push(" cancel".into());
+        spans.push(" save/close".into());
     }
     Line::from(spans)
 }

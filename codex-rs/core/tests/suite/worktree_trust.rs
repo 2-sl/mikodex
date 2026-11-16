@@ -5,9 +5,9 @@ use anyhow::Result;
 use codex_config::LoaderOverrides;
 use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
-use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::SandboxPolicy;
 use codex_utils_cargo_bin::cargo_bin;
 use core_test_support::responses;
 use core_test_support::skip_if_remote;
@@ -107,11 +107,13 @@ async fn forged_worktree_project_config_cannot_start_host_mcp() -> Result<()> {
             }
         );
         assert_eq!(
-            loaded.permissions.effective_permission_profile(),
+            loaded.permissions.legacy_sandbox_policy(&checkout),
             if registered {
-                PermissionProfile::Disabled
+                SandboxPolicy::DangerFullAccess
             } else {
-                PermissionProfile::read_only()
+                SandboxPolicy::ReadOnly {
+                    network_access: false,
+                }
             }
         );
 

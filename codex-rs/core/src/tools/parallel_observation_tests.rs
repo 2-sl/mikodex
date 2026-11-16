@@ -36,7 +36,6 @@ fn cancelled_dispatch_reports_zero_handler_work_even_without_tracing() {
         "turn",
         &call,
         &ToolCallSource::Direct,
-        Arc::new(ToolCallState::default()),
         Arc::new(extensions.build()),
     )
     .unwrap();

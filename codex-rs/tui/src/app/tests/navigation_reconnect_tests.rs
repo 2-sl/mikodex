@@ -132,6 +132,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
         app.agents_overview
             .last_messages
             .insert(selected, "Pre-disconnect answer".into());
+        app.agents_overview.initialized = overview_initialized;
         // This task was unarchived elsewhere while disconnected.
         app.agents_overview.removed_threads.insert(added);
         let mut view = app.agents_overview_view(
@@ -157,8 +158,8 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 .to_string()
         };
         let stale_request = Uuid::new_v4();
-        let refresh_owner = crate::backend_id::BackendId::new();
-        app.agents_overview.active_refresh = Some((stale_request, refresh_owner));
+        app.agents_overview.request_id = Some(stale_request);
+        app.agents_overview.refresh_pending = true;
         let refresh = tokio::spawn(std::future::pending::<()>());
         app.agents_overview.refresh_task = Some(refresh.abort_handle());
         let directory = tempfile::tempdir()?;
@@ -250,27 +251,10 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             Ok::<_, color_eyre::Report>(methods)
         });
         let mut session = AppServerSession::new(
-            refresh_owner,
+            crate::backend_id::BackendId::new(),
             crate::connect_remote_app_server(endpoint).await?,
             ThreadParamsMode::Embedded,
         );
-        app.app_server_backend_id = Some(session.backend_id());
-        app.backend_registry.connect(&session);
-        let parked = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
-        let parked_owner = parked.backend_id();
-        app.backend_registry.connect(&parked);
-        app.backend_registry.observe(session.backend_id(), added);
-
-        app.agents_overview.pending_refresh_backends = [session.backend_id()].into();
-        if overview_initialized {
-            app.agents_overview.initialized.insert(session.backend_id());
-        }
-        if let Some(thread_id) = previous_thread {
-            assert!(
-                app.backend_registry
-                    .observe(session.backend_id(), thread_id)
-            );
-        }
         assert!(
             session
                 .thread_loaded_list(ThreadLoadedListParams {
@@ -288,20 +272,17 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 "Waiting for active turns.".into(),
             );
         }
-        app.agents_overview.pending_usage = Some((ThreadId::new(), Uuid::new_v4()));
         app.handle_backend_event(&session, disconnected).await;
-        assert_eq!(app.agents_overview.pending_usage, None);
         assert!(app.reconnect.offline);
-        assert!(
-            app.backend_registry
-                .request_handle(session.backend_id())
-                .is_none()
-        );
-        assert!(app.backend_registry.request_handle(parked_owner).is_some());
         assert!(app.agents_overview.last_messages.is_empty());
         assert!(refresh.await.unwrap_err().is_cancelled());
-        assert_eq!(app.agents_overview.active_refresh, None);
-        assert!(app.agents_overview.pending_refresh_backends.is_empty());
+        assert_eq!(
+            (
+                app.agents_overview.request_id,
+                app.agents_overview.refresh_pending
+            ),
+            (None, false)
+        );
         app.apply_agents_overview_thread_refresh(
             &session,
             stale_request,
@@ -344,18 +325,14 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             app.reconnect.presentation,
         )
         .await?;
-        let old_event_tx = app.app_event_tx.app_event_tx.clone();
-        crate::boxed_future!(app.finish_reconnect(
+        app.finish_reconnect(
             &mut tui,
             &mut session,
             &mut events,
             connected,
             CODEX_CLI_VERSION,
-        ))
+        )
         .await?;
-        assert_eq!(app.app_server_backend_id, Some(session.backend_id()));
-        assert!(old_event_tx.is_closed());
-        assert_eq!(app.agents_overview.pending_usage, None);
         if interrupted_setup {
             assert!(app.windows_sandbox.pending_setup.is_none());
             assert!(app.windows_sandbox.setup_started_at.is_none());
@@ -384,10 +361,10 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
 
         tokio::time::timeout(Duration::from_secs(/*secs*/ 5), async {
             let mut deferred = Vec::new();
-            while app.agents_overview.active_refresh.is_some() {
+            while app.agents_overview.request_id.is_some() {
                 let event = events.recv().await.expect("inventory refresh event");
                 if matches!(event, AppEvent::AgentsOverviewThreadsLoaded { .. }) {
-                    crate::boxed_future!(app.handle_event(&mut tui, &mut session, event)).await?;
+                    Box::pin(app.handle_event(&mut tui, &mut session, event)).await?;
                 } else {
                     deferred.push(event);
                 }
@@ -398,13 +375,6 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             Ok::<_, color_eyre::Report>(())
         })
         .await??;
-        assert!(
-            app.backend_registry
-                .request_handle(session.backend_id())
-                .is_some()
-        );
-        assert!(app.backend_registry.request_handle(parked_owner).is_some());
-        parked.shutdown().await?;
         assert!(app.agents_overview.visible_thread_ids.contains(&vanished));
 
         // Missing metadata alone does not evict a retained row; an archive notification does.
@@ -528,12 +498,8 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 app.chat_widget.composer_text_with_pending(),
                 "latest draft!"
             );
-            crate::boxed_future!(app.handle_event(
-                &mut tui,
-                &mut session,
-                AppEvent::OpenAgentsOverview
-            ))
-            .await?;
+            Box::pin(app.handle_event(&mut tui, &mut session, AppEvent::OpenAgentsOverview))
+                .await?;
             assert!(app.chat_widget.has_active_view());
             app.handle_tui_event(
                 &mut tui,
@@ -579,7 +545,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 );
             }
             available.store(true, std::sync::atomic::Ordering::SeqCst);
-            crate::boxed_future!(app.handle_event(
+            Box::pin(app.handle_event(
                 &mut tui,
                 &mut session,
                 AppEvent::SelectAgentsOverviewThread { thread_id: id },
@@ -629,7 +595,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             .await?;
             while let Ok(event) = events.try_recv() {
                 if matches!(event, AppEvent::CodexOp(AppCommand::UserTurn { .. })) {
-                    crate::boxed_future!(app.handle_event(&mut tui, &mut session, event)).await?;
+                    Box::pin(app.handle_event(&mut tui, &mut session, event)).await?;
                 }
             }
             let channel = app.thread_event_channels.get(&id).unwrap();

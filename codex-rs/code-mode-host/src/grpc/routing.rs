@@ -146,7 +146,6 @@ impl GrpcSession {
             input_json,
             sequence,
             traceparent,
-            heartbeat: None,
         };
         if message.encoded_len() > MAX_FRAME_BYTES {
             return Err(format!(

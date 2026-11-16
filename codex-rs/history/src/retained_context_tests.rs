@@ -51,7 +51,6 @@ fn publish_answer() -> RetainedContextEvent {
 
 fn delivered_message(id: &str, text: &str, acceptance_order: u64) -> RetainedContextEvent {
     RetainedContextEvent::DeliveredAssistantMessage {
-        retained_source: None,
         message: RetainedUserMessage {
             origin: crate::UserInputOrigin::User,
             turn_id: "turn-1".to_owned(),

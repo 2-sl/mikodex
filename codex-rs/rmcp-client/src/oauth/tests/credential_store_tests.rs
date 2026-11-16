@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 //! Verifies guarded mutations, pinned storage, token mapping, and saved runtime snapshots.
 
 use std::time::Duration;
@@ -30,7 +28,6 @@ use crate::oauth::save_oauth_tokens_to_file;
 use crate::oauth::save_oauth_tokens_to_file_with_lock_held;
 use crate::oauth::store_lock::OAuthStore;
 use crate::oauth::store_lock::OAuthStoreLock;
-use crate::oauth::store_lock::OAuthStoreWriteOperation;
 
 #[tokio::test(flavor = "current_thread")]
 async fn mutations_require_and_retain_the_transaction_guard() -> Result<()> {
@@ -62,8 +59,8 @@ async fn mutations_require_and_retain_the_transaction_guard() -> Result<()> {
             load_oauth_tokens_from_file(&initial.server_name, &initial.url)?.is_none(),
             !clear,
         );
-        // Guard acquisition requires a durable credential. Delete it under the guard in the
-        // save case: a queued save must retain the guard without recreating the row.
+        // Guard acquisition now rereads storage. Restore the deleted credential first,
+        // then delete it again under the guard so the queued save must recreate it.
         save_oauth_tokens_to_file(&initial)?;
         let guard = CredentialStore::acquire_refresh_guard(&store)
             .await?
@@ -71,8 +68,7 @@ async fn mutations_require_and_retain_the_transaction_guard() -> Result<()> {
         if !clear {
             store.clear().await?;
         }
-        let aggregate_lock =
-            OAuthStoreLock::acquire_for_write(OAuthStore::File, OAuthStoreWriteOperation::Save)?;
+        let aggregate_lock = OAuthStoreLock::acquire_for_write(OAuthStore::File)?;
         let mut mutation = if clear {
             store.clear()
         } else {
@@ -91,7 +87,7 @@ async fn mutations_require_and_retain_the_transaction_guard() -> Result<()> {
         drop(aggregate_lock);
         let _guard = tokio::time::timeout(Duration::from_secs(/*secs*/ 5), contender).await??;
         let durable = load_oauth_tokens_from_file(&initial.server_name, &initial.url)?;
-        assert!(durable.is_none());
+        assert_eq!(durable.is_none(), clear);
     }
     Ok(())
 }
@@ -312,8 +308,7 @@ async fn cancelled_rejection_retains_guard_and_preserves_replacement() -> Result
         Err(AuthError::CredentialStoreError(error)) if error.contains("active refresh guard")
     ));
     let guard = store.acquire_transaction_guard().await?;
-    let aggregate_lock =
-        OAuthStoreLock::acquire_for_write(OAuthStore::File, OAuthStoreWriteOperation::Save)?;
+    let aggregate_lock = OAuthStoreLock::acquire_for_write(OAuthStore::File)?;
     let mut mutation = store.on_refresh_token_rejected(&credentials);
     assert!(futures::poll!(&mut mutation).is_pending());
     drop(mutation);

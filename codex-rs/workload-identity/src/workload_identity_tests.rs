@@ -21,7 +21,6 @@ use super::JWT_BEARER_GRANT_TYPE;
 use super::WorkloadIdentityExchange;
 use super::WorkloadIdentityToken;
 use crate::ApiTokenMetadata;
-use crate::AssertionSource;
 use crate::ChatgptTokenMetadata;
 use crate::WorkloadIdentityConfig;
 use crate::WorkloadIdentityError;
@@ -34,14 +33,11 @@ fn assertion_file(assertion: &str) -> (TempDir, PathBuf) {
     (temp_dir, path)
 }
 
-fn make_exchange(
-    source: impl Into<AssertionSource>,
-    server: &MockServer,
-) -> WorkloadIdentityExchange {
+fn make_exchange(path: PathBuf, server: &MockServer) -> WorkloadIdentityExchange {
     WorkloadIdentityExchange::new(
         WorkloadIdentityConfig::new(
             "idpm_rule_one".to_string(),
-            source,
+            path,
             /*workload_identity_context*/ None,
         )
         .expect("valid config"),
@@ -50,10 +46,6 @@ fn make_exchange(
     )
     .expect("valid exchange")
 }
-
-#[cfg(unix)]
-#[path = "spiffe_tests.rs"]
-mod spiffe_tests;
 
 fn success_body(access_token: &str, expires_in: u64) -> serde_json::Value {
     serde_json::json!({

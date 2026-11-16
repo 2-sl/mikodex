@@ -56,11 +56,11 @@ impl App {
         if self.focused_sidebar_chooser(tui) {
             return false;
         }
-        let rename_active = self
-            .chat_widget
-            .selected_index_for_active_view(AGENTS_OVERVIEW_VIEW_ID)
-            .is_some()
-            || self.agents_overview.sidebar_focused;
+        let rename_active = self.agents_overview.sidebar_focused
+            || self
+                .chat_widget
+                .selected_index_for_active_view(AGENTS_OVERVIEW_VIEW_ID)
+                .is_some();
         let escape = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         let insert_escape = if rename_active {
             let state = self
@@ -309,18 +309,24 @@ impl App {
         use crate::keymap::KeymapContextSet;
 
         if let Some(overlay) = &self.overlay {
-            let contexts = match overlay {
-                Overlay::Transcript(view) if view.is_search_editing() => {
-                    KeymapContextSet::new(KeymapContext::Editor)
-                }
-                Overlay::Transcript(view) if view.is_select_mode() => {
-                    KeymapContextSet::transcript().with_transcript_select()
-                }
-                _ if self.backtrack.overlay_preview_active => KeymapContextSet::browsing(),
-                Overlay::Transcript(_) => KeymapContextSet::transcript(),
-                _ => KeymapContextSet::new(KeymapContext::Pager),
+            let context = if matches!(overlay, Overlay::Transcript(view) if view.is_search_editing())
+            {
+                KeymapContext::Editor
+            } else {
+                KeymapContext::Pager
             };
-            return contexts.with_voice_toggle(&self.keymap);
+            let contexts =
+                if matches!(overlay, Overlay::Transcript(_)) && context == KeymapContext::Pager {
+                    KeymapContextSet::transcript()
+                } else {
+                    KeymapContextSet::new(context)
+                }
+                .with_voice_toggle(&self.keymap);
+            return if self.backtrack.overlay_preview_active && context == KeymapContext::Pager {
+                KeymapContextSet::browsing().with_voice_toggle(&self.keymap)
+            } else {
+                contexts
+            };
         }
         if self.agents_overview.sidebar_focused && self.chat_widget.no_modal_or_popup_active() {
             let contexts = self
@@ -337,9 +343,7 @@ impl App {
             return KeymapContextSet::new(KeymapContext::Editor).with_voice_toggle(&self.keymap);
         }
         if self.transcript_view.is_select_mode() && self.chat_widget.no_modal_or_popup_active() {
-            return KeymapContextSet::transcript()
-                .with_transcript_select()
-                .with_voice_toggle(&self.keymap);
+            return KeymapContextSet::transcript().with_voice_toggle(&self.keymap);
         }
         if self.transcript_view.is_activity_focused() && self.chat_widget.no_modal_or_popup_active()
         {
@@ -519,7 +523,8 @@ impl App {
                 _ => {}
             }
         }
-        if !self.agents_overview.sidebar_focused && self.chat_widget.is_read_only_view()
+        if !self.agents_overview.sidebar_focused
+            && self.chat_widget.is_external_writer_view()
             && self.overlay.is_none()
             && self.chat_widget.no_modal_or_popup_active()
             && key_event.kind == KeyEventKind::Press
@@ -543,8 +548,7 @@ impl App {
                 self.app_event_tx.send(AppEvent::Exit(ExitMode::Immediate));
                 return;
             }
-            if self.chat_widget.is_external_writer_view()
-                && matches!(key_event.code, KeyCode::Char('f' | 'F'))
+            if matches!(key_event.code, KeyCode::Char('f' | 'F'))
                 && (modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT)
             {
                 self.chat_widget.fork_in_progress = true;
@@ -552,35 +556,25 @@ impl App {
                     .send(AppEvent::ForkCurrentSession { name: None });
                 return;
             }
-            let recovery_key = if self.chat_widget.is_archived_view() {
-                matches!(key_event.code, KeyCode::Char('u' | 'U'))
-            } else {
-                matches!(key_event.code, KeyCode::Char('r' | 'R'))
-            };
-            if recovery_key
+            if matches!(key_event.code, KeyCode::Char('r' | 'R'))
                 && (modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT)
                 && let Some(thread_id) = self.current_displayed_thread_id()
             {
-                if self.chat_widget.is_archived_view()
-                    && let Err(error) = app_server.thread_unarchive(thread_id).await
-                    && !crate::app_server_session::is_active_writer_error(&error)
+                let target = SessionTarget {
+                    backend_id: app_server.backend_id(),
+                    path: self
+                        .primary_session_configured
+                        .as_ref()
+                        .and_then(|session| session.rollout_path.clone()),
+                    thread_id,
+                    cwd: None,
+                    history_mode: None,
+                };
+                if let Ok(AppRunControl::Exit(_)) =
+                    self.resume_target_session(tui, app_server, target).await
                 {
-                    // Another client may have restored it before its notification arrived.
-                    let already_unarchived = error.chain().any(|cause| {
-                        cause.to_string().contains(&format!(
-                            "no archived rollout found for thread id {thread_id}"
-                        ))
-                    }) && app_server
-                        .thread_read(thread_id, /*include_turns*/ false)
-                        .await
-                        .is_ok();
-                    if !already_unarchived {
-                        self.chat_widget
-                            .add_error_message(format!("Failed to unarchive thread: {error}"));
-                        return;
-                    }
+                    self.app_event_tx.send(AppEvent::Exit(ExitMode::Immediate));
                 }
-                archived_thread::resume_displayed_thread(self, tui, app_server, thread_id).await;
                 return;
             }
         }
@@ -742,7 +736,8 @@ impl App {
             return;
         }
 
-        if !self.agents_overview.sidebar_focused && self.chat_widget.is_read_only_view()
+        if !self.agents_overview.sidebar_focused
+            && self.chat_widget.is_external_writer_view()
             && self.overlay.is_none()
             && self.chat_widget.no_modal_or_popup_active()
         {
@@ -915,7 +910,7 @@ impl App {
     }
 
     pub(crate) fn should_handle_backtrack_esc(&self, key_event: KeyEvent) -> bool {
-        !self.chat_widget.is_read_only_view()
+        !self.chat_widget.is_external_writer_view()
             && !self.chat_widget.has_provider_error()
             && !self.chat_widget.side_conversation_active()
             && !self.chat_widget.shortcut_overlay_visible()

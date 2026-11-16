@@ -1345,7 +1345,6 @@ async fn thread_start_emits_mcp_server_status_updated_notifications() -> Result<
         McpServerStatusUpdatedNotification {
             thread_id: Some(start_response.thread.id.clone()),
             name: "optional_broken".to_string(),
-            environment_id: None,
             status: McpServerStartupState::Starting,
             error: None,
             failure_reason: None,
@@ -1658,7 +1657,6 @@ required = true
         .request(|request_id| ClientRequest::McpServerStatusList {
             request_id,
             params: ListMcpServerStatusParams {
-                environment_id: None,
                 server_name: None,
                 cursor: None,
                 limit: None,

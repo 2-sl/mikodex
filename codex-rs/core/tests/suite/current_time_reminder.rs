@@ -14,6 +14,7 @@ use chrono::Local;
 use chrono::Utc;
 use codex_config::test_support::CloudConfigBundleFixture;
 use codex_core::SleepFuture;
+use codex_core::TimeFuture;
 use codex_core::TimeProvider;
 use codex_core::TurnInputRequest;
 use codex_core::config::CurrentTimeReminderConfig;
@@ -86,7 +87,7 @@ impl Default for TestTimeProvider {
 }
 
 impl TimeProvider for TestTimeProvider {
-    fn current_time(&self, _thread_id: ThreadId) -> anyhow::Result<chrono::DateTime<chrono::Utc>> {
+    fn current_time(&self, _thread_id: ThreadId) -> TimeFuture<'_> {
         let timestamp = if let Some(script) = &self.scripted_current_time {
             script
                 .lock()
@@ -96,9 +97,11 @@ impl TimeProvider for TestTimeProvider {
         } else {
             Ok(self.current_time.fetch_add(60, Ordering::Relaxed))
         };
-
-        let timestamp = timestamp.map_err(anyhow::Error::msg)?;
-        Ok(DateTime::<Utc>::from_timestamp(timestamp, 0).expect("test timestamp should be valid"))
+        Box::pin(async move {
+            let timestamp = timestamp.map_err(anyhow::Error::msg)?;
+            Ok(DateTime::<Utc>::from_timestamp(timestamp, 0)
+                .expect("test timestamp should be valid"))
+        })
     }
 
     fn sleep(&self, _thread_id: ThreadId, duration: Duration) -> SleepFuture<'_> {
@@ -111,8 +114,8 @@ impl TimeProvider for TestTimeProvider {
 struct FailingTimeProvider;
 
 impl TimeProvider for FailingTimeProvider {
-    fn current_time(&self, _thread_id: ThreadId) -> anyhow::Result<chrono::DateTime<chrono::Utc>> {
-        Err(anyhow!("test clock unavailable"))
+    fn current_time(&self, _thread_id: ThreadId) -> TimeFuture<'_> {
+        Box::pin(async { Err(anyhow!("test clock unavailable")) })
     }
 
     fn sleep(&self, _thread_id: ThreadId, _duration: Duration) -> SleepFuture<'_> {

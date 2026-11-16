@@ -64,11 +64,6 @@ async fn externally_archived_thread_keeps_advertised_agents_navigation() -> Resu
         /*initial_user_message*/ None,
     );
     app.replace_chat_widget(ChatWidget::new_with_app_event(init));
-    app.chat_widget.remote_connection =
-        crate::status::remote_connection::remote_connection_status_value(
-            &app.app_server_target,
-            /*server_version*/ None,
-        );
     let id = ThreadId::new();
     app.active_thread_id = Some(id);
     app.primary_thread_id = Some(id);
@@ -86,17 +81,26 @@ async fn externally_archived_thread_keeps_advertised_agents_navigation() -> Resu
     .await;
     while events.try_recv().is_ok() {}
 
-    // The archived view retains its draft without accepting editing keys.
+    // Left must still edit an existing draft before it can navigate from an empty composer.
     app.chat_widget
         .restore_user_message_to_composer("ab".into());
+    app.handle_tui_event(
+        &mut tui,
+        &mut app_server,
+        TuiEvent::Key(KeyCode::Left.into()),
+    )
+    .await?;
     app.handle_tui_event(
         &mut tui,
         &mut app_server,
         TuiEvent::Key(KeyCode::Char('!').into()),
     )
     .await?;
-    assert_eq!(app.chat_widget.composer_text_with_pending(), "ab");
-    assert!(app.chat_widget.no_modal_or_popup_active());
+    assert_eq!(app.chat_widget.composer_text_with_pending(), "a!b");
+    assert!(
+        !std::iter::from_fn(|| events.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::OpenAgentsOverview))
+    );
     for key in [
         KeyCode::End.into(),
         KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
@@ -104,8 +108,8 @@ async fn externally_archived_thread_keeps_advertised_agents_navigation() -> Resu
         app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(key))
             .await?;
     }
-    assert_eq!(app.chat_widget.composer_text_with_pending(), "ab");
-    assert!(render_bottom_popup(&app.chat_widget, /*width*/ 96).contains("command center"));
+    assert!(app.chat_widget.composer_is_empty());
+    assert!(render_bottom_popup(&app.chat_widget, /*width*/ 96).contains("for agents"));
     app.handle_tui_event(
         &mut tui,
         &mut app_server,
@@ -116,15 +120,19 @@ async fn externally_archived_thread_keeps_advertised_agents_navigation() -> Resu
         )),
     )
     .await?;
-    assert!(app.chat_widget.no_modal_or_popup_active());
+    assert!(
+        !std::iter::from_fn(|| events.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::OpenAgentsOverview))
+    );
     app.handle_tui_event(
         &mut tui,
         &mut app_server,
         TuiEvent::Key(KeyCode::Left.into()),
     )
     .await?;
-    assert!(!app.chat_widget.no_modal_or_popup_active());
-    assert_eq!(app.chat_widget.composer_text_with_pending(), "ab");
+    let event = events.try_recv()?;
+    assert_matches!(event, AppEvent::OpenAgentsOverview);
+    app.handle_event(&mut tui, &mut app_server, event).await?;
     insta::assert_snapshot!(
         "externally_archived_thread_agents",
         render_bottom_popup(&app.chat_widget, /*width*/ 96)

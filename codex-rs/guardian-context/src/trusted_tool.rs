@@ -15,7 +15,7 @@ use crate::SectionInput;
 use crate::SectionScope;
 use crate::truncate_text as truncate_entry;
 
-pub(crate) const MAX_TRUSTED_TOOL_CONTEXT_TOKENS: usize = 512;
+const MAX_TRUSTED_TOOL_CONTEXT_TOKENS: usize = 512;
 const USER_CONFIGURATION_PREFIX: &str = "Codex verified that this exact MCP tool or connector was declared in \
      trusted user configuration. ";
 const PLUGIN_SERVICE_ORCHESTRATOR_PREFIX: &str = "Codex verified that this exact connector was provided by the \
@@ -44,26 +44,6 @@ pub struct TrustedTool {
 impl TrustedTool {
     /// Classification attached to this fragment's rendered text.
     pub const KIND: &str = "guardian.trusted_tool";
-
-    pub(crate) fn attestation(&self) -> String {
-        let (prefix, source) = match &self.source {
-            TrustedToolSource::UserConfiguration(path) => {
-                (USER_CONFIGURATION_PREFIX, path.as_str())
-            }
-            TrustedToolSource::PluginServiceOrchestrator => (
-                PLUGIN_SERVICE_ORCHESTRATOR_PREFIX,
-                "plugin_service_orchestrator",
-            ),
-        };
-        format!(
-            "{prefix}{TRUSTED_TOOL_SCOPE}\n{}",
-            json!({
-                "server": self.server,
-                "connector_id": self.connector_id,
-                "source": source,
-            })
-        )
-    }
 }
 
 impl ContextualUserFragment for TrustedTool {
@@ -84,8 +64,24 @@ impl ContextualUserFragment for TrustedTool {
     }
 
     fn body(&self) -> ContentItem {
+        let (prefix, source) = match &self.source {
+            TrustedToolSource::UserConfiguration(path) => {
+                (USER_CONFIGURATION_PREFIX, path.as_str())
+            }
+            TrustedToolSource::PluginServiceOrchestrator => (
+                PLUGIN_SERVICE_ORCHESTRATOR_PREFIX,
+                "plugin_service_orchestrator",
+            ),
+        };
         input_text(truncate_entry(
-            &self.attestation(),
+            &format!(
+                "{prefix}{TRUSTED_TOOL_SCOPE}\n{}",
+                json!({
+                    "server": self.server,
+                    "connector_id": self.connector_id,
+                    "source": source,
+                })
+            ),
             MAX_TRUSTED_TOOL_CONTEXT_TOKENS,
         ))
     }

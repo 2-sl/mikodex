@@ -106,7 +106,7 @@ async fn admit_mcp_dependencies(
     candidates.retain(|name, config| {
         catalog
             .mcp_server_catalog
-            .server_by_name(name)
+            .server(name)
             .is_some_and(|server| server.config().enabled && server.config() == config)
     });
     candidates

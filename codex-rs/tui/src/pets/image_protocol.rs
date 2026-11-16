@@ -71,7 +71,7 @@ impl PetImageUnsupportedReason {
     fn message(self) -> &'static str {
         match self {
             Self::Tmux => {
-                "Pets are unavailable in this tmux pane. Use fullscreen Mikodex with allow-passthrough all, or run Mikodex outside tmux."
+                "Pets are unavailable in this tmux pane. Use fullscreen Codex with allow-passthrough all, or run Mikodex outside tmux."
             }
             Self::Zellij => {
                 "Pets are disabled in Zellij. Terminal images don’t stay reliably pane-local in Zellij. Run Mikodex outside Zellij to use pets."

@@ -13,8 +13,7 @@ use thiserror::Error;
 #[derive(Clone, Debug)]
 pub struct PluginListQuery {
     pub thread_id: String,
-    /// Absent for explicit discovery before turn admission.
-    pub turn_id: Option<String>,
+    pub turn_id: String,
     pub mcp_resources: Option<Arc<McpResourceClient>>,
     /// Already-acquired V2 inventories; empty for cloud listing.
     pub snapshots: Vec<ExecutorCapabilityDiscoveryV2Snapshot>,

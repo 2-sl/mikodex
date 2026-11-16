@@ -596,7 +596,7 @@ impl ModelInfo {
 /// retained for model catalog compatibility.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
 pub struct ModelMessages {
-    /// Model-owned Apps usage guidance, subject to existing Apps availability and authorization.
+    /// Optional model-owned Apps wording, transported without runtime interpretation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apps: Option<AppsMessages>,
     /// Model-owned plugin wording; runtime capability facts and eligibility remain client-owned.
@@ -627,11 +627,11 @@ pub struct ModelMessages {
     pub confirmation_policies: Option<ConfirmationPolicies>,
 }
 
-/// Literal model-owned Apps guidance inside the existing developer fragment markers.
+/// Optional Apps wording from the model catalog, preserved for future runtime consumption.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
 pub struct AppsMessages {
-    /// Missing/null uses bundled guidance; empty clears it. Whitespace-only or more than
-    /// 800 UTF-8 bytes falls back to bundled guidance. Other values preserve exact bytes.
+    /// Missing and null deserialize as `None`; all strings preserve their exact bytes.
+    /// Rendering, size limits, and empty-string behavior are defined by consumers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_instructions: Option<String>,
 }

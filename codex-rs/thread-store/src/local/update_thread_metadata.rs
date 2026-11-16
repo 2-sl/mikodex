@@ -1084,7 +1084,6 @@ mod tests {
         assert_eq!(pinned_metadata.source, "cli");
         let pinned_page = store
             .list_threads(ListThreadsParams {
-                included_thread_ids: None,
                 page_size: 10,
                 cursor: None,
                 sort_key: ThreadSortKey::RecencyAt,
@@ -2304,7 +2303,6 @@ mod tests {
         assert_eq!(metadata.cwd, normalized_cwd);
         let page = store
             .list_threads(ListThreadsParams {
-                included_thread_ids: None,
                 page_size: 10,
                 cursor: None,
                 sort_key: ThreadSortKey::UpdatedAt,

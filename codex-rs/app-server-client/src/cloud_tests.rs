@@ -153,11 +153,8 @@ async fn native_model_list_bypasses_the_cloud_command_queue() -> color_eyre::Res
         .await;
 
     // Leave the command receiver idle. The catalog must finish without its worker.
-    let (client, mut commands, _events) = CloudClient::channel_with_native(
-        /*capacity*/ 1,
-        Some(native),
-        /*title_client*/ None,
-    );
+    let (client, mut commands, _events) =
+        CloudClient::channel_with_catalog(/*capacity*/ 1, Some(native));
     let handle = AppServerClient::Cloud(client).request_handle();
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(/*secs*/ 5),

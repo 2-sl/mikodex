@@ -1,4 +1,3 @@
-use codex_mcp::McpServerKey;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -20,7 +19,6 @@ use codex_protocol::models::ContentItemMetadata;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::HookEventName;
 use codex_protocol::protocol::HookRunStatus;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
@@ -41,7 +39,6 @@ use core_test_support::skip_if_wine_exec;
 use core_test_support::stdio_server_bin;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
-use core_test_support::wait_for_event_match;
 use core_test_support::wait_for_mcp_server;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -522,13 +519,11 @@ async fn mcp_tool_hook_interpolates_prompt_and_runs_without_tool_approval() -> R
     Ok(())
 }
 
-#[test_case::test_case(McpStartupReadiness::Connection, "browser", "node_repl"; "connection")]
-#[test_case::test_case(McpStartupReadiness::Catalog, "unified-computer-use", "cua_repl"; "catalog")]
+#[test_case::test_case(McpStartupReadiness::Connection; "connection")]
+#[test_case::test_case(McpStartupReadiness::Catalog; "catalog")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mcp_tool_hook_starts_cached_model_hidden_tools(
     startup_readiness: McpStartupReadiness,
-    plugin: &'static str,
-    repl: &'static str,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
@@ -545,7 +540,7 @@ async fn mcp_tool_hook_starts_cached_model_hidden_tools(
     let rmcp_test_server_bin = stdio_server_bin()?;
     let test = test_codex()
         .with_model_info_override("gpt-5.5", |model| model.use_responses_lite = true)
-        .with_pre_build_hook(move |home| {
+        .with_pre_build_hook(|home| {
             let hooks = json!({
                 "hooks": {
                     "UserPromptSubmit": [{
@@ -561,35 +556,8 @@ async fn mcp_tool_hook_starts_cached_model_hidden_tools(
             });
             fs::write(home.join("hooks.json"), hooks.to_string())
                 .expect("write model-hidden MCP tool hook config");
-            let manifest_dir = home.join(format!(
-                "plugins/cache/openai-bundled/{plugin}/local/.codex-plugin"
-            ));
-            fs::create_dir_all(&manifest_dir).expect("create bundled plugin fixture");
-            let manifest = json!({
-                "name": plugin,
-                "hooks": {"hooks": {"SubagentStop": [{"hooks": [{
-                    "type": "mcp_tool",
-                    "server": repl,
-                    "tool": "turn_ended",
-                }]}]}},
-            });
-            fs::write(manifest_dir.join("plugin.json"), manifest.to_string())
-                .expect("write bundled cleanup hook");
-            fs::write(
-                home.join("config.toml"),
-                format!("[plugins.\"{plugin}@openai-bundled\"]\nenabled = true\n"),
-            )
-            .expect("enable bundled plugin fixture");
         })
         .with_config(move |config| {
-            config
-                .features
-                .enable(Feature::Plugins)
-                .expect("enable plugins");
-            config
-                .features
-                .disable(Feature::ExecutorCapabilityDiscovery)
-                .expect("use legacy MCP for the local fixtures");
             enable_hooks_and_rmcp_server(
                 config,
                 rmcp_test_server_bin,
@@ -600,24 +568,13 @@ async fn mcp_tool_hook_starts_cached_model_hidden_tools(
             let mcp_server = servers.get_mut(RMCP_SERVER).expect("test MCP server");
             mcp_server.enabled_tools = Some(vec!["thread_hint".to_string()]);
             mcp_server.startup_readiness = startup_readiness;
-            let mut cleanup_server = mcp_server.clone();
-            cleanup_server.enabled_tools = None;
-            servers.insert(repl.to_string(), cleanup_server);
+            let unused_server = mcp_server.clone();
+            servers.insert("unused".to_string(), unused_server);
             config.mcp_servers.set(servers).expect("test MCP servers");
         })
         .build(&server)
         .await?;
-    let startup = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::McpStartupComplete(summary) => Some(summary.clone()),
-        _ => None,
-    })
-    .await;
-    for server in [RMCP_SERVER, repl] {
-        assert!(
-            startup.ready.iter().any(|ready| ready == server),
-            "expected {server} to be ready: {startup:?}",
-        );
-    }
+    wait_for_mcp_server(&test.codex, RMCP_SERVER).await?;
 
     let subagent = test
         .thread_manager
@@ -640,24 +597,14 @@ async fn mcp_tool_hook_starts_cached_model_hidden_tools(
         .thread
         .current_mcp_config_and_runtime_context()
         .await;
-    let plugin_id = format!("{plugin}@openai-bundled");
-    assert!(
-        subagent.thread.list_hooks().hooks.iter().any(|hook| {
-            hook.builtin
-                && hook.enabled
-                && hook.event_name == HookEventName::SubagentStop
-                && hook.plugin_id.as_deref() == Some(plugin_id.as_str())
-        }),
-        "the child must load the bundled cleanup hook",
+    assert_eq!(
+        subagent
+            .thread
+            .mcp_connection_statuses(&mcp_config)
+            .await
+            .get(RMCP_SERVER),
+        Some(&McpServerConnectionStatus::NotStarted),
     );
-    let repl_key = McpServerKey::unscoped(repl);
-    let statuses = subagent.thread.mcp_connection_statuses(&mcp_config).await;
-    for key in [McpServerKey::unscoped(RMCP_SERVER), repl_key.clone()] {
-        assert_eq!(
-            statuses.get(&key),
-            Some(&McpServerConnectionStatus::NotStarted),
-        );
-    }
     subagent
         .thread
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
@@ -683,9 +630,9 @@ async fn mcp_tool_hook_starts_cached_model_hidden_tools(
             .thread
             .mcp_connection_statuses(&mcp_config)
             .await
-            .get(&repl_key),
+            .get("unused"),
         Some(&McpServerConnectionStatus::NotStarted),
-        "bundled cleanup must leave an unused cached REPL dormant",
+        "a hook must leave unrelated cached servers dormant",
     );
     let request = response.single_request();
     let expected_context = format!(
@@ -801,7 +748,7 @@ async fn mcp_tool_hook_timeout_includes_cached_server_startup() -> Result<()> {
             .thread
             .mcp_connection_statuses(&mcp_config)
             .await
-            .get(&McpServerKey::unscoped(RMCP_SERVER)),
+            .get(RMCP_SERVER),
         Some(&McpServerConnectionStatus::NotStarted),
     );
     subagent

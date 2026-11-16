@@ -6,7 +6,6 @@ use codex_hooks::HookMcpCall;
 use codex_hooks::HookMcpExecutor;
 use codex_hooks::HookMcpOutput;
 use codex_mcp::McpRuntime;
-use codex_mcp::McpToolStartup;
 use codex_protocol::ThreadId;
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -36,11 +35,7 @@ impl HookMcpExecutor for CoreHookMcpExecutor {
                     Some(Value::Object(call.input)),
                     Some(Value::Object(metadata)),
                     Some(call.timeout),
-                    if call.skip_dormant_repl_cleanup {
-                        McpToolStartup::SkipDormantReplCleanup
-                    } else {
-                        McpToolStartup::Wait
-                    },
+                    /*wait_for_server*/ true,
                 ),
             )
             .await
@@ -61,7 +56,6 @@ impl HookMcpExecutor for CoreHookMcpExecutor {
             }
 
             Ok(HookMcpOutput {
-                structured_content: result.structured_content,
                 text,
                 source_tool_namespace: call_result.source_tool_namespace,
             })

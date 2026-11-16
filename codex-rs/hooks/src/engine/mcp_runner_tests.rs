@@ -31,7 +31,6 @@ impl HookMcpExecutor for RecordingExecutor {
         async move {
             self.calls.lock().expect("lock calls").push(call);
             Ok(HookMcpOutput {
-                structured_content: None,
                 text: self.output.clone(),
                 source_tool_namespace: Some("security".into()),
             })
@@ -135,7 +134,6 @@ async fn mcp_tool_results_use_command_hook_output_contract() {
     assert_eq!(
         *calls.lock().expect("lock calls"),
         vec![HookMcpCall {
-            skip_dormant_repl_cleanup: false,
             server: "security".to_string(),
             tool: "scan".to_string(),
             environment_id: None,

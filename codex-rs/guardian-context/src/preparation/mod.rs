@@ -2,7 +2,6 @@
 //! Collection keeps captured sources intact. This owner applies text and image policy;
 //! delivery checks repeat against current reviewer history after compaction.
 
-mod async_entries;
 mod elastic;
 pub(crate) mod repl;
 pub(crate) mod root;
@@ -14,7 +13,6 @@ use crate::CollectedContext;
 use crate::ComposedContext;
 use crate::ContextPresentation;
 use crate::ContextSection;
-use crate::ElasticBudgetConfig;
 use crate::GuardianRootMessage;
 use crate::RetainedInstructionItem;
 use crate::SectionError;
@@ -60,51 +58,6 @@ pub fn prepare_context(
     presentation: ContextPresentation<'_>,
     budgeting: ContextBudgeting,
     reviewer_history: &[ResponseItemEnvelope],
-) -> Result<ComposedContext, SectionError> {
-    prepare_context_with_async_caps(
-        context,
-        profile,
-        entry_number_offset,
-        presentation,
-        budgeting,
-        reviewer_history,
-        /*async_elastic*/ None,
-    )
-}
-
-/// Prepares the classifier suffix, applying typed async entry caps before rendering.
-pub fn prepare_async_context(
-    context: &CollectedContext,
-    profile: &ContextProfile,
-    entry_number_offset: usize,
-    presentation: ContextPresentation<'_>,
-    reviewer_history: &[ResponseItemEnvelope],
-    elastic: Option<&ElasticBudgetConfig>,
-) -> Result<ComposedContext, SectionError> {
-    let budgeting = if elastic.is_some() {
-        ContextBudgeting::Elastic
-    } else {
-        ContextBudgeting::Fixed
-    };
-    prepare_context_with_async_caps(
-        Cow::Borrowed(context),
-        profile,
-        entry_number_offset,
-        presentation,
-        budgeting,
-        reviewer_history,
-        elastic,
-    )
-}
-
-fn prepare_context_with_async_caps(
-    context: Cow<'_, CollectedContext>,
-    profile: &ContextProfile,
-    entry_number_offset: usize,
-    presentation: ContextPresentation<'_>,
-    budgeting: ContextBudgeting,
-    reviewer_history: &[ResponseItemEnvelope],
-    async_elastic: Option<&ElasticBudgetConfig>,
 ) -> Result<ComposedContext, SectionError> {
     let (target, placeholder) = match &presentation {
         ContextPresentation::SyncFull { .. } => (
@@ -160,16 +113,15 @@ fn prepare_context_with_async_caps(
         },
     };
     context.retain_new_reviews(reviewer_history);
-    if let Some(config) = async_elastic {
-        async_entries::apply(&mut context, config, &mut transcript.truncations);
+    if target == crate::ContextTarget::Sync {
+        prepare_sync_sections(&mut context, budgeting)?;
     }
-    prepare_sections(&mut context, budgeting)?;
     context.compose_prepared(presentation, transcript)
 }
 
-/// Applies request section policy to the original collection snapshot.
+/// Applies synchronous section policy to the already bounded collection snapshot.
 /// The host prepares its borrowed transcript selection before consuming the collection.
-pub(crate) fn prepare_sections(
+pub(crate) fn prepare_sync_sections(
     context: &mut CollectedContext,
     budgeting: ContextBudgeting,
 ) -> Result<(), SectionError> {

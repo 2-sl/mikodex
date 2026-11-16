@@ -48,7 +48,6 @@ use self::input_boundary::terminal_input_is_readable;
 use crate::custom_terminal;
 use crate::custom_terminal::Terminal as CustomTerminal;
 use crate::insert_history::HistoryLineWrapPolicy;
-use crate::insert_history::InsertHistoryMode;
 use crate::notifications::DesktopNotificationBackend;
 use crate::notifications::detect_backend;
 use crate::terminal_hyperlinks::HyperlinkLine;
@@ -74,9 +73,6 @@ mod job_control;
 mod keyboard_modes;
 mod link_pointer;
 pub(crate) use link_pointer::PointerShape;
-#[cfg(test)]
-#[path = "tui/inline_image_history_tests.rs"]
-mod inline_image_history_tests;
 mod notification_preview;
 #[cfg(test)]
 #[path = "tui/owned_screen_tests.rs"]
@@ -544,7 +540,6 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
                     "terminal startup probes failed: {err}"
                 );
                 crate::terminal_probe::StartupProbe {
-                    alternate_scroll_enabled: None,
                     cursor_position: None,
                     default_colors: None,
                     keyboard_enhancement_supported: None,
@@ -553,14 +548,6 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
             }
         }
     };
-
-    #[cfg(unix)]
-    ALTERNATE_SCREEN.initial_scroll_enabled.store(
-        startup_probe
-            .alternate_scroll_enabled
-            .unwrap_or(/*default*/ false),
-        Ordering::Relaxed,
-    );
 
     #[cfg(unix)]
     crate::terminal_palette::set_default_colors_from_startup_probe(startup_probe.default_colors);
@@ -1081,12 +1068,6 @@ impl Tui {
         if let Err(err) = terminal_stderr::resume() {
             tracing::warn!("failed to suppress terminal stderr after external program: {err}");
         }
-        // An editor's suspend/resume cycle can change termios behind crossterm's raw-mode cache.
-        // Clear that cache so set_modes actually restores raw mode.
-        #[cfg(unix)]
-        if let Err(err) = disable_raw_mode() {
-            tracing::warn!("failed to reset raw mode after external program: {err}");
-        }
         if let Err(err) = set_modes() {
             tracing::warn!("failed to re-enable terminal modes after external program: {err}");
         }
@@ -1162,7 +1143,6 @@ impl Tui {
         Self::flush_pending_history_lines(
             &mut self.terminal,
             &mut self.pending_history_lines,
-            &mut self.retained_images,
             self.scrollback,
             screen_size,
         )?;
@@ -1345,38 +1325,22 @@ impl Tui {
     }
 
     /// Write any buffered history lines above the viewport and clear the buffer.
-    fn flush_pending_history_lines<B>(
-        terminal: &mut CustomTerminal<B>,
+    fn flush_pending_history_lines(
+        terminal: &mut Terminal,
         pending_history_lines: &mut Vec<PendingHistoryLines>,
-        retained_images: &mut Vec<crate::transcript_image::ImagePlacement>,
         scrollback: ScrollbackStrategy,
         screen_size: Size,
-    ) -> Result<()>
-    where
-        B: Backend<Error = io::Error> + Write,
-    {
-        while let Some(batch) = pending_history_lines.first() {
-            let mode = scrollback.history_insertion_mode(batch.wrap_policy);
-            let viewport = terminal.viewport_area;
-            // Standard insertion scrolls only above a bottom-aligned viewport when there
-            // are at least two history rows (the minimum for a DEC scroll region).
-            let preserves_direct_kitty = mode == InsertHistoryMode::Standard
-                && viewport.top() > 1
-                && viewport.bottom() == screen_size.height
-                && screen_size == terminal.last_known_screen_size
-                && terminal.tmux_kitty_image_base.is_none();
-            if retained_images.iter().any(|placement| {
-                !preserves_direct_kitty
-                    || placement.image.protocol != crate::pets::ImageProtocol::Kitty
-                    || placement.area.intersection(viewport) != placement.area
-            }) {
-                // iTerm2's file-backed images and Sixel pixels can scroll with history.
-                terminal.clear_frame_images(retained_images)?;
-            }
+    ) -> Result<()> {
+        if pending_history_lines.is_empty() {
+            return Ok(());
+        }
 
-            // Once insertion starts, an I/O error can leave a prefix on screen. Dequeue
-            // this batch first so retrying the remaining batches cannot duplicate that prefix.
+        // A failed write can already have emitted part of this batch. Never retry that batch
+        // automatically: replaying it would duplicate the successful prefix. Remaining batches
+        // stay queued, and the caller reports the I/O error.
+        while !pending_history_lines.is_empty() {
             let batch = pending_history_lines.remove(/*index*/ 0);
+            let mode = scrollback.history_insertion_mode(batch.wrap_policy);
             crate::insert_history::insert_history_hyperlink_lines_with_mode_and_wrap_policy(
                 terminal,
                 &batch.lines,
@@ -1505,7 +1469,6 @@ impl Tui {
             Self::flush_pending_history_lines(
                 terminal,
                 &mut self.pending_history_lines,
-                &mut self.retained_images,
                 self.scrollback,
                 screen_size,
             )?;
@@ -1644,7 +1607,6 @@ impl Tui {
             Self::flush_pending_history_lines(
                 terminal,
                 &mut self.pending_history_lines,
-                &mut self.retained_images,
                 self.scrollback,
                 screen_size,
             )?;

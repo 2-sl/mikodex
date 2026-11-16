@@ -1,6 +1,5 @@
 //! Cursor motions and marked-range derivation for keyboard transcript selection.
 
-use super::table::TableMarkKind;
 use super::*;
 use crossterm::event::KeyCode;
 use unicode_segmentation::UnicodeSegmentation;
@@ -25,19 +24,6 @@ impl TranscriptView {
         let snapshot = self.snapshot_cells();
         let cells = snapshot.as_deref().unwrap_or(cells);
         let next = match motion {
-            _ if let Some((mark, table)) = mode.mark.and_then(|mark| Some((mark, mark.table?))) => {
-                if table.kind == TableMarkKind::Cells {
-                    self.move_select_table(cells, mode, mark, motion);
-                    return;
-                }
-                self.move_cell_text_cursor(
-                    cells,
-                    mark,
-                    table.active,
-                    motion,
-                    &mut mode.preferred_column,
-                )
-            }
             CursorMotion::Character(code) => {
                 mode.preferred_column = None;
                 self.move_select_character(cells, cursor, code)
@@ -45,8 +31,7 @@ impl TranscriptView {
             CursorMotion::Rows(rows) => {
                 let index = self.resolve(cells, cursor);
                 let layout = self.layout(cells, index);
-                let padding_column = mode.padding_column(self.area.width);
-                let column = mode.preferred_column.or(padding_column).or_else(|| {
+                let column = mode.preferred_column.or_else(|| {
                     layout.as_ref().map(|layout| {
                         let row = layout
                             .row_for_offset(cursor.offset)
@@ -91,10 +76,7 @@ impl TranscriptView {
         if let Some(mark) = &mut mode.mark {
             mark.active = next;
             mark.active_edges = None;
-        } else if let Some(selection) = &mut self.selection
-            && (next != cursor || mode.table_caret.is_none())
-        {
-            mode.table_caret = None;
+        } else if let Some(selection) = &mut self.selection {
             selection.set_keyboard_range(next, next);
         }
         self.select_mode = Some(mode);
@@ -207,7 +189,9 @@ impl TranscriptView {
             } else {
                 0
             };
-            let mut words = selectable_words(text);
+            let mut words = text
+                .split_word_bound_indices()
+                .filter(|(_, word)| word.chars().any(char::is_alphanumeric));
             let found = if backward {
                 words
                     .rfind(|(start, _)| *start < offset)
@@ -313,16 +297,12 @@ impl TranscriptView {
         }
     }
 
-    pub(in crate::transcript_view) fn sync_select_range(&mut self, cells: &[Arc<dyn HistoryCell>]) {
+    pub(super) fn sync_select_range(&mut self, cells: &[Arc<dyn HistoryCell>]) {
         let Some(mark) = self.select_mode.and_then(|mode| mode.mark) else {
             return;
         };
         let snapshot = self.snapshot_cells();
         let cells = snapshot.as_deref().unwrap_or(cells);
-        if let Some(table) = mark.table {
-            self.sync_select_table(cells, mark, table);
-            return;
-        }
         let after_anchor = self.after_grapheme(cells, mark.anchor);
         let after_active = self.after_grapheme(cells, mark.active);
         let origin = match mark.unit {
@@ -457,9 +437,4 @@ impl TranscriptView {
 fn selectable_graphemes(text: &str) -> impl DoubleEndedIterator<Item = (usize, &str)> {
     text.grapheme_indices(/*is_extended*/ true)
         .filter(|(_, grapheme)| !grapheme.contains('\n'))
-}
-
-pub(super) fn selectable_words(text: &str) -> impl DoubleEndedIterator<Item = (usize, &str)> {
-    text.split_word_bound_indices()
-        .filter(|(_, word)| word.chars().any(char::is_alphanumeric))
 }

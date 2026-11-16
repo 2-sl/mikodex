@@ -16,10 +16,10 @@ use tracing::trace;
 use tracing::trace_span;
 
 use super::McpConnectionSet;
+use super::McpServerMetadata;
 use super::catalog_telemetry::emit_binding_catalog;
 use super::catalog_telemetry::record_binding_catalog_size;
 use super::catalog_telemetry::tool_definition_json_bytes;
-use crate::McpServerKey;
 use crate::binding::McpBinding;
 use crate::binding::PreparedMcpCall;
 use crate::binding::PreparedToolInfo;
@@ -32,8 +32,10 @@ use crate::rmcp_client::CODEX_APPS_REFRESH_DURATION_METRIC;
 use crate::rmcp_client::MCP_TOOLS_LIST_DURATION_METRIC;
 use crate::rmcp_client::ManagedClient;
 use crate::rmcp_client::list_tools_for_client_uncached;
+use crate::rmcp_client::prepare_codex_apps_tools_for_model;
 use crate::runtime::emit_duration;
 use crate::tools::ToolInfo;
+use crate::tools::filter_tools;
 use crate::tools::normalize_tools_for_model_with_prefix;
 
 const MCP_UI_META_KEY: &str = "ui";
@@ -79,7 +81,7 @@ impl McpConnectionSet {
     pub(crate) fn record_startup_readiness(
         &self,
         phase: &'static str,
-        required_servers: &[McpServerKey],
+        required_servers: &[String],
         required_plugins: &HashSet<String>,
     ) {
         if !tracing::enabled!(tracing::Level::INFO) {
@@ -101,9 +103,9 @@ impl McpConnectionSet {
                             .is_some()
                     });
             let explicitly_required = required_servers.contains(server_name)
-                || (self.is_selected_plugin_server(server_name)
+                || (self.is_selected_plugin_mcp_server(server_name)
                     && self
-                        .plugin_id_for_server(server_name)
+                        .plugin_id_for_mcp_server_name(server_name)
                         .is_some_and(|plugin_id| required_plugins.contains(plugin_id)));
             tracing::info!(
                 event.name = "mcp.startup_readiness",
@@ -121,9 +123,9 @@ impl McpConnectionSet {
 
     pub(crate) async fn stable_catalog_revisions(
         &self,
-        required_servers: &[McpServerKey],
+        required_servers: &[String],
         required_plugins: &HashSet<String>,
-    ) -> Option<HashMap<McpServerKey, BindingCatalogRevision>> {
+    ) -> Option<HashMap<String, BindingCatalogRevision>> {
         let mut revisions = HashMap::new();
         for (server_name, view) in &self.servers {
             let startup_complete = view
@@ -141,9 +143,9 @@ impl McpConnectionSet {
                     || required_servers
                         .iter()
                         .any(|required| required == server_name)
-                    || (self.is_selected_plugin_server(server_name)
+                    || (self.is_selected_plugin_mcp_server(server_name)
                         && self
-                            .plugin_id_for_server(server_name)
+                            .plugin_id_for_mcp_server_name(server_name)
                             .is_some_and(|plugin_id| required_plugins.contains(plugin_id)))
                 {
                     return None;
@@ -198,30 +200,25 @@ impl McpConnectionSet {
     #[instrument(level = "trace", skip_all, fields(mcp_server_count = self.servers.len()))]
     pub(crate) async fn list_tools_with_errors(
         &self,
-        include_server: impl Fn(&McpServerKey) -> bool,
-    ) -> (Vec<ToolInfo>, HashMap<McpServerKey, String>) {
+        include_server: impl Fn(&str) -> bool,
+    ) -> (Vec<ToolInfo>, HashMap<String, String>) {
         let (tools, errors, _) = self.list_catalogs_with_errors(include_server).await;
         (tools, errors)
     }
 
     pub(crate) async fn list_catalogs_with_errors(
         &self,
-        include_server: impl Fn(&McpServerKey) -> bool,
+        include_server: impl Fn(&str) -> bool,
     ) -> (
         Vec<ToolInfo>,
-        HashMap<McpServerKey, String>,
-        HashMap<McpServerKey, Arc<serde_json::Value>>,
+        HashMap<String, String>,
+        HashMap<String, Arc<serde_json::Value>>,
     ) {
         let mut metadata = HashMap::new();
         let mut tools = Vec::new();
         let mut errors = HashMap::new();
         let mut available_server_count = 0;
         let mut unavailable_server_count = 0;
-        let exposure = self
-            .config
-            .as_ref()
-            .map(|config| config.mcp_server_catalog.exposure())
-            .unwrap_or_default();
         let server_results = join_all(
             self.servers
                 .iter()
@@ -235,7 +232,7 @@ impl McpConnectionSet {
                         .startup_complete
                         .load(Ordering::Acquire);
                     let server_tools = view
-                        .listed_catalog(server_name.name(), &self.tool_plugin_context, exposure)
+                        .listed_catalog(server_name, &self.tool_plugin_context)
                         .instrument(trace_span!(
                             "list_tools_for_server",
                             server_name = %server_name,
@@ -244,7 +241,13 @@ impl McpConnectionSet {
                         ))
                         .await;
                     let result = match server_tools {
-                        Ok(catalog) => Ok(catalog),
+                        Ok((server_tools, meta)) => Ok((
+                            server_tools
+                                .into_iter()
+                                .map(|tool| Self::with_server_metadata(tool, &view.metadata))
+                                .collect::<Vec<_>>(),
+                            meta,
+                        )),
                         Err(error) => {
                             trace!(
                                 server_name = %server_name,
@@ -255,7 +258,7 @@ impl McpConnectionSet {
                             Err(error)
                         }
                     };
-                    (server_name.to_owned(), result)
+                    (server_name, result)
                 }),
         )
         .await;
@@ -278,7 +281,6 @@ impl McpConnectionSet {
             tools,
             self.prefix_mcp_tool_names,
             &self.non_prefixed_mcp_tool_servers,
-            exposure,
         );
         trace!(
             available_server_count,
@@ -294,7 +296,7 @@ impl McpConnectionSet {
         self: &Arc<Self>,
         config: Arc<crate::McpConfig>,
         plugins_available: bool,
-        required_servers: &[McpServerKey],
+        required_servers: &[String],
         required_plugins: &HashSet<String>,
     ) -> McpBinding {
         let mut listed_tools = Vec::new();
@@ -329,11 +331,11 @@ impl McpConnectionSet {
                     || required_servers
                         .iter()
                         .any(|required| required == server_name)
-                    || (self.is_selected_plugin_server(server_name)
+                    || (self.is_selected_plugin_mcp_server(server_name)
                         && self
-                            .plugin_id_for_server(server_name)
+                            .plugin_id_for_mcp_server_name(server_name)
                             .is_some_and(|plugin_id| required_plugins.contains(plugin_id)))
-                    || (server_name.name() == CODEX_APPS_MCP_SERVER_NAME && !has_cached_tools);
+                    || (server_name == CODEX_APPS_MCP_SERVER_NAME && !has_cached_tools);
                 if !must_wait_for_startup && has_cached_tools {
                     trace!(server_name = %server_name, "using cached MCP catalog without waiting for startup");
                     return (server_name, view, cached_tools);
@@ -381,7 +383,6 @@ impl McpConnectionSet {
             (server_name, view, None)
         }))
         .await;
-        let catalog = &config.mcp_server_catalog;
         let server_results = join_all(server_snapshots.into_iter().map(|(server_name, view, cached_tools)| async move {
             let startup_pending = !view
                 .connection
@@ -416,9 +417,7 @@ impl McpConnectionSet {
                     trace!(server_name = %server_name, "omitting MCP server without an exact ready client");
                     return None;
                 };
-                let raw_name = catalog.server(server_name)
-                    .map_or(server_name.name(), |server| server.name());
-                view.refresh_notified_catalog(raw_name, &client).await;
+                view.refresh_notified_catalog(server_name, &client).await;
                 client.tool_timeout = view.tool_timeout;
                 let snapshot = client.tool_catalog.read(Arc::new).await;
                 let server_tools = snapshot.tools.to_vec();
@@ -434,10 +433,10 @@ impl McpConnectionSet {
                 0
             };
             if catalog_log_enabled {
-                let plugin_id = self.plugin_id_for_server(server_name);
+                let plugin_id = self.plugin_id_for_mcp_server_name(server_name);
                 emit_binding_catalog(
                     product_sku,
-                    if server_name.name() == CODEX_APPS_MCP_SERVER_NAME {
+                    if server_name == CODEX_APPS_MCP_SERVER_NAME {
                         "codex_apps"
                     } else if plugin_id.is_some() {
                         "plugin"
@@ -450,6 +449,15 @@ impl McpConnectionSet {
                     raw_definition_json_bytes,
                 );
             }
+            let server_tools = filter_tools(server_tools, &view.tool_filter);
+            let server_tools = if server_name == CODEX_APPS_MCP_SERVER_NAME {
+                prepare_codex_apps_tools_for_model(server_tools, &self.tool_plugin_context)
+            } else {
+                crate::rmcp_client::prepare_regular_mcp_tools_for_model(
+                    server_tools,
+                    &self.tool_plugin_context,
+                )
+            };
             let server_tools = server_tools
                 .into_iter()
                 .map(|mut tool| {
@@ -458,10 +466,9 @@ impl McpConnectionSet {
                     {
                         annotations.read_only_hint = None;
                     }
-                    tool
+                    Self::with_server_metadata(tool, &view.metadata)
                 })
-                .collect();
-            let server_tools = view.prepare_tools_for_model(server_tools, &self.tool_plugin_context, catalog.exposure());
+                .collect::<Vec<_>>();
             Some((
                 server_name.clone(),
                 client,
@@ -488,24 +495,23 @@ impl McpConnectionSet {
             listed_tools,
             self.prefix_mcp_tool_names,
             &self.non_prefixed_mcp_tool_servers,
-            catalog.exposure(),
         );
         let mut tools = Vec::with_capacity(listed_tools.len());
         let mut pending_calls = Vec::with_capacity(listed_tools.len());
         for tool_info in listed_tools {
             let model_visible = crate::tool_is_model_visible(&tool_info);
-            let Some((client, snapshot)) = clients.get(tool_info.server_key()) else {
+            let Some((client, snapshot)) = clients.get(&tool_info.server_name) else {
                 if model_visible {
                     tools.push(tool_info);
                 }
                 continue;
             };
             if config
-                .permission_profile_for_server(tool_info.server_key())
+                .permission_profile_for_server(&tool_info.server_name)
                 .is_none()
             {
                 trace!(
-                    server_name = %tool_info.server_name(),
+                    server_name = %tool_info.server_name,
                     tool_name = %tool_info.tool.name,
                     "omitting MCP tool without an exact ready client"
                 );
@@ -535,7 +541,7 @@ impl McpConnectionSet {
             };
             calls.insert(
                 (
-                    call.tool_info().server_key().clone(),
+                    call.server_name().to_string(),
                     call.tool_info().tool.name.to_string(),
                 ),
                 call,
@@ -548,12 +554,12 @@ impl McpConnectionSet {
                 view.connection.startup_is_dormant()
                     && !view.connection.client.cancel_token.is_cancelled()
             })
-            .map(|(key, _)| key.clone())
+            .map(|(name, _)| name.clone())
             .collect();
         let clients = Arc::new(McpBindingClients::new(
             clients
                 .into_iter()
-                .map(|(key, (client, _))| (key, client))
+                .map(|(server_name, (client, _))| (server_name, client))
                 .collect(),
             deferred_servers,
         ));
@@ -573,12 +579,9 @@ impl McpConnectionSet {
         config: Arc<crate::McpConfig>,
         advertised_tool: &ToolInfo,
     ) -> Result<PreparedMcpCall> {
-        let server_name = advertised_tool.server_name();
+        let server_name = &advertised_tool.server_name;
         let unavailable = || advertised_tool.unavailable_to_model_error();
-        let view = self
-            .servers
-            .get(advertised_tool.server_key())
-            .ok_or_else(unavailable)?;
+        let view = self.servers.get(server_name).ok_or_else(unavailable)?;
         if !view.tool_filter.allows(&advertised_tool.tool.name) {
             return Err(unavailable());
         }
@@ -594,20 +597,26 @@ impl McpConnectionSet {
             .tools
             .iter()
             .find(|tool| {
-                tool.server_name() == server_name
+                tool.server_name == *server_name
                     && tool.tool.name == advertised_tool.tool.name
                     && tool.connector_id == advertised_tool.connector_id
             })
             .ok_or_else(unavailable)?;
-        let mut tool_info = view
-            .prepare_tools_for_model(
+        let mut tool_info = if server_name == CODEX_APPS_MCP_SERVER_NAME {
+            prepare_codex_apps_tools_for_model(
                 vec![current_tool.clone()],
                 &self.tool_plugin_context,
-                config.mcp_server_catalog.exposure(),
             )
-            .pop()
-            .filter(tool_is_model_visible)
-            .ok_or_else(unavailable)?;
+        } else {
+            crate::rmcp_client::prepare_regular_mcp_tools_for_model(
+                vec![current_tool.clone()],
+                &self.tool_plugin_context,
+            )
+        }
+        .pop()
+        .filter(tool_is_model_visible)
+        .ok_or_else(unavailable)?;
+        tool_info = Self::with_server_metadata(tool_info, &view.metadata);
         // Preserve the globally normalized identity advertised to the model, while
         // taking schema, annotations, and approval metadata from the current catalog.
         tool_info
@@ -629,12 +638,13 @@ impl McpConnectionSet {
     ) -> Option<PreparedMcpCall> {
         let tool_info = tool_info.into();
         let (server_metadata, plugin_id, selected_plugin_server) = {
-            let server_key = tool_info.get().server_key();
-            let view = self.servers.get(server_key)?;
+            let server_name = &tool_info.get().server_name;
+            let view = self.servers.get(server_name)?;
             (
                 view.metadata.clone(),
-                self.plugin_id_for_server(server_key).map(str::to_string),
-                self.is_selected_plugin_server(server_key),
+                self.plugin_id_for_mcp_server_name(server_name)
+                    .map(str::to_string),
+                self.is_selected_plugin_mcp_server(server_name),
             )
         };
         PreparedMcpCall::new(
@@ -658,13 +668,13 @@ impl McpConnectionSet {
         let refresh_start = Instant::now();
         let view = self
             .servers
-            .get(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
+            .get(CODEX_APPS_MCP_SERVER_NAME)
             .ok_or_else(|| anyhow!("unknown MCP server '{CODEX_APPS_MCP_SERVER_NAME}'"))?;
         let Some((tools, _)) = self.refresh_codex_apps_tool_catalog(validate).await? else {
             return Ok(None);
         };
         let server_has_permission = config
-            .permission_profile_for_server(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
+            .permission_profile_for_server(CODEX_APPS_MCP_SERVER_NAME)
             .is_some();
         let model_visible_tool_names = tools
             .iter()
@@ -694,23 +704,22 @@ impl McpConnectionSet {
         let refresh_start = Instant::now();
         let view = self
             .servers
-            .get(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
+            .get(CODEX_APPS_MCP_SERVER_NAME)
             .ok_or_else(|| anyhow!("unknown MCP server '{CODEX_APPS_MCP_SERVER_NAME}'"))?;
         let (_, tools) = self
             .refresh_codex_apps_tool_catalog(|| Some(()))
             .await?
             .context("Apps discovery refresh skipped publication")?;
-        let exposure = self
-            .config
-            .as_ref()
-            .map(|config| config.mcp_server_catalog.exposure())
-            .unwrap_or_default();
-        let tools = view.prepare_tools_for_model(tools, &self.tool_plugin_context, exposure);
+        let tools = prepare_codex_apps_tools_for_model(
+            filter_tools(tools, &view.tool_filter),
+            &self.tool_plugin_context,
+        )
+        .into_iter()
+        .map(|tool| Self::with_server_metadata(tool, &view.metadata));
         let tools = normalize_tools_for_model_with_prefix(
             tools,
             self.prefix_mcp_tool_names,
             &self.non_prefixed_mcp_tool_servers,
-            exposure,
         );
         emit_duration(
             CODEX_APPS_REFRESH_DURATION_METRIC,
@@ -723,7 +732,7 @@ impl McpConnectionSet {
     pub(crate) async fn apps_tools_from_mcp_client(&self) -> Vec<ToolInfo> {
         let Some(client) = self
             .servers
-            .get(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
+            .get(crate::CODEX_APPS_MCP_SERVER_NAME)
             .filter(|view| {
                 view.connection
                     .client
@@ -747,7 +756,7 @@ impl McpConnectionSet {
     ) -> Result<Option<(Vec<ToolInfo>, Vec<ToolInfo>)>> {
         let view = self
             .servers
-            .get(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
+            .get(CODEX_APPS_MCP_SERVER_NAME)
             .ok_or_else(|| anyhow!("unknown MCP server '{CODEX_APPS_MCP_SERVER_NAME}'"))?;
         let managed_client = view
             .connection
@@ -818,5 +827,14 @@ impl McpConnectionSet {
             &[("cache", "miss")],
         );
         Ok(Some((client_tools, tools)))
+    }
+
+    fn with_server_metadata(mut tool: ToolInfo, metadata: &McpServerMetadata) -> ToolInfo {
+        tool.supports_parallel_tool_calls = metadata.supports_parallel_tool_calls;
+        tool.server_origin = metadata
+            .origin
+            .as_ref()
+            .map(|origin| origin.as_str().to_string());
+        tool
     }
 }

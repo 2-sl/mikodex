@@ -379,8 +379,7 @@ use super::skill_popup::SkillPopup;
 use super::slash_commands::ServiceTierCommand;
 use super::slash_commands::SlashCommandItem;
 use super::voice_strip::VoiceStrip;
-use crate::bottom_pane::StatusLine;
-use crate::bottom_pane::StatusLineFocus;
+use crate::bottom_pane::footer_content::FooterContent;
 use crate::history_cell::sanitize_user_text;
 use crate::key_hint::KeyBindingListExt;
 use crate::keymap::EditorKeymap;
@@ -402,7 +401,7 @@ use codex_protocol::user_input::TextElement;
 mod agents_navigation;
 mod attachment_state;
 mod completion_target;
-pub(super) mod composer_layout;
+mod composer_layout;
 mod draft_state;
 mod footer_state;
 mod history_search;
@@ -414,6 +413,7 @@ mod paste_input;
 mod popup_state;
 mod reconnect;
 pub(crate) use reconnect::RestrictedInputMode;
+mod native_status;
 mod slash_input;
 mod sparkle;
 mod status_surface;
@@ -799,12 +799,13 @@ impl ChatComposer {
                 flash: None,
                 context_window_percent: None,
                 context_window_used_tokens: None,
-                context_window_hidden: false,
+                context_window_pending: false,
                 collaboration_mode_indicator: None,
                 goal_status_indicator: None,
                 ide_context_active: false,
                 status_line_value: None,
-                labeled_status_line: Default::default(),
+                measured_status_line: Default::default(),
+                wrapped_native_status: Default::default(),
                 status_line_enabled: false,
                 side_conversation_context_label: None,
                 active_agent_label: None,
@@ -917,12 +918,13 @@ impl ChatComposer {
             let style = IgnitionStyle::random(self.effort_animation_style);
             self.effort_ignition = Some(EffortIgnition::new(tier, style));
             self.effort_animation_style = Some(style);
-            let previous = self.with_status_surface_content(StatusLineFocus::Focused, |status| {
-                status.and_then(StatusLine::as_native).cloned()
-            });
-            if let Some(previous) = previous {
-                self.effort_status_line_transition =
-                    Some(EffortStatusLineTransition::new(tier, previous));
+            if let Some(previous) = self.status_surface_content()
+                && !matches!(previous.as_ref(), FooterContent::Extension { .. })
+            {
+                self.effort_status_line_transition = Some(EffortStatusLineTransition::new(
+                    tier,
+                    previous.into_owned().into_hyperlink_line(),
+                ));
             }
             if let Some(frame_requester) = &self.frame_requester {
                 frame_requester.schedule_frame();
@@ -1505,7 +1507,7 @@ impl ChatComposer {
     }
 
     fn right_footer_line_with_context(&self) -> Line<'static> {
-        let mut line = if self.footer.context_window_hidden {
+        let mut line = if self.footer.context_window_pending {
             Line::default()
         } else {
             context_window_line(
@@ -1514,9 +1516,7 @@ impl ChatComposer {
             )
         };
         if let Some(vim_mode) = self.vim_mode_indicator_span() {
-            if !line.spans.is_empty() {
-                line.spans.push(" | ".dim());
-            }
+            line.spans.push(" | ".dim());
             line.spans.push(vim_mode);
         }
         line
@@ -1901,7 +1901,7 @@ impl ChatComposer {
         self.attachments.local_image_paths()
     }
 
-    pub(crate) fn status_line_content(&self) -> Option<&StatusLine> {
+    pub(crate) fn status_line_content(&self) -> Option<&FooterContent> {
         self.footer.status_line_value.as_ref()
     }
 
@@ -2096,10 +2096,7 @@ impl ChatComposer {
         }
 
         let result = match &mut self.popups.active {
-            ActivePopup::Command(_) => self.handle_key_event_with_slash_popup(
-                key_event,
-                slash_input::SlashPopupInputMode::Normal,
-            ),
+            ActivePopup::Command(_) => self.handle_key_event_with_slash_popup(key_event),
             ActivePopup::File(_) => self.handle_key_event_with_file_popup(key_event),
             ActivePopup::Skill(_) => self.handle_key_event_with_skill_popup(key_event),
             ActivePopup::MentionV2(_) => self.handle_key_event_with_mentions_v2_popup(key_event),
@@ -4486,8 +4483,8 @@ impl ChatComposer {
         self.footer.context_window_used_tokens = used_tokens;
     }
 
-    pub(crate) fn set_context_window_hidden(&mut self, hidden: bool) {
-        self.footer.context_window_hidden = hidden;
+    pub(crate) fn set_context_window_pending(&mut self, pending: bool) {
+        self.footer.context_window_pending = pending;
     }
 
     pub(crate) fn set_esc_backtrack_hint(&mut self, show: bool) {
@@ -4509,7 +4506,6 @@ impl ChatComposer {
             return false;
         }
         self.footer.active_agent_label = active_agent_label;
-        *self.footer.labeled_status_line.get_mut() = None;
         true
     }
 }
@@ -7836,14 +7832,12 @@ mod tests {
                             crate::task_mentions::TaskMention {
                                 thread_id: "task-123".to_string(),
                                 title: "Review database migration".to_string(),
-                                label_style: crate::thread_label::ThreadLabelStyle::Cloud,
                                 cwd: "/workspace/project".to_string(),
                                 snippet: "database migration".to_string(),
                             },
                             crate::task_mentions::TaskMention {
                                 thread_id: "task-456".to_string(),
                                 title: "migration".to_string(),
-                                label_style: crate::thread_label::ThreadLabelStyle::Plain,
                                 cwd: "/another/project".to_string(),
                                 snippet: "migration".to_string(),
                             },
@@ -7876,7 +7870,6 @@ mod tests {
         let task = crate::task_mentions::TaskMention {
             thread_id: "task-123".to_string(),
             title: format!("task\n\t{}é{}", "a".repeat(154), "é".repeat(200)),
-            label_style: crate::thread_label::ThreadLabelStyle::Plain,
             cwd: "/workspace/project".to_string(),
             snippet: String::new(),
         };

@@ -1,5 +1,5 @@
 //! Receives live board previews for an active turn using the extension's turn hooks.
-//! The host provisions and owns the board.
+//! Provisioning and durable board ownership belong to the research host.
 
 use crate::RemoteAgentMessageBoard;
 use codex_extension_api::ExtensionData;

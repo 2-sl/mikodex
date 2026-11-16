@@ -36,13 +36,6 @@
         "null"
       ]
     },
-    "environmentId": {
-      "description": "Exact registration scope; omission preserves legacy name-only selection.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "originCallId": {
       "description": "Originating MCP tool call used to select the resource's app.",
       "type": [

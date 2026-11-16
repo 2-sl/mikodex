@@ -45,7 +45,7 @@ use ignore::overrides::OverrideBuilder;
 ///
 /// These are intentionally system-level paths only (plus Nix store roots) so
 /// `include_platform_defaults` does not silently widen access to user data.
-pub(super) const LINUX_PLATFORM_DEFAULT_READ_ROOTS: &[&str] = &[
+const LINUX_PLATFORM_DEFAULT_READ_ROOTS: &[&str] = &[
     "/bin",
     "/sbin",
     "/usr",
@@ -107,13 +107,11 @@ pub(crate) enum BwrapNetworkMode {
     /// Bubblewrap enforces this by unsharing the network namespace. The
     /// proxy-routing bridge is established by the helper process after startup.
     ProxyOnly,
-    /// The transparent TCP setup already isolated this command's network namespace.
-    PreparedProxy,
 }
 
 impl BwrapNetworkMode {
     fn should_unshare_network(self) -> bool {
-        matches!(self, Self::Isolated | Self::ProxyOnly)
+        !matches!(self, Self::FullAccess)
     }
 }
 

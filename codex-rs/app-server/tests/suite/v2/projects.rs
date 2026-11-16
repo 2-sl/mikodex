@@ -102,7 +102,6 @@ async fn projects_list_by_recency_and_preserve_metadata_timestamps() -> Result<(
                     params: ThreadListParams {
                         include_attached_threads: false,
                         current_account_only: false,
-                        included_thread_ids: None,
                         excluded_thread_ids: None,
                         attached_to_thread_id: None,
                         originators: None,
@@ -331,7 +330,6 @@ async fn projects_persist_and_assign_threads() -> Result<()> {
             params: ThreadListParams {
                 include_attached_threads: false,
                 current_account_only: false,
-                included_thread_ids: None,
                 excluded_thread_ids: None,
                 attached_to_thread_id: None,
                 originators: None,
@@ -383,7 +381,6 @@ async fn projects_persist_and_assign_threads() -> Result<()> {
             params: ThreadListParams {
                 include_attached_threads: false,
                 current_account_only: false,
-                included_thread_ids: None,
                 excluded_thread_ids: None,
                 attached_to_thread_id: None,
                 originators: None,
@@ -438,7 +435,6 @@ async fn projects_persist_and_assign_threads() -> Result<()> {
             params: ThreadListParams {
                 include_attached_threads: false,
                 current_account_only: false,
-                included_thread_ids: None,
                 excluded_thread_ids: None,
                 attached_to_thread_id: None,
                 originators: None,
@@ -638,7 +634,6 @@ async fn projects_persist_and_assign_threads() -> Result<()> {
             params: ThreadListParams {
                 include_attached_threads: false,
                 current_account_only: false,
-                included_thread_ids: None,
                 excluded_thread_ids: None,
                 attached_to_thread_id: None,
                 originators: None,
@@ -734,7 +729,6 @@ async fn deleted_project_is_dropped_before_first_durable_thread_persistence() ->
             params: ThreadListParams {
                 include_attached_threads: false,
                 current_account_only: false,
-                included_thread_ids: None,
                 excluded_thread_ids: None,
                 attached_to_thread_id: None,
                 originators: None,
@@ -929,7 +923,6 @@ async fn projects_validate_filters_cursors_and_sqlite_less_assignment() -> Resul
             .send_thread_list_request(ThreadListParams {
                 include_attached_threads: false,
                 current_account_only: false,
-                included_thread_ids: None,
                 excluded_thread_ids: None,
                 attached_to_thread_id: None,
                 originators: None,
@@ -1020,7 +1013,6 @@ async fn projects_validate_filters_cursors_and_sqlite_less_assignment() -> Resul
         .send_thread_list_request(ThreadListParams {
             include_attached_threads: false,
             current_account_only: false,
-            included_thread_ids: None,
             excluded_thread_ids: None,
             attached_to_thread_id: None,
             originators: None,

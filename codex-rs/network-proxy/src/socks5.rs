@@ -1008,7 +1008,6 @@ mod tests {
             enabled: true,
             mode: NetworkMode::Limited,
             mitm: true,
-            allow_local_binding: Some(true),
             ..NetworkProxyConfig::default()
         };
         settings.set_allowed_domains(vec!["example.com".to_string()]);
@@ -1077,8 +1076,6 @@ mod tests {
             mode: NetworkMode::Full,
             mitm: true,
             credential_broker: true,
-            // This test exercises protocol detection, independently of live DNS resolution.
-            allow_local_binding: Some(true),
             ..NetworkProxyConfig::default()
         };
         settings.set_allowed_domains(vec!["api.openai.com".to_string()]);
@@ -1107,7 +1104,6 @@ mod tests {
         let mut settings = NetworkProxyConfig {
             enabled: true,
             mode: NetworkMode::Limited,
-            allow_local_binding: Some(true),
             ..NetworkProxyConfig::default()
         };
         settings.set_allowed_domains(vec!["example.com".to_string()]);
@@ -1143,7 +1139,6 @@ mod tests {
                 },
                 ..MitmHookConfig::default()
             }],
-            allow_local_binding: Some(true),
             ..NetworkProxyConfig::default()
         };
         settings.set_allowed_domains(vec!["api.github.com".to_string()]);
@@ -1176,7 +1171,6 @@ mod tests {
                 },
                 ..MitmHookConfig::default()
             }],
-            allow_local_binding: Some(true),
             ..NetworkProxyConfig::default()
         };
         settings.set_allowed_domains(vec!["api.github.com".to_string()]);

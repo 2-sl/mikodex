@@ -181,7 +181,6 @@ async fn list_section_threads(
             .collect::<Vec<_>>()
     });
     let filters = ThreadFilterOptions {
-        included_thread_ids: params.included_thread_ids.as_deref(),
         archived_only: params.archived,
         allowed_sources: allowed_sources.as_slice(),
         model_providers: params.model_providers.as_deref(),
@@ -243,7 +242,6 @@ pub(super) async fn list_rollout_threads(
     sort_direction: codex_rollout::SortDirection,
 ) -> ThreadStoreResult<codex_rollout::ThreadsPage> {
     if params.use_state_db_only
-        || params.included_thread_ids.is_some()
         || params
             .relation_filter
             .is_some_and(ThreadRelationFilter::is_parent_scoped)
@@ -260,7 +258,6 @@ pub(super) async fn list_rollout_threads(
             params.allowed_sources.as_slice(),
             params.model_providers.as_deref(),
             params.cwd_filters.as_deref(),
-            params.included_thread_ids.as_deref(),
             params.relation_filter.map(state_relation_filter),
             params.archived,
             params.section.as_ref().map(Option::as_deref),
@@ -368,7 +365,6 @@ mod tests {
 
         let page = store
             .list_threads(ListThreadsParams {
-                included_thread_ids: None,
                 page_size: 10,
                 cursor: None,
                 sort_key: ThreadSortKey::CreatedAt,
@@ -431,7 +427,6 @@ mod tests {
 
         let page = store
             .list_threads(ListThreadsParams {
-                included_thread_ids: None,
                 page_size: 10,
                 cursor: None,
                 sort_key: ThreadSortKey::CreatedAt,
@@ -506,7 +501,6 @@ mod tests {
 
         let page = store
             .list_threads(ListThreadsParams {
-                included_thread_ids: None,
                 page_size: 10,
                 cursor: None,
                 sort_key: ThreadSortKey::CreatedAt,
@@ -545,7 +539,6 @@ mod tests {
 
         let active = store
             .list_threads(ListThreadsParams {
-                included_thread_ids: None,
                 page_size: 10,
                 cursor: None,
                 sort_key: ThreadSortKey::CreatedAt,
@@ -564,7 +557,6 @@ mod tests {
             .expect("active listing");
         let archived = store
             .list_threads(ListThreadsParams {
-                included_thread_ids: None,
                 page_size: 10,
                 cursor: None,
                 sort_key: ThreadSortKey::CreatedAt,
@@ -624,7 +616,6 @@ mod tests {
             write_session_file(home.path(), "2025-01-03T12-00-00", uuid).expect("session file");
 
         let params = ListThreadsParams {
-            included_thread_ids: None,
             page_size: 10,
             cursor: None,
             sort_key: ThreadSortKey::CreatedAt,
@@ -722,7 +713,6 @@ mod tests {
             .expect("remove rollout without invalidating SQLite metadata");
 
         let params = ListThreadsParams {
-            included_thread_ids: None,
             page_size: 2,
             cursor: None,
             sort_key: ThreadSortKey::SectionPosition,
@@ -777,7 +767,6 @@ mod tests {
 
         let err = store
             .list_threads(ListThreadsParams {
-                included_thread_ids: None,
                 page_size: 10,
                 cursor: Some("not-a-cursor".to_string()),
                 sort_key: ThreadSortKey::CreatedAt,

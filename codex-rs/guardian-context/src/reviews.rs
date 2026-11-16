@@ -57,11 +57,6 @@ impl std::fmt::Debug for PreviousReviews {
 }
 
 impl PreviousReviews {
-    pub(crate) fn retain(&mut self, predicate: impl FnMut(&PreviousReview) -> bool) -> bool {
-        self.fragments.retain(predicate);
-        !self.fragments.is_empty()
-    }
-
     /// Validates the count and size of complete fragments, including their markers.
     /// The host remains responsible for provenance and authorization validity.
     /// Rejects oversized evidence without truncating or dropping any records.
@@ -126,12 +121,13 @@ impl CollectedContext {
             let ContextSection::PreviousReviews(reviews) = section else {
                 return true;
             };
-            reviews.retain(|review| {
+            reviews.fragments.retain(|review| {
                 !history
                     .iter()
                     .filter_map(|item| item.metadata.as_ref())
                     .any(|metadata| metadata.guardian_review_ids.contains(&review.id))
-            })
+            });
+            !reviews.fragments.is_empty()
         });
     }
 }

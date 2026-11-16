@@ -203,6 +203,12 @@ impl PendingAppServerRequests {
                     message: "Attestation generation is not available in TUI.".to_string(),
                 })
             }
+            ServerRequest::CurrentTimeRead { request_id, .. } => {
+                Some(UnsupportedAppServerRequest {
+                    request_id: request_id.clone(),
+                    message: "External current time is not available in TUI.".to_string(),
+                })
+            }
             ServerRequest::ApplyPatchApproval { request_id, .. } => {
                 Some(UnsupportedAppServerRequest {
                     request_id: request_id.clone(),
@@ -524,6 +530,7 @@ impl PendingAppServerRequests {
             ServerRequest::ChatgptAuthTokensRefresh { .. } => None,
             ServerRequest::DynamicToolCall { .. }
             | ServerRequest::AttestationGenerate { .. }
+            | ServerRequest::CurrentTimeRead { .. }
             | ServerRequest::ApplyPatchApproval { .. }
             | ServerRequest::ExecCommandApproval { .. } => None,
         }
@@ -950,7 +957,6 @@ mod tests {
             pending.note_server_request(&ServerRequest::McpServerElicitationRequest {
                 request_id: AppServerRequestId::Integer(12),
                 params: McpServerElicitationRequestParams {
-                    environment_id: None,
                     thread_id: "thread-1".to_string(),
                     turn_id: Some("turn-1".to_string()),
                     server_name: "example".to_string(),
@@ -1098,7 +1104,6 @@ mod tests {
             pending.note_server_request(&ServerRequest::McpServerElicitationRequest {
                 request_id: AppServerRequestId::Integer(12),
                 params: McpServerElicitationRequestParams {
-                    environment_id: None,
                     thread_id: "thread-1".to_string(),
                     turn_id: Some("turn-1".to_string()),
                     server_name: "example".to_string(),

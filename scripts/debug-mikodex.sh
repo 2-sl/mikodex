@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Point `chatgpt.cliExecutable` at this script in VS Code settings to debug the
-# Codex extension with the latest Mikodex CLI binary.
+# Set "chatgpt.cliExecutable": "/Users/<USERNAME>/code/codex/scripts/debug-codex.sh" in VSCode settings to always get the
+# latest codex-rs binary when debugging Codex Extension.
 
 
 set -euo pipefail

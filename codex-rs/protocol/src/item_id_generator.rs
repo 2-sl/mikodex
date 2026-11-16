@@ -1,9 +1,9 @@
-//! Response item ID allocation for a thread and its consumers.
+//! Response item ID generation shared by sessions and their consumers.
 
 use crate::ResponseItemId;
 use std::sync::Arc;
 
-/// Generates IDs for an item kind. Clones share the owning thread's sequence.
+/// Generates response item IDs from a type prefix for an owning session. Clones share the same callable.
 pub type ItemIdGenerator = Arc<dyn Fn(&str) -> ResponseItemId + Send + Sync>;
 
 #[cfg(test)]

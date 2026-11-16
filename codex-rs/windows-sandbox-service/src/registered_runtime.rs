@@ -2,7 +2,6 @@
 //! Lifecycle and admission decisions stay with callers. Persist ownership before deployment;
 //! retain profiles until Windows completes, or pending resources until service exit on shutdown.
 
-use std::os::windows::fs::MetadataExt;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::OwnedHandle;
 use std::sync::atomic::AtomicBool;
@@ -144,13 +143,13 @@ pub(crate) fn provision(
             cleanup_logon_pending: false,
             account,
             user_sid: profile.user_sid.clone(),
-            alias_path: Some(alias_path.clone()),
+            alias_path: Some(alias_path),
         });
-        profiles.push((profile, installed.contains(full_name), alias_path));
+        profiles.push((profile, installed.contains(full_name)));
     }
     let receipt_current = record.runtime()?.ready_for_package(&full_name.to_string())
         && record.runtime()?.accounts == accounts
-        && profiles.iter().all(|(_, installed, _)| *installed);
+        && profiles.iter().all(|(_, installed)| *installed);
     // Both exact SIDs are durable before either package registration or metadata grant.
     // An idempotent setup check must not temporarily revoke a valid launch receipt.
     record.runtime_mut()?.accounts = accounts;
@@ -159,7 +158,7 @@ pub(crate) fn provision(
         crate::installation_record::save_runtime(record)
             .context("persist managed runtime account registration")?;
     }
-    for (mut profile, installed, alias_path) in profiles {
+    for (mut profile, installed) in profiles {
         if !installed {
             let operation = with_owner_impersonation(profile.token.as_raw_handle() as _, || {
                 Ok(PackageManager::new()?.RegisterPackageByFullNameAsync(
@@ -202,29 +201,7 @@ pub(crate) fn provision(
                 }
                 std::thread::sleep(Duration::from_millis(50));
             };
-            registration_result::RegistrationResult::read(&operation, status).check(|| {
-                // Look up the generated execution alias as its intended user. The
-                // command path independently verifies the spawned image and identity.
-                let alias_present = with_owner_impersonation(profile.token.as_raw_handle(), || {
-                    Ok(std::fs::symlink_metadata(&alias_path)?.file_attributes()
-                        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
-                        != 0)
-                });
-                if !matches!(alias_present, Ok(true)) {
-                    return false;
-                }
-                // FindUsers distinguishes a staged package from a registration for this SID.
-                PackageManager::new()
-                    .and_then(|manager| manager.FindUsers(full_name))
-                    .is_ok_and(|users| {
-                        users.into_iter().any(|user| {
-                            user.UserSecurityId().is_ok_and(|sid| sid == profile.user_sid.as_str())
-                                && user.InstallState().is_ok_and(|state| {
-                                    state == windows::Management::Deployment::PackageInstallState::Installed
-                                })
-                        })
-                    })
-            })?;
+            registration_result::RegistrationResult::read(&operation, status).check()?;
             ensure!(
                 registered_packages(&profile.user_sid, &family)
                     .context("verify managed runtime package registration")?

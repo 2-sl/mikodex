@@ -55,7 +55,7 @@ impl<'a> PreparedReviewContext<'a> {
             Some(config) => Ok(Self::Elastic(
                 context
                     .prepare_elastic_entries(config)?
-                    .prepare_delivery(history)?,
+                    .prepare_sync_delivery(history)?,
             )),
             None => {
                 codex_guardian_context::prepare_sync_delivery(&mut context, history)?;
@@ -251,7 +251,9 @@ pub(crate) async fn finalize(
         .pending_budget_reminder(session.thread_id(), &session.current_window_id().await)
         .await
     {
-        let reminder = session.budget_reminder_item(&reminder);
+        let reminder = ContextualUserFragment::into(crate::context::RolloutBudgetContext {
+            remaining_tokens: reminder.remaining_tokens,
+        });
         existing = existing.saturating_add(
             usize::try_from(estimate_item_token_count(&reminder)).unwrap_or(usize::MAX),
         );

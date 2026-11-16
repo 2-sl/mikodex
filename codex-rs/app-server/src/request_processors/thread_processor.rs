@@ -4,9 +4,6 @@ mod daemon_continuation;
 #[path = "daemon_snapshot.rs"]
 mod daemon_snapshot;
 
-#[path = "realtime_history.rs"]
-mod realtime_history;
-
 mod workspace_switching;
 
 #[path = "thread_resume_account.rs"]
@@ -59,7 +56,7 @@ use std::ops::ControlFlow;
 
 pub(super) const THREAD_LIST_DEFAULT_LIMIT: usize = 25;
 pub(super) const THREAD_LIST_MAX_LIMIT: usize = 100;
-const THREAD_LIST_MAX_FILTER_IDS: usize = 100;
+const THREAD_LIST_MAX_EXCLUDED_IDS: usize = 100;
 const PAGINATED_FULL_HISTORY_DEPRECATION_SUMMARY: &str = "Full-history hydration is deprecated for paginated threads; use `excludeTurns: true`, then page with `thread/turns/list` and `thread/items/list`.";
 const PAGINATED_THREAD_READ_DEPRECATION_SUMMARY: &str = "Full-history hydration is deprecated for paginated threads; omit `includeTurns` or set it to `false`, then page with `thread/turns/list` and `thread/items/list`.";
 
@@ -109,7 +106,6 @@ struct ThreadListFilters {
     search_term: Option<String>,
     use_state_db_only: bool,
     relation_filter: Option<StoreThreadRelationFilter>,
-    included_thread_ids: Option<Vec<ThreadId>>,
     excluded_thread_ids: HashSet<ThreadId>,
 }
 
@@ -202,22 +198,26 @@ fn collect_resume_override_mismatches(
         }
     }
     if let Some(requested_sandbox) = request.sandbox.as_ref() {
-        let active_sandbox_label = config_snapshot
-            .permission_profile
-            .legacy_sandbox_policy_label(config_snapshot.cwd().as_path());
-        let sandbox_matches = match requested_sandbox {
-            SandboxMode::ReadOnly => active_sandbox_label == "read-only",
-            SandboxMode::WorkspaceWrite => active_sandbox_label == "workspace-write",
-            SandboxMode::DangerFullAccess => {
-                matches!(
-                    active_sandbox_label,
-                    "danger-full-access" | "external-sandbox"
-                )
-            }
-        };
+        let active_sandbox = config_snapshot.sandbox_policy();
+        let sandbox_matches = matches!(
+            (requested_sandbox, &active_sandbox),
+            (
+                SandboxMode::ReadOnly,
+                codex_protocol::protocol::SandboxPolicy::ReadOnly { .. }
+            ) | (
+                SandboxMode::WorkspaceWrite,
+                codex_protocol::protocol::SandboxPolicy::WorkspaceWrite { .. }
+            ) | (
+                SandboxMode::DangerFullAccess,
+                codex_protocol::protocol::SandboxPolicy::DangerFullAccess
+            ) | (
+                SandboxMode::DangerFullAccess,
+                codex_protocol::protocol::SandboxPolicy::ExternalSandbox { .. }
+            )
+        );
         if !sandbox_matches {
             mismatch_details.push(format!(
-                "sandbox requested={requested_sandbox:?} active={active_sandbox_label}"
+                "sandbox requested={requested_sandbox:?} active={active_sandbox:?}"
             ));
         }
     }
@@ -2759,7 +2759,6 @@ impl ThreadRequestProcessor {
             current_account_only,
             cursor,
             limit,
-            included_thread_ids,
             excluded_thread_ids,
             sort_key,
             sort_direction,
@@ -2776,11 +2775,19 @@ impl ThreadRequestProcessor {
             ancestor_thread_id,
             attached_to_thread_id,
         } = params;
-        let included_thread_ids = included_thread_ids
-            .map(|ids| parse_thread_list_ids(ids, "included"))
-            .transpose()?;
-        let excluded_thread_ids =
-            parse_thread_list_ids(excluded_thread_ids.unwrap_or_default(), "excluded")?;
+        let excluded_thread_ids = excluded_thread_ids.unwrap_or_default();
+        if excluded_thread_ids.len() > THREAD_LIST_MAX_EXCLUDED_IDS {
+            return Err(invalid_params(format!(
+                "excludedThreadIds accepts at most {THREAD_LIST_MAX_EXCLUDED_IDS} entries"
+            )));
+        }
+        let excluded_thread_ids = excluded_thread_ids
+            .iter()
+            .map(|id| {
+                ThreadId::from_string(id)
+                    .map_err(|err| invalid_params(format!("invalid excluded thread id: {err}")))
+            })
+            .collect::<Result<HashSet<_>, _>>()?;
         if originators
             .as_ref()
             .is_some_and(|values| !values.is_empty())
@@ -2893,7 +2900,6 @@ impl ThreadRequestProcessor {
                     search_term,
                     use_state_db_only,
                     relation_filter,
-                    included_thread_ids,
                     excluded_thread_ids,
                 },
             )
@@ -4760,14 +4766,12 @@ impl ThreadRequestProcessor {
                     matches!(existing_thread.agent_status().await, AgentStatus::Running);
 
                 // Parent-owned V2 children must not be rebuilt from public resume overrides.
-                // A recovery turn can already own the core slot before either status changes.
                 if can_accept_direct_input(
                     existing_thread.multi_agent_version(),
                     &config_snapshot.session_source,
                 ) && !has_subscribers
                     && matches!(loaded_status, ThreadStatus::Idle)
                     && !is_running
-                    && !existing_thread.has_active_turn().await
                 {
                     // A loaded idle thread is only a cache entry. Shut it down
                     // before removing it so cold resume cannot duplicate a
@@ -5433,8 +5437,10 @@ impl ThreadRequestProcessor {
                     .items()
                     .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }))
                 && let Some(model) = options.config.model.as_deref()
-                && parent
-                    .model_info(model, &options.config.to_models_manager_config())
+                && self
+                    .thread_manager
+                    .get_models_manager()
+                    .get_model_info(model, &options.config.to_models_manager_config())
                     .await
                     .use_responses_lite
             {
@@ -6070,7 +6076,6 @@ impl ThreadRequestProcessor {
             search_term,
             use_state_db_only,
             relation_filter,
-            included_thread_ids,
             excluded_thread_ids,
         } = filters;
         let mut cursor_obj = cursor;
@@ -6109,7 +6114,6 @@ impl ThreadRequestProcessor {
                 .thread_store
                 .list_threads(StoreListThreadsParams {
                     page_size,
-                    included_thread_ids: included_thread_ids.clone(),
                     cursor: cursor_obj.clone(),
                     sort_key,
                     sort_direction: store_sort_direction,
@@ -6183,21 +6187,6 @@ impl ThreadRequestProcessor {
 
         Ok((items, next_cursor))
     }
-}
-
-fn parse_thread_list_ids<C: FromIterator<ThreadId>>(
-    ids: Vec<String>,
-    kind: &str,
-) -> Result<C, JSONRPCErrorError> {
-    if ids.len() > THREAD_LIST_MAX_FILTER_IDS {
-        return Err(invalid_params(format!(
-            "{kind}ThreadIds accepts at most {THREAD_LIST_MAX_FILTER_IDS} entries"
-        )));
-    }
-    ids.into_iter()
-        .map(ThreadId::try_from)
-        .collect::<Result<_, _>>()
-        .map_err(|err| invalid_params(format!("invalid {kind} thread id: {err}")))
 }
 
 const THREAD_TURNS_DEFAULT_LIMIT: usize = 25;

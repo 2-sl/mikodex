@@ -257,12 +257,11 @@ async fn turn_completion_metrics_follow_model_switch(scenario: UsageScenario) {
     session
         .update_token_usage_info(
             &previous_context,
-            TokenUsage {
+            Some(&TokenUsage {
                 input_tokens: 1_000,
                 total_tokens: 1_000,
                 ..TokenUsage::default()
-            }
-            .into(),
+            }),
             /*includes_reasoning*/ false,
         )
         .await
@@ -288,7 +287,7 @@ async fn turn_completion_metrics_follow_model_switch(scenario: UsageScenario) {
         session
             .update_token_usage_info(
                 &previous_context,
-                compaction_usage.clone().into(),
+                Some(&compaction_usage),
                 /*includes_reasoning*/ false,
             )
             .await
@@ -321,7 +320,7 @@ async fn turn_completion_metrics_follow_model_switch(scenario: UsageScenario) {
                 .record_token_usage_info(
                     &turn_context,
                     &response_context.initial_settings,
-                    response_usage.clone().into(),
+                    Some(&response_usage),
                     crate::session::TokenUsageContext::Sampling {
                         includes_reasoning: false,
                         input_item_count: 0,

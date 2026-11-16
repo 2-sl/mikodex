@@ -32,11 +32,12 @@ genrule(
     srcs = [":bwrap"],
     outs = ["bwrap.sha256.env"],
     cmd = " && ".join([
-        'digest=$$("$(COREUTILS_BIN)" sha256sum < "$<")',
-        'printf "CODEX_BWRAP_SHA256=%s\\n" "$${digest%% *}" > "$@"',
+        '$(execpath @bazel_tools//tools/build_defs/hash:sha256) $(execpath :bwrap) "$@"',
+        'digest=$$(<"$@")',
+        'printf "CODEX_BWRAP_SHA256=%s\\n" "$$digest" > "$@"',
     ]),
     target_compatible_with = ["@platforms//os:linux"],
-    toolchains = ["@coreutils_toolchains//:resolved_toolchain"],
+    tools = ["@bazel_tools//tools/build_defs/hash:sha256"],
     visibility = ["//codex-rs/linux-sandbox:__pkg__"],
 )
 

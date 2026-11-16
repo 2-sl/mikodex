@@ -19,7 +19,7 @@ use super::ProxyConnection;
 use super::ProxyTarget;
 use super::bridge;
 use super::client_config;
-use super::control::bearer_header;
+use super::control::TunnelCredential;
 
 // Only gateways shipped with the CLI may receive the signed-in account's credential.
 pub(super) const PUBLIC_GATEWAY: &str = "https://codex-portals.api.openai.com";
@@ -74,7 +74,7 @@ fn oauth_bearer(token: &str) -> Result<HeaderValue> {
                 .all(|b| b.is_ascii_alphanumeric() || b"-._~+/".contains(&b)),
         "invalid OAuth access token"
     );
-    bearer_header(token)
+    TunnelCredential::Bearer.header(token)
 }
 
 /// Relay one SSH session. Poll the active account's token only after verifying the gateway.

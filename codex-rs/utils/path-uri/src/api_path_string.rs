@@ -262,8 +262,10 @@ fn render_windows_opaque_fallback(path_bytes: &[u8]) -> Option<String> {
     if !path_bytes.len().is_multiple_of(2) {
         return None;
     }
-    let (units, _) = path_bytes.as_chunks();
-    let path_wide: Vec<_> = units.iter().copied().map(u16::from_le_bytes).collect();
+    let path_wide = path_bytes
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect::<Vec<_>>();
 
     // Windows absolute paths either have a rooted drive prefix (`C:\\`) or a
     // rooted namespace/UNC prefix (`\\server`, `\\.\\`, or `\\?\\`).

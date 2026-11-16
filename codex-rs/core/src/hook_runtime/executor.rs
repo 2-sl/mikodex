@@ -20,8 +20,7 @@ pub(crate) fn prepare_executor_hook_sources(
     let config = mcp.config();
     let app_tool_policy = AppToolPolicyEvaluator::new(&config.config_layer_stack);
     let lookup_enabled_tool = |server: &str, tool: &str| {
-        let key = config.mcp_server_catalog.resolve_server_name(server)?;
-        mcp.tool_info(key, tool).filter(|tool_info| {
+        mcp.tool_info(server, tool).filter(|tool_info| {
             if server != CODEX_APPS_MCP_SERVER_NAME {
                 return true;
             }

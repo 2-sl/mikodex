@@ -1,6 +1,4 @@
 use super::*;
-use crate::McpServerExposure;
-use crate::McpServerKey;
 #[path = "connection_manager/network_policy_tests.rs"]
 mod network_policy_tests;
 use crate::McpBinding;
@@ -141,7 +139,7 @@ impl McpConnectionSet {
     ) {
         let name = name.into();
         self.servers.insert(
-            McpServerKey::unscoped(name.clone()),
+            name,
             McpServerView {
                 refresh_tool_list: true,
                 refresh_timeout: DEFAULT_STARTUP_TIMEOUT,
@@ -159,7 +157,6 @@ impl McpConnectionSet {
                 }),
                 metadata: McpServerMetadata {
                     environment_id: String::new(),
-                    server_key: McpServerKey::unscoped(name),
                     pollutes_memory: true,
                     origin: None,
                     supports_parallel_tool_calls: false,
@@ -173,26 +170,24 @@ impl McpConnectionSet {
     }
 
     fn test_client(&self, name: &str) -> &AsyncManagedClient {
-        &self.servers[&McpServerKey::unscoped(name)]
-            .connection
-            .client
+        &self.servers[name].connection.client
     }
 
     fn set_test_server_metadata(&mut self, name: &str, metadata: McpServerMetadata) {
         self.servers
-            .get_mut(&McpServerKey::unscoped(name))
+            .get_mut(name)
             .expect("test server exists")
             .metadata = metadata;
     }
 
     fn shares_test_connection_with(&self, other: &Self, name: &str) -> bool {
-        self.shares_server_connection(other, &McpServerKey::unscoped(name))
+        self.shares_server_connection(other, name)
     }
 }
 
 pub(crate) fn create_test_tool(server_name: &str, tool_name: &str) -> ToolInfo {
     ToolInfo {
-        server_key: McpServerKey::unscoped(server_name),
+        server_name: server_name.to_string(),
         supports_parallel_tool_calls: false,
         server_origin: None,
         callable_name: tool_name.to_string(),
@@ -433,23 +428,6 @@ impl InProcessTransportFactory for MutableToolsTransportFactory {
     }
 }
 
-pub(crate) async fn create_test_apps_client(
-    tool: Tool,
-    list_started: Option<Arc<Notify>>,
-    release_list: Option<Arc<Notify>>,
-    list_requests: Arc<AtomicUsize>,
-) -> anyhow::Result<Arc<RmcpClient>> {
-    let client = RmcpClient::new_in_process_client(Arc::new(RefreshTestTransportFactory {
-        tool,
-        list_started,
-        release_list,
-        next_cursor: None,
-        list_requests,
-    }))
-    .await?;
-    Ok(Arc::new(client))
-}
-
 struct DisconnectingToolsTransportFactory {
     server: MutableToolsServer,
     disconnect: CancellationToken,
@@ -551,8 +529,6 @@ async fn create_test_managed_client(tools: Vec<ToolInfo>) -> ManagedClient {
 #[tokio::test(start_paused = true)]
 async fn prepared_call_timeout_includes_trusted_access_lookup() {
     let mut tool = create_test_tool("docs", "access");
-    let key = McpServerKey::in_environment(codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID, "docs");
-    tool.server_key = key.clone();
     tool.tool.annotations = Some(rmcp::model::ToolAnnotations::new().read_only(true));
     let mut tool_meta = rmcp::model::MetaObject::new();
     tool_meta.insert(
@@ -580,7 +556,7 @@ async fn prepared_call_timeout_includes_trusted_access_lookup() {
     config.mcp_server_catalog = catalog.build();
     config
         .server_permissions
-        .insert(key.clone(), McpServerPermissions::Thread);
+        .insert("docs".to_string(), McpServerPermissions::Thread);
     manager.tool_plugin_context = Arc::new(crate::tool_plugin_context(&config));
     let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
     manager.trusted_access = Some(TrustedAccessContext::new(
@@ -592,7 +568,6 @@ async fn prepared_call_timeout_includes_trusted_access_lookup() {
     let manager = Arc::new(manager);
     let server_metadata = McpServerMetadata {
         environment_id: codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
-        server_key: key,
         pollutes_memory: true,
         origin: Some(McpServerOrigin::Stdio),
         supports_parallel_tool_calls: false,
@@ -658,10 +633,7 @@ async fn stalled_apps_client_publication_expires_at_the_configured_startup_timeo
     client.client = futures::future::pending().boxed().shared();
     client.startup_complete.store(false, Ordering::Release);
     manager.insert_test_client(CODEX_APPS_MCP_SERVER_NAME, client);
-    let view = manager
-        .servers
-        .get_mut(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
-        .unwrap();
+    let view = manager.servers.get_mut(CODEX_APPS_MCP_SERVER_NAME).unwrap();
     let connection = Arc::get_mut(&mut view.connection).unwrap();
     let (_publisher, initialized) = watch::channel(None);
     connection.initialized_apps = Some(initialized);
@@ -684,78 +656,11 @@ async fn stalled_apps_client_publication_expires_at_the_configured_startup_timeo
 }
 
 #[tokio::test]
-async fn cleanup_skips_only_an_unrequested_private_local_stdio_connection() {
-    let name = "node_repl";
-    let key = McpServerKey::unscoped(name);
-    let mut manager = McpConnectionSet::empty(/*prefix_mcp_tool_names*/ true);
-    manager.insert_test_client(name, create_ready_async_managed_client(Vec::new()).await);
-    let (trigger, _receiver) = watch::channel(false);
-    Arc::get_mut(
-        &mut manager
-            .servers
-            .get_mut(&key)
-            .expect("registered REPL view")
-            .connection,
-    )
-    .expect("unique test connection")
-    .startup_trigger = Some(trigger.clone());
-    let stdio: McpServerConfig =
-        serde_json::from_value(serde_json::json!({"command":"test-helper"}))
-            .expect("valid test stdio config");
-    let http = reusable_server_config("https://example.com/mcp");
-    let mut remote = stdio.clone();
-    remote.environment_id = "remote".to_string();
-    let configured = |config| crate::McpServerRegistration::from_config(name.to_string(), config);
-    let plugin = crate::McpServerRegistration::from_plugin(
-        name.to_string(),
-        crate::McpPluginAttribution::new("other@example".into(), "Other".into()),
-        /*plugin_order*/ 0,
-        stdio.clone(),
-    );
-    for (registration, expected) in [
-        (configured(http), false),
-        (configured(remote), false),
-        (plugin, false),
-        (configured(stdio), true),
-    ] {
-        let mut runtime_config = crate::mcp::tests::test_mcp_config(std::env::temp_dir());
-        let mut catalog = crate::ResolvedMcpCatalog::builder();
-        catalog.register(registration);
-        runtime_config.mcp_server_catalog = catalog.build();
-        manager.config = Some(Arc::new(runtime_config));
-        assert_eq!(manager.is_dormant_private_stdio(&key), expected);
-    }
-    let view = manager.servers.get_mut(&key).expect("registered REPL view");
-    view.protocol_mode = crate::McpProtocolMode::V20260728;
-    assert!(!manager.is_dormant_private_stdio(&key));
-    let view = manager.servers.get_mut(&key).expect("registered REPL view");
-    view.protocol_mode = crate::McpProtocolMode::Legacy;
-    Arc::get_mut(&mut view.connection)
-        .expect("unique test connection")
-        .client
-        .connection_slot = Some(Arc::default());
-    assert!(!manager.is_dormant_private_stdio(&key));
-    let connection = Arc::get_mut(
-        &mut manager
-            .servers
-            .get_mut(&key)
-            .expect("registered REPL view")
-            .connection,
-    )
-    .expect("unique test connection");
-    connection.client.connection_slot = None;
-    trigger.send_replace(true);
-    assert!(!manager.is_dormant_private_stdio(&key));
-}
-
-#[tokio::test]
 async fn connection_statuses_observe_clients_without_starting_them() {
     use codex_protocol::mcp::McpServerConnectionStatus as Status;
 
     let mut manager = McpConnectionSet::empty(/*prefix_mcp_tool_names*/ true);
-    manager
-        .disabled_servers
-        .push(McpServerKey::unscoped("disabled"));
+    manager.disabled_servers.push("disabled".to_string());
     let ready = create_ready_async_managed_client(Vec::new()).await;
     ready.client().await.expect("ready client");
     manager.insert_test_client("connected", ready);
@@ -794,15 +699,8 @@ async fn connection_statuses_observe_clients_without_starting_them() {
     pending.cached_server_info = Some(create_test_server_info("Cached"));
     manager.insert_test_client("starting", pending.clone());
     manager.insert_test_client("deferred", pending);
-    let scoped_key = McpServerKey::in_environment("remote", "connected");
-    let mut deferred = manager
-        .servers
-        .remove(&McpServerKey::unscoped("deferred"))
-        .unwrap();
-    deferred.metadata.server_key = scoped_key.clone();
-    manager.servers.insert(scoped_key.clone(), deferred);
     let (trigger, _receiver) = watch::channel(/*init*/ false);
-    Arc::get_mut(&mut manager.servers.get_mut(&scoped_key).unwrap().connection)
+    Arc::get_mut(&mut manager.servers.get_mut("deferred").unwrap().connection)
         .unwrap()
         .startup_trigger = Some(trigger.clone());
 
@@ -813,25 +711,19 @@ async fn connection_statuses_observe_clients_without_starting_them() {
     .await
     .expect("status must not await startup");
     let mut expected = HashMap::from([
-        (McpServerKey::unscoped("connected"), Status::Connected),
-        (McpServerKey::unscoped("failed"), Status::Failed),
-        (
-            McpServerKey::unscoped("auth"),
-            Status::AuthenticationRequired,
-        ),
-        (
-            McpServerKey::unscoped("flattened-auth"),
-            Status::AuthenticationRequired,
-        ),
-        (McpServerKey::unscoped("cancelled"), Status::Cancelled),
-        (McpServerKey::unscoped("starting"), Status::Starting),
-        (scoped_key, Status::NotStarted),
-        (McpServerKey::unscoped("disabled"), Status::Disabled),
+        ("connected".to_string(), Status::Connected),
+        ("failed".to_string(), Status::Failed),
+        ("auth".to_string(), Status::AuthenticationRequired),
+        ("flattened-auth".to_string(), Status::AuthenticationRequired),
+        ("cancelled".to_string(), Status::Cancelled),
+        ("starting".to_string(), Status::Starting),
+        ("deferred".to_string(), Status::NotStarted),
+        ("disabled".to_string(), Status::Disabled),
     ]);
     assert_eq!(statuses, expected);
     assert!(!*trigger.borrow());
     manager.test_client("connected").cancel_token.cancel();
-    expected.insert(McpServerKey::unscoped("connected"), Status::Cancelled);
+    expected.insert("connected".to_string(), Status::Cancelled);
     assert_eq!(manager.connection_statuses().await, expected);
 }
 
@@ -876,8 +768,7 @@ async fn connection_statuses_follow_latest_reconnect_outcome() {
     let manager = create_test_manager_with_failed_apps_startup(Vec::new(), factory);
     let client = manager.test_client(CODEX_APPS_MCP_SERVER_NAME);
     assert!(client.client().await.is_err());
-    let expected =
-        |status| HashMap::from([(McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME), status)]);
+    let expected = |status| HashMap::from([(CODEX_APPS_MCP_SERVER_NAME.to_string(), status)]);
     assert_eq!(
         manager.connection_statuses().await,
         expected(Status::Failed)
@@ -948,13 +839,16 @@ pub(crate) async fn create_test_manager_with_ready_apps_client(
     release_list: Option<Arc<Notify>>,
 ) -> anyhow::Result<Arc<McpConnectionSet>> {
     let tool = create_test_tool(CODEX_APPS_MCP_SERVER_NAME, tool_name);
-    let client = create_test_apps_client(
-        tool.tool.clone(),
-        list_started,
-        release_list,
-        Arc::default(),
-    )
-    .await?;
+    let client = Arc::new(
+        RmcpClient::new_in_process_client(Arc::new(RefreshTestTransportFactory {
+            tool: tool.tool.clone(),
+            list_started,
+            release_list,
+            next_cursor: None,
+            list_requests: Arc::new(AtomicUsize::new(0)),
+        }))
+        .await?,
+    );
     client
         .initialize(
             InitializeRequestParams::new(
@@ -1015,7 +909,6 @@ pub(crate) async fn create_test_manager_with_ready_apps_client(
         CODEX_APPS_MCP_SERVER_NAME,
         McpServerMetadata {
             environment_id: codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
-            server_key: McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
             pollutes_memory: false,
             origin: None,
             supports_parallel_tool_calls: false,
@@ -1137,7 +1030,6 @@ async fn disabled_permissions_auto_accept_elicitation_with_empty_form_schema() {
     );
     let (tx_event, _rx_event) = async_channel::bounded(1);
     let sender = manager.make_sender(
-        McpServerKey::unscoped("server"),
         "server".to_string(),
         Some(tx_event),
         &ClientMcpExtensions::default(),
@@ -1176,7 +1068,6 @@ async fn disabled_permissions_do_not_auto_accept_elicitation_with_requested_fiel
     );
     let (tx_event, _rx_event) = async_channel::bounded(1);
     let sender = manager.make_sender(
-        McpServerKey::unscoped("server"),
         "server".to_string(),
         Some(tx_event),
         &ClientMcpExtensions::default(),
@@ -1272,7 +1163,6 @@ async fn assert_elicitation_declined_with_reviewer_calls(
     );
     let (tx_event, rx_event) = async_channel::bounded(1);
     let sender = manager.make_sender(
-        McpServerKey::unscoped(server_name),
         server_name.to_string(),
         Some(tx_event),
         &ClientMcpExtensions::default(),
@@ -1316,7 +1206,6 @@ async fn assert_requested_user_input_is_declined(
     );
     let (tx_event, rx_event) = async_channel::bounded(1);
     let sender = manager.make_sender(
-        McpServerKey::unscoped("server"),
         "server".to_string(),
         Some(tx_event),
         &ClientMcpExtensions::default(),
@@ -1396,7 +1285,6 @@ async fn assert_disabled_permissions_surface_requested_user_input(
     );
     let (tx_event, rx_event) = async_channel::bounded(1);
     let sender = manager.make_sender(
-        McpServerKey::unscoped("server"),
         "server".to_string(),
         Some(tx_event),
         &ClientMcpExtensions::default(),
@@ -1541,7 +1429,6 @@ async fn disabled_permissions_decline_user_input_without_an_event_channel() {
         full_access_form_input_enabled_router(),
     );
     let sender = manager.make_sender(
-        McpServerKey::unscoped("server"),
         "server".to_string(),
         /*tx_event*/ None,
         &ClientMcpExtensions::default(),
@@ -1604,7 +1491,6 @@ async fn concurrent_authority_updates_never_auto_approve_mixed_policy() {
         }
     });
     let sender = manager.make_sender(
-        McpServerKey::unscoped("server"),
         "server".to_string(),
         /*tx_event*/ None,
         &ClientMcpExtensions::default(),
@@ -1676,13 +1562,11 @@ async fn shared_elicitation_router_targets_the_exact_pending_request() {
     );
     let (tx_event, rx_event) = async_channel::bounded(2);
     let sender_a = manager_a.make_sender(
-        McpServerKey::unscoped("server"),
         "server".to_string(),
         Some(tx_event.clone()),
         &ClientMcpExtensions::default(),
     );
     let sender_b = manager_b.make_sender(
-        McpServerKey::unscoped("server"),
         "server".to_string(),
         Some(tx_event),
         &ClientMcpExtensions::default(),
@@ -1782,7 +1666,6 @@ async fn cancelled_elicitation_is_removed_without_affecting_other_pending_reques
     );
     let (tx_event, rx_event) = async_channel::bounded(2);
     let sender = manager.make_sender(
-        McpServerKey::unscoped("server"),
         "server".to_string(),
         Some(tx_event),
         &ClientMcpExtensions::default(),
@@ -1865,22 +1748,13 @@ async fn cancelled_elicitation_is_removed_without_affecting_other_pending_reques
 
 #[test]
 fn test_normalize_tools_short_non_duplicated_names() {
-    let mut tools = vec![
+    let tools = vec![
         create_test_tool("server1", "tool1"),
         create_test_tool("server1", "tool2"),
     ];
-    let key = McpServerKey::in_environment("remote", "server1");
-    for tool in &mut tools {
-        tool.server_key = key.clone();
-    }
 
-    let model_tools = normalize_tools_for_model_with_prefix(
-        tools,
-        /*prefix_mcp_tool_names*/ true,
-        &[],
-        McpServerExposure::Legacy,
-    );
-    assert!(model_tools.iter().all(|tool| tool.server_key() == &key));
+    let model_tools =
+        normalize_tools_for_model_with_prefix(tools, /*prefix_mcp_tool_names*/ true, &[]);
 
     assert_eq!(
         model_tool_names(&model_tools),
@@ -1903,7 +1777,6 @@ fn test_normalize_tools_omits_prefix_only_for_selected_servers() {
         tools,
         /*prefix_mcp_tool_names*/ true,
         &["history".to_string(), "notes".to_string()],
-        McpServerExposure::Legacy,
     );
 
     assert_eq!(
@@ -1925,7 +1798,6 @@ fn test_normalize_tools_selects_raw_server_name() {
         vec![tool],
         /*prefix_mcp_tool_names*/ true,
         &["codex_apps".to_string()],
-        McpServerExposure::Legacy,
     );
 
     assert_eq!(
@@ -1945,7 +1817,6 @@ fn test_normalize_tools_global_feature_omits_prefix_for_every_server() {
         tools,
         /*prefix_mcp_tool_names*/ false,
         &["history".to_string()],
-        McpServerExposure::Legacy,
     );
 
     assert_eq!(
@@ -1964,12 +1835,8 @@ fn test_normalize_tools_duplicated_names_skipped() {
         create_test_tool("server1", "duplicate_tool"),
     ];
 
-    let model_tools = normalize_tools_for_model_with_prefix(
-        tools,
-        /*prefix_mcp_tool_names*/ true,
-        &[],
-        McpServerExposure::Legacy,
-    );
+    let model_tools =
+        normalize_tools_for_model_with_prefix(tools, /*prefix_mcp_tool_names*/ true, &[]);
 
     // Only the first tool should remain, the second is skipped
     assert_eq!(
@@ -1989,7 +1856,6 @@ fn test_normalize_tools_respects_responses_api_name_length_boundaries() {
             vec![create_test_tool("codex_apps", &tool_name)],
             /*prefix_mcp_tool_names*/ true,
             &[],
-            McpServerExposure::Legacy,
         );
         let model_name = model_tools[0].canonical_tool_name();
 
@@ -2013,12 +1879,8 @@ fn test_normalize_tools_long_names_same_server() {
         create_test_tool(server_name, &second_name),
     ];
 
-    let model_tools = normalize_tools_for_model_with_prefix(
-        tools,
-        /*prefix_mcp_tool_names*/ true,
-        &[],
-        McpServerExposure::Legacy,
-    );
+    let model_tools =
+        normalize_tools_for_model_with_prefix(tools, /*prefix_mcp_tool_names*/ true, &[]);
 
     assert_eq!(model_tools.len(), 2);
 
@@ -2040,12 +1902,8 @@ fn test_normalize_tools_long_names_same_server() {
 fn test_normalize_tools_sanitizes_invalid_characters() {
     let tools = vec![create_test_tool("server.one", "tool.two-three")];
 
-    let model_tools = normalize_tools_for_model_with_prefix(
-        tools,
-        /*prefix_mcp_tool_names*/ true,
-        &[],
-        McpServerExposure::Legacy,
-    );
+    let model_tools =
+        normalize_tools_for_model_with_prefix(tools, /*prefix_mcp_tool_names*/ true, &[]);
 
     assert_eq!(model_tools.len(), 1);
     let tool = model_tools.into_iter().next().expect("one tool");
@@ -2060,7 +1918,7 @@ fn test_normalize_tools_sanitizes_invalid_characters() {
     );
     // The callable parts are sanitized for model-visible tool calls, but the raw
     // MCP name is preserved for the actual MCP call.
-    assert_eq!(tool.server_name(), "server.one");
+    assert_eq!(tool.server_name, "server.one");
     assert_eq!(tool.callable_namespace, "mcp__server_one");
     assert_eq!(tool.callable_name, "tool_two_three");
     assert_eq!(tool.tool.name, "tool.two-three");
@@ -2075,12 +1933,8 @@ fn test_normalize_tools_sanitizes_invalid_characters() {
 fn test_normalize_tools_keeps_hyphenated_mcp_tools_callable() {
     let tools = vec![create_test_tool("music-studio", "get-strudel-guide")];
 
-    let model_tools = normalize_tools_for_model_with_prefix(
-        tools,
-        /*prefix_mcp_tool_names*/ true,
-        &[],
-        McpServerExposure::Legacy,
-    );
+    let model_tools =
+        normalize_tools_for_model_with_prefix(tools, /*prefix_mcp_tool_names*/ true, &[]);
 
     assert_eq!(model_tools.len(), 1);
     let tool = model_tools.into_iter().next().expect("one tool");
@@ -2102,12 +1956,8 @@ fn test_normalize_tools_disambiguates_sanitized_namespace_collisions() {
         create_test_tool("npm__scope_package_name", "lookup"),
     ];
 
-    let model_tools = normalize_tools_for_model_with_prefix(
-        tools,
-        /*prefix_mcp_tool_names*/ true,
-        &[],
-        McpServerExposure::Legacy,
-    );
+    let model_tools =
+        normalize_tools_for_model_with_prefix(tools, /*prefix_mcp_tool_names*/ true, &[]);
 
     assert_eq!(model_tools.len(), 4);
     let mut namespaces = model_tools
@@ -2120,7 +1970,7 @@ fn test_normalize_tools_disambiguates_sanitized_namespace_collisions() {
 
     let raw_servers = model_tools
         .iter()
-        .map(super::super::tools::ToolInfo::server_name)
+        .map(|tool| tool.server_name.as_str())
         .collect::<HashSet<_>>();
     assert_eq!(
         raw_servers,
@@ -2145,12 +1995,8 @@ fn test_normalize_tools_disambiguates_sanitized_tool_name_collisions() {
         create_test_tool("server", "tool_name"),
     ];
 
-    let model_tools = normalize_tools_for_model_with_prefix(
-        tools,
-        /*prefix_mcp_tool_names*/ true,
-        &[],
-        McpServerExposure::Legacy,
-    );
+    let model_tools =
+        normalize_tools_for_model_with_prefix(tools, /*prefix_mcp_tool_names*/ true, &[]);
 
     assert_eq!(model_tools.len(), 2);
     let raw_tool_names = model_tools
@@ -2231,7 +2077,7 @@ fn filter_tools_applies_per_server_filters() {
         .collect();
 
     assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].server_name(), "server1");
+    assert_eq!(filtered[0].server_name, "server1");
     assert_eq!(filtered[0].callable_name, "tool_a");
 }
 
@@ -2267,7 +2113,7 @@ async fn shared_apps_snapshot_requires_writable_discovery_and_a_shared_cache() -
         );
 
         let mut config = crate::mcp::tests::test_mcp_config(codex_home.path().to_path_buf());
-        config.client.requires_read_only_mcp_tools = read_only;
+        config.requires_read_only_mcp_tools = read_only;
         let mut catalog = crate::ResolvedMcpCatalog::builder();
         catalog.register(crate::McpServerRegistration::from_hosted_apps(
             "fixture",
@@ -2290,7 +2136,7 @@ async fn shared_apps_snapshot_requires_writable_discovery_and_a_shared_cache() -
                 plugins_available: false,
                 ready_selected_capability_roots: Vec::new(),
                 mcp_servers: HashMap::from([(
-                    McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
+                    CODEX_APPS_MCP_SERVER_NAME.to_string(),
                     EffectiveMcpServer::from_host_config(server_config.clone()),
                 )]),
                 submit_id: "test".to_string(),
@@ -2342,7 +2188,7 @@ async fn hosted_apps_protocol_mode_is_independent_of_generic_mode() -> anyhow::R
         ),
     ] {
         let mut config = crate::mcp::tests::test_mcp_config(codex_home.path().to_path_buf());
-        config.client.protocol_mode = generic_mode;
+        config.protocol_mode = generic_mode;
         config.host_owned_apps_protocol_mode = hosted_mode;
         let mut catalog = crate::ResolvedMcpCatalog::builder();
         catalog.register(crate::McpServerRegistration::from_hosted_apps(
@@ -2372,11 +2218,11 @@ async fn hosted_apps_protocol_mode_is_independent_of_generic_mode() -> anyhow::R
                 ready_selected_capability_roots: Vec::new(),
                 mcp_servers: HashMap::from([
                     (
-                        McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
+                        CODEX_APPS_MCP_SERVER_NAME.to_string(),
                         EffectiveMcpServer::from_host_config(server_config.clone()),
                     ),
                     (
-                        McpServerKey::unscoped("third_party"),
+                        "third_party".to_string(),
                         EffectiveMcpServer::from_host_config(server_config.clone()),
                     ),
                 ]),
@@ -2403,13 +2249,10 @@ async fn hosted_apps_protocol_mode_is_independent_of_generic_mode() -> anyhow::R
         .await;
 
         assert_eq!(
-            manager.servers[&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME)].protocol_mode,
+            manager.servers[CODEX_APPS_MCP_SERVER_NAME].protocol_mode,
             hosted_mode
         );
-        assert_eq!(
-            manager.servers[&McpServerKey::unscoped("third_party")].protocol_mode,
-            generic_mode
-        );
+        assert_eq!(manager.servers["third_party"].protocol_mode, generic_mode);
         assert_eq!(
             manager
                 .event_stream_connection
@@ -2474,14 +2317,14 @@ async fn resource_template_listings_skip_only_hosted_apps() -> anyhow::Result<()
             .await;
         assert_eq!(
             binding
-                .list_resource_templates(&McpServerKey::unscoped(name), /*params*/ None)
+                .list_resource_templates(name, /*params*/ None)
                 .await?
                 .resource_templates,
             expected
         );
         let all = binding.list_all_resource_templates(|_| true).await;
         assert_eq!(
-            all.by_server.get(&McpServerKey::unscoped(name)),
+            all.by_server.get(name),
             (!expected.is_empty()).then_some(&expected)
         );
     }
@@ -2549,7 +2392,7 @@ async fn codex_apps_extension_does_not_share_host_owned_tools_cache() -> anyhow:
                 plugins_available: false,
                 ready_selected_capability_roots: Vec::new(),
                 mcp_servers: HashMap::from([(
-                    McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
+                    CODEX_APPS_MCP_SERVER_NAME.to_string(),
                     EffectiveMcpServer::from_host_config(server_config.clone()),
                 )]),
                 submit_id: "cache-ownership-test".to_string(),
@@ -2574,8 +2417,7 @@ async fn codex_apps_extension_does_not_share_host_owned_tools_cache() -> anyhow:
 
         let client = manager.test_client(CODEX_APPS_MCP_SERVER_NAME);
         assert_eq!(
-            manager.servers[&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME)].protocol_mode,
-            expected_mode,
+            manager.servers[CODEX_APPS_MCP_SERVER_NAME].protocol_mode, expected_mode,
             "an ordinary extension must use its own mode, not the hosted protocol default"
         );
         assert!(
@@ -2641,7 +2483,7 @@ async fn list_all_tools_uses_shared_codex_apps_cache_while_client_is_pending() {
                 == ToolName::namespaced("mcp__codex_apps", "calendar_create_event")
         })
         .expect("tool from shared cache");
-    assert_eq!(tool.server_name(), CODEX_APPS_MCP_SERVER_NAME);
+    assert_eq!(tool.server_name, CODEX_APPS_MCP_SERVER_NAME);
     assert_eq!(tool.callable_name, "calendar_create_event");
 }
 
@@ -2708,14 +2550,13 @@ async fn capture_binding_preserves_ready_client_catalog_and_shares_prepared_meta
     );
     manager
         .servers
-        .get_mut(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
+        .get_mut(CODEX_APPS_MCP_SERVER_NAME)
         .expect("test server exists")
         .tool_filter = tool_filter;
     manager.set_test_server_metadata(
         CODEX_APPS_MCP_SERVER_NAME,
         McpServerMetadata {
             environment_id: codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
-            server_key: McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
             pollutes_memory: false,
             origin: None,
             supports_parallel_tool_calls: false,
@@ -2743,10 +2584,7 @@ async fn capture_binding_preserves_ready_client_catalog_and_shares_prepared_meta
         vec!["client_local_tool", "collision"]
     );
     let prepared = step
-        .prepare_call(
-            &McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
-            "client_local_tool",
-        )
+        .prepare_call(CODEX_APPS_MCP_SERVER_NAME, "client_local_tool")
         .expect("client-local tool should be callable");
     assert!(std::ptr::eq(
         step.tools()
@@ -2755,33 +2593,21 @@ async fn capture_binding_preserves_ready_client_catalog_and_shares_prepared_meta
         prepared.tool_info()
     ));
     assert_eq!(
-        step.tool_info(
-            &McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
-            "collision"
-        )
-        .and_then(|tool| tool.connector_id.as_deref()),
+        step.tool_info(CODEX_APPS_MCP_SERVER_NAME, "collision")
+            .and_then(|tool| tool.connector_id.as_deref()),
         Some("z-hidden")
     );
     assert!(
-        step.prepare_call(
-            &McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
-            "collision"
-        )
-        .is_none()
+        step.prepare_call(CODEX_APPS_MCP_SERVER_NAME, "collision")
+            .is_none()
     );
     assert!(
-        step.prepare_call(
-            &McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
-            "shared_cached_tool"
-        )
-        .is_none()
+        step.prepare_call(CODEX_APPS_MCP_SERVER_NAME, "shared_cached_tool")
+            .is_none()
     );
     assert!(
-        step.prepare_call(
-            &McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
-            "client_local_blocked"
-        )
-        .is_none()
+        step.prepare_call(CODEX_APPS_MCP_SERVER_NAME, "client_local_blocked")
+            .is_none()
     );
 }
 
@@ -2868,7 +2694,7 @@ async fn hard_refresh_keeps_client_catalog_local_when_shared_cache_loses_race() 
 
     let mut config = crate::mcp::tests::test_mcp_config(codex_home.path().to_path_buf());
     config.server_permissions.insert(
-        McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
+        CODEX_APPS_MCP_SERVER_NAME.to_string(),
         McpServerPermissions::Thread,
     );
     let manager_a_for_refresh = Arc::clone(&manager_a);
@@ -2906,7 +2732,7 @@ async fn hard_refresh_keeps_client_catalog_local_when_shared_cache_loses_race() 
     Arc::get_mut(&mut manager_b)
         .expect("unshared manager")
         .servers
-        .get_mut(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
+        .get_mut(CODEX_APPS_MCP_SERVER_NAME)
         .expect("Apps server")
         .tool_filter
         .disabled
@@ -3138,7 +2964,7 @@ async fn list_available_server_infos_uses_cache_while_client_is_pending() {
     .await;
     let server_infos = timeout_result.expect("server info lookup should not block on startup");
     assert_eq!(
-        server_infos.get(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME)),
+        server_infos.get(CODEX_APPS_MCP_SERVER_NAME),
         Some(&server_info)
     );
 }
@@ -3165,7 +2991,7 @@ async fn list_all_tools_accepts_canonical_namespaced_tool_names() {
     let expected = ("rmcp", "rmcp", "echo", "echo");
     assert_eq!(
         (
-            tool.server_name(),
+            tool.server_name.as_str(),
             tool.callable_namespace.as_str(),
             tool.callable_name.as_str(),
             tool.tool.name.as_ref(),
@@ -3233,7 +3059,6 @@ async fn capture_binding_exposes_cached_tools_before_startup() {
         CODEX_APPS_MCP_SERVER_NAME,
         McpServerMetadata {
             environment_id: codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
-            server_key: McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
             pollutes_memory: false,
             origin: None,
             supports_parallel_tool_calls: false,
@@ -3261,17 +3086,14 @@ async fn capture_binding_exposes_cached_tools_before_startup() {
     );
     assert!(
         cached_binding
-            .prepare_call(
-                &McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
-                "shared_cached_tool"
-            )
+            .prepare_call(CODEX_APPS_MCP_SERVER_NAME, "shared_cached_tool")
             .is_none()
     );
 
     let manager_for_startup = Arc::clone(&manager);
     let startup = tokio::spawn(async move {
         manager_for_startup
-            .wait_for_server_startup(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
+            .wait_for_server_startup(CODEX_APPS_MCP_SERVER_NAME)
             .await
     });
 
@@ -3318,7 +3140,6 @@ async fn capture_binding_skips_pending_optional_servers_after_configured_shared_
     plugin_config.mcp_server_catalog = catalog.build();
     plugin_config.optional_mcp_startup_grace = Duration::from_millis(250);
     manager.tool_plugin_context = Arc::new(crate::tool_plugin_context(&plugin_config));
-    manager.config = Some(Arc::new(plugin_config.clone()));
     for server_name in ["pending-one", "pending-two", "pending-selected"] {
         manager.insert_test_client(
             server_name.to_string(),
@@ -3350,22 +3171,7 @@ async fn capture_binding_skips_pending_optional_servers_after_configured_shared_
         "pending-selected",
         manager.test_client("pending-selected").clone(),
     );
-    required_manager.required_servers = vec![McpServerKey::in_environment(
-        codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID,
-        "pending-selected",
-    )];
-    for manager in [&mut manager, &mut required_manager] {
-        for name in ["pending-one", "pending-selected"] {
-            if let Some(mut server) = manager.servers.remove(&McpServerKey::unscoped(name)) {
-                let key = McpServerKey::in_environment(
-                    codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID,
-                    name,
-                );
-                server.metadata.server_key = key.clone();
-                manager.servers.insert(key, server);
-            }
-        }
-    }
+    required_manager.required_servers = vec!["pending-selected".to_string()];
 
     let manager = Arc::new(manager);
     assert!(
@@ -3400,13 +3206,7 @@ async fn capture_binding_skips_pending_optional_servers_after_configured_shared_
     assert!(
         tokio::time::timeout(
             Duration::from_millis(1),
-            binding.list_resources(
-                &McpServerKey::in_environment(
-                    codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID,
-                    "pending-one"
-                ),
-                /*params*/ None
-            ),
+            binding.list_resources("pending-one", /*params*/ None),
         )
         .await
         .is_err(),
@@ -3415,7 +3215,7 @@ async fn capture_binding_skips_pending_optional_servers_after_configured_shared_
     assert!(
         tokio::time::timeout(
             Duration::from_millis(1),
-            binding.list_all_resources(|server| server.name() == "pending-one"),
+            binding.list_all_resources(|server| server == "pending-one"),
         )
         .await
         .is_ok(),
@@ -3423,10 +3223,7 @@ async fn capture_binding_skips_pending_optional_servers_after_configured_shared_
     );
 
     for server_name in ["pending-one", "pending-selected"] {
-        let required_servers = vec![McpServerKey::in_environment(
-            codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID,
-            server_name,
-        )];
+        let required_servers = vec![server_name.to_string()];
         let binding = tokio::time::timeout(
             Duration::from_millis(1),
             manager.capture_binding_with_metadata(
@@ -3489,10 +3286,9 @@ async fn capture_binding_waits_for_optional_startup_when_shared_grace_is_disable
 
     let mut config = crate::mcp::tests::test_mcp_config(std::env::temp_dir());
     config.optional_mcp_startup_grace = Duration::ZERO;
-    config.server_permissions.insert(
-        McpServerKey::unscoped("optional"),
-        McpServerPermissions::Thread,
-    );
+    config
+        .server_permissions
+        .insert("optional".to_string(), McpServerPermissions::Thread);
     let manager = Arc::new(manager);
     let mut capture = tokio::spawn(async move {
         manager
@@ -3515,11 +3311,7 @@ async fn capture_binding_waits_for_optional_startup_when_shared_grace_is_disable
     release_startup.send(()).expect("release client startup");
 
     let binding = capture.await.expect("capture binding task");
-    assert!(
-        binding
-            .prepare_call(&McpServerKey::unscoped("optional"), "echo")
-            .is_some()
-    );
+    assert!(binding.prepare_call("optional", "echo").is_some());
 }
 
 #[tokio::test]
@@ -3557,9 +3349,7 @@ async fn stable_catalog_revisions_ignore_terminal_optional_server_failures() {
             .await
             .is_some()
     );
-    manager
-        .required_servers
-        .push(McpServerKey::unscoped("failed"));
+    manager.required_servers.push("failed".to_string());
     assert!(
         manager
             .stable_catalog_revisions(
@@ -3572,11 +3362,7 @@ async fn stable_catalog_revisions_ignore_terminal_optional_server_failures() {
     manager.required_servers.clear();
 
     let binding = capture_binding(&Arc::new(manager)).await;
-    assert!(
-        binding
-            .prepare_call(&McpServerKey::unscoped("ready"), "echo")
-            .is_some()
-    );
+    assert!(binding.prepare_call("ready", "echo").is_some());
 }
 
 #[tokio::test(start_paused = true)]
@@ -3801,7 +3587,7 @@ async fn capture_binding_uses_cache_published_during_optional_startup() {
 
     let binding = binding.await;
     assert!(
-        !manager.servers[&McpServerKey::unscoped("pending")]
+        !manager.servers["pending"]
             .connection
             .client
             .startup_complete
@@ -3856,30 +3642,17 @@ async fn capture_binding_retains_cached_tools_that_expire_while_waiting_for_anot
     );
     manager.insert_test_client("server_a", client_a);
     manager.insert_test_client("server_b", client_b);
-    Arc::get_mut(
-        &mut manager
-            .servers
-            .get_mut(&McpServerKey::unscoped("server_a"))
-            .unwrap()
-            .connection,
-    )
-    .expect("unique server A connection")
-    .startup_trigger = Some(watch::channel(/*init*/ false).0);
-    manager.required_servers = vec![
-        McpServerKey::unscoped("server_a"),
-        McpServerKey::unscoped("server_b"),
-    ];
+    Arc::get_mut(&mut manager.servers.get_mut("server_a").unwrap().connection)
+        .expect("unique server A connection")
+        .startup_trigger = Some(watch::channel(/*init*/ false).0);
+    manager.required_servers = vec!["server_a".to_string(), "server_b".to_string()];
     let manager = Arc::new(manager);
 
     let binding = capture_binding(&manager);
     tokio::pin!(binding);
     assert!(futures::poll!(&mut binding).is_pending());
     started_b.await.expect("server B startup should begin");
-    assert!(
-        manager.servers[&McpServerKey::unscoped("server_a")]
-            .connection
-            .startup_is_dormant()
-    );
+    assert!(manager.servers["server_a"].connection.startup_is_dormant());
 
     // Expire A's catalog while capture is waiting for B's required startup.
     tokio::time::advance(Duration::from_secs(/*secs*/ 2)).await;
@@ -3896,11 +3669,7 @@ async fn capture_binding_retains_cached_tools_that_expire_while_waiting_for_anot
             ToolName::namespaced("mcp__server_b", "tool_b"),
         ])
     );
-    assert!(
-        manager.servers[&McpServerKey::unscoped("server_a")]
-            .connection
-            .startup_is_dormant()
-    );
+    assert!(manager.servers["server_a"].connection.startup_is_dormant());
 }
 
 #[tokio::test]
@@ -3944,7 +3713,7 @@ async fn capture_binding_omits_cache_disabled_while_waiting_for_another_server()
     );
     manager.insert_test_client("cached", cached);
     manager.insert_test_client("waiting", waiting);
-    manager.required_servers = vec![McpServerKey::unscoped("waiting")];
+    manager.required_servers = vec!["waiting".to_string()];
     let manager = Arc::new(manager);
 
     let binding = capture_binding(&manager);
@@ -4008,7 +3777,7 @@ async fn capture_binding_resolves_concurrently_and_rechecks_cached_clients() {
     let manager_for_startup = Arc::clone(&manager);
     let startup = tokio::spawn(async move {
         manager_for_startup
-            .wait_for_server_startup(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
+            .wait_for_server_startup(CODEX_APPS_MCP_SERVER_NAME)
             .await
     });
     tokio::time::timeout(Duration::from_secs(1), apps_started)
@@ -4041,30 +3810,16 @@ async fn capture_binding_resolves_concurrently_and_rechecks_cached_clients() {
     );
     assert!(
         binding
-            .prepare_call(
-                &McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
-                "client_local_tool"
-            )
+            .prepare_call(CODEX_APPS_MCP_SERVER_NAME, "client_local_tool")
             .is_some()
     );
     assert!(
         binding
-            .prepare_call(
-                &McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
-                "shared_cached_tool"
-            )
+            .prepare_call(CODEX_APPS_MCP_SERVER_NAME, "shared_cached_tool")
             .is_none()
     );
-    assert!(
-        binding
-            .prepare_call(&McpServerKey::unscoped("first"), "first_tool")
-            .is_some()
-    );
-    assert!(
-        binding
-            .prepare_call(&McpServerKey::unscoped("second"), "second_tool")
-            .is_some()
-    );
+    assert!(binding.prepare_call("first", "first_tool").is_some());
+    assert!(binding.prepare_call("second", "second_tool").is_some());
 }
 
 #[tokio::test]
@@ -4089,7 +3844,7 @@ async fn list_all_tools_applies_legacy_mcp_prefix_by_default() {
     let expected = ("rmcp", "mcp__rmcp", "echo", "echo");
     assert_eq!(
         (
-            tool.server_name(),
+            tool.server_name.as_str(),
             tool.callable_namespace.as_str(),
             tool.callable_name.as_str(),
             tool.tool.name.as_ref(),
@@ -4115,8 +3870,9 @@ async fn call_tool_requires_connection_without_waiting_for_startup() {
     let pending_call = tokio::time::timeout(
         Duration::from_millis(50),
         manager.call_tool(
-            &McpServerKey::unscoped("docs"),
+            "docs",
             "search",
+            /*environment_id*/ None,
             /*arguments*/ None,
             /*meta*/ None,
             Some(Duration::from_secs(5)),
@@ -4138,8 +3894,9 @@ async fn call_tool_requires_connection_without_waiting_for_startup() {
 
     let ready_error = manager
         .call_tool(
-            &McpServerKey::unscoped("docs"),
+            "docs",
             "search",
+            /*environment_id*/ None,
             /*arguments*/ None,
             /*meta*/ None,
             Some(Duration::from_secs(5)),
@@ -4164,7 +3921,7 @@ async fn connected_call_respects_server_tool_filters() {
     manager.insert_test_client("docs", client);
     manager
         .servers
-        .get_mut(&McpServerKey::unscoped("docs"))
+        .get_mut("docs")
         .expect("test server should exist")
         .tool_filter
         .disabled
@@ -4172,8 +3929,9 @@ async fn connected_call_respects_server_tool_filters() {
 
     let filtered_error = manager
         .call_tool(
-            &McpServerKey::unscoped("docs"),
+            "docs",
             "search",
+            /*environment_id*/ None,
             /*arguments*/ None,
             /*meta*/ None,
             Some(Duration::from_secs(5)),
@@ -4185,7 +3943,7 @@ async fn connected_call_respects_server_tool_filters() {
 }
 
 #[tokio::test]
-async fn explicit_environment_is_validated_before_waiting_for_ready_connections() {
+async fn call_tool_validates_environment_without_waiting_for_ready_connections() {
     let client = create_test_managed_client(vec![create_test_tool("docs", "search")]).await;
     let (client, _, _) = create_gated_async_managed_client(client);
     let approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
@@ -4198,27 +3956,34 @@ async fn explicit_environment_is_validated_before_waiting_for_ready_connections(
     manager.insert_test_client("docs", client);
     manager
         .servers
-        .get_mut(&McpServerKey::unscoped("docs"))
+        .get_mut("docs")
         .expect("test server should exist")
         .metadata
         .environment_id = "executor-a".to_string();
 
     let mismatched_environment = manager
-        .resolve_tool_call_server("docs", "search", Some("executor-b"))
+        .call_tool(
+            "docs",
+            "search",
+            Some("executor-b"),
+            /*arguments*/ None,
+            /*meta*/ None,
+            Some(Duration::from_secs(5)),
+            /*wait_for_server*/ false,
+        )
+        .await
         .expect_err("calls must reject a server from a different environment");
     assert_eq!(
         mismatched_environment.to_string(),
         "MCP server `docs` is running in environment `executor-a`, expected `executor-b`"
     );
 
-    let server = manager
-        .resolve_tool_call_server("docs", "search", Some("executor-a"))
-        .expect("the declared owner must resolve");
     let pending_call = tokio::time::timeout(
         Duration::from_millis(50),
         manager.call_tool(
-            server,
+            "docs",
             "search",
+            Some("executor-a"),
             /*arguments*/ None,
             /*meta*/ None,
             Some(Duration::from_secs(5)),
@@ -4282,7 +4047,7 @@ async fn catalog_listing_preserves_legacy_apps_tools_during_failed_startup() {
         let connection = Arc::get_mut(
             &mut manager
                 .servers
-                .get_mut(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
+                .get_mut(CODEX_APPS_MCP_SERVER_NAME)
                 .expect("Apps server")
                 .connection,
         )
@@ -4571,13 +4336,13 @@ async fn list_all_tools_uses_shared_codex_apps_cache_when_client_startup_fails()
                 == ToolName::namespaced("mcp__codex_apps", "calendar_create_event")
         })
         .expect("tool from shared cache");
-    assert_eq!(tool.server_name(), CODEX_APPS_MCP_SERVER_NAME);
+    assert_eq!(tool.server_name, CODEX_APPS_MCP_SERVER_NAME);
     assert_eq!(tool.callable_name, "calendar_create_event");
     assert_eq!(
         manager
             .list_available_server_infos(|_| true)
             .await
-            .get(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME)),
+            .get(CODEX_APPS_MCP_SERVER_NAME),
         Some(&server_info)
     );
 }
@@ -4607,11 +4372,10 @@ async fn list_all_tools_reconnects_failed_codex_apps_startup_and_reuses_client()
     let mut manager = create_test_manager_with_failed_apps_startup(Vec::new(), reconnect_factory);
     manager
         .servers
-        .get_mut(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
+        .get_mut(CODEX_APPS_MCP_SERVER_NAME)
         .expect("test server exists")
         .metadata = McpServerMetadata {
         environment_id: codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
-        server_key: McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
         pollutes_memory: false,
         origin: None,
         supports_parallel_tool_calls: false,
@@ -4655,10 +4419,7 @@ async fn list_all_tools_reconnects_failed_codex_apps_startup_and_reuses_client()
 
     let step = capture_binding(&manager).await;
     let prepared = step
-        .prepare_call(
-            &McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
-            "drive_search",
-        )
+        .prepare_call(CODEX_APPS_MCP_SERVER_NAME, "drive_search")
         .expect("recovered tool should have a prepared call");
     assert!(
         !prepared
@@ -4835,7 +4596,6 @@ async fn tool_lists_do_not_block_and_share_codex_apps_startup_reconnect() {
         CODEX_APPS_MCP_SERVER_NAME,
         McpServerMetadata {
             environment_id: codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
-            server_key: McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
             pollutes_memory: false,
             origin: None,
             supports_parallel_tool_calls: false,
@@ -4873,8 +4633,7 @@ async fn tool_lists_do_not_block_and_share_codex_apps_startup_reconnect() {
         .expect("step capture should not wait for reconnect");
     assert_eq!(pending_step.tools(), first_tools);
     // Readiness joins the retry that discovery started before call preparation.
-    let server_key = McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME);
-    let mut ready = Box::pin(manager.wait_for_server_startup(&server_key));
+    let mut ready = Box::pin(manager.wait_for_server_startup(CODEX_APPS_MCP_SERVER_NAME));
     assert!(futures::poll!(&mut ready).is_pending());
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
 
@@ -4905,10 +4664,7 @@ async fn tool_lists_do_not_block_and_share_codex_apps_startup_reconnect() {
     );
     assert!(
         recovered_step
-            .prepare_call(
-                &McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
-                "drive_search"
-            )
+            .prepare_call(CODEX_APPS_MCP_SERVER_NAME, "drive_search")
             .is_some()
     );
     assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
@@ -4931,7 +4687,6 @@ async fn list_all_tools_adds_server_metadata_to_tools() {
         server_name,
         McpServerMetadata {
             environment_id: codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
-            server_key: McpServerKey::unscoped(server_name),
             pollutes_memory: true,
             origin: Some(McpServerOrigin::StreamableHttp(
                 "https://docs.example".to_string(),
@@ -4945,7 +4700,7 @@ async fn list_all_tools_adds_server_metadata_to_tools() {
     let tools = manager.list_all_tools().await;
     assert_eq!(tools.len(), 1);
     let tool = &tools[0];
-    assert_eq!(tool.server_name(), server_name);
+    assert_eq!(tool.server_name, server_name);
     assert!(tool.supports_parallel_tool_calls);
     assert_eq!(tool.server_origin.as_deref(), Some("https://docs.example"));
 }
@@ -4966,10 +4721,7 @@ fn server_metadata_preserves_tool_approval_policy() {
             ..Default::default()
         },
     );
-    let metadata = McpServerMetadata::new(
-        McpServerKey::unscoped("docs"),
-        &EffectiveMcpServer::from_host_config(config),
-    );
+    let metadata = McpServerMetadata::from(&EffectiveMcpServer::from_host_config(config));
 
     assert_eq!(metadata.environment_id, "remote");
     assert_eq!(metadata.tool_approval_mode("read"), AppToolApproval::Prompt);
@@ -5029,11 +4781,11 @@ fn gov_codex_apps_retain_local_chatgpt_auth_provider() -> anyhow::Result<()> {
     let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
     let provider = codex_model_provider::auth_provider_from_auth(&auth);
     let mut config = crate::mcp::tests::test_mcp_config(codex_home.path().to_path_buf());
-    config.client.chatgpt_base_url = "https://gov.chatgpt.com/backend-api/".to_string();
+    config.chatgpt_base_url = "https://gov.chatgpt.com/backend-api/".to_string();
     config.apps_enabled = true;
 
     let local_config = crate::codex_apps_mcp_server_config(
-        &config.client.chatgpt_base_url,
+        &config.chatgpt_base_url,
         /*apps_mcp_product_sku*/ None,
         /*originator*/ None,
     );
@@ -5059,7 +4811,7 @@ fn gov_codex_apps_retain_local_chatgpt_auth_provider() -> anyhow::Result<()> {
     config.mcp_server_catalog = catalog.build();
 
     let servers = crate::effective_mcp_servers(&config, Some(&auth));
-    let local = &servers[&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME)];
+    let local = &servers[CODEX_APPS_MCP_SERVER_NAME];
     assert_eq!(local.config().auth, McpServerAuth::ChatGpt);
     let retained = chatgpt_auth_provider_for_server(local, Some(Arc::clone(&provider)))
         .expect("local Gov Apps must retain ChatGPT authentication");
@@ -5068,23 +4820,11 @@ fn gov_codex_apps_retain_local_chatgpt_auth_provider() -> anyhow::Result<()> {
         "server selection must preserve the supplied provider"
     );
 
-    assert_eq!(
-        servers[&McpServerKey::unscoped("custom-oauth")]
-            .config()
-            .auth,
-        McpServerAuth::OAuth
-    );
-    assert_eq!(
-        servers[&McpServerKey::unscoped("remote-gov")].config().auth,
-        McpServerAuth::ChatGpt
-    );
+    assert_eq!(servers["custom-oauth"].config().auth, McpServerAuth::OAuth);
+    assert_eq!(servers["remote-gov"].config().auth, McpServerAuth::ChatGpt);
     for name in ["custom-oauth", "remote-gov"] {
         assert!(
-            chatgpt_auth_provider_for_server(
-                &servers[&McpServerKey::unscoped(name)],
-                Some(Arc::clone(&provider))
-            )
-            .is_none(),
+            chatgpt_auth_provider_for_server(&servers[name], Some(Arc::clone(&provider))).is_none(),
             "{name} must not receive the host ChatGPT provider"
         );
     }
@@ -5191,17 +4931,19 @@ async fn executor_owned_chatgpt_mcp_accepts_only_safe_explicit_authorization() -
         let mut catalog = crate::ResolvedMcpCatalog::builder();
         catalog.register(crate::McpServerRegistration::from_config(
             "fake-first-party".to_string(),
-            server_config,
+            server_config.clone(),
         ));
         runtime_config.mcp_server_catalog = catalog.build();
-        let mcp_servers = crate::effective_mcp_servers(&runtime_config, Some(&hosted_auth));
+        let mcp_servers = crate::effective_mcp_servers_from_configured(
+            HashMap::from([("fake-first-party".to_string(), server_config)]),
+            &runtime_config,
+            Some(&hosted_auth),
+        );
         assert!(matches!(
-            mcp_servers[&McpServerKey::unscoped("fake-first-party")]
-                .config()
-                .auth,
+            mcp_servers["fake-first-party"].config().auth,
             McpServerAuth::ChatGpt
         ));
-        let remote_server = &mcp_servers[&McpServerKey::unscoped("fake-first-party")];
+        let remote_server = &mcp_servers["fake-first-party"];
         assert!(
             chatgpt_auth_provider_for_server(
                 remote_server,
@@ -5245,7 +4987,7 @@ async fn executor_owned_chatgpt_mcp_accepts_only_safe_explicit_authorization() -
             "{case}: executor-owned servers must not retain hosted OAuth credentials"
         );
         let auth_statuses = crate::compute_auth_statuses(
-            [(&McpServerKey::unscoped("fake-first-party"), remote_server)],
+            mcp_servers.iter(),
             OAuthCredentialsStoreMode::default(),
             AuthKeyringBackendKind::default(),
             Some(&hosted_auth),
@@ -5260,8 +5002,7 @@ async fn executor_owned_chatgpt_mcp_accepts_only_safe_explicit_authorization() -
             McpAuthState::Unsupported
         };
         assert_eq!(
-            auth_statuses[&McpServerKey::unscoped("fake-first-party")].auth_state,
-            expected_auth_state,
+            auth_statuses["fake-first-party"].auth_state, expected_auth_state,
             "{case}: auth status must only accept safe executor-owned authorization"
         );
 
@@ -5325,7 +5066,7 @@ async fn no_local_runtime_fails_local_stdio_but_keeps_local_http_server() {
     let codex_home = tempdir().expect("tempdir");
     let mcp_servers = HashMap::from([
         (
-            McpServerKey::unscoped("stdio"),
+            "stdio".to_string(),
             EffectiveMcpServer::from_host_config(McpServerConfig {
                 auth: Default::default(),
                 transport: McpServerTransportConfig::Stdio {
@@ -5355,7 +5096,7 @@ async fn no_local_runtime_fails_local_stdio_but_keeps_local_http_server() {
             }),
         ),
         (
-            McpServerKey::unscoped("http"),
+            "http".to_string(),
             EffectiveMcpServer::from_host_config(McpServerConfig {
                 auth: Default::default(),
                 transport: McpServerTransportConfig::StreamableHttp {
@@ -5428,7 +5169,7 @@ async fn no_local_runtime_fails_local_stdio_but_keeps_local_http_server() {
     assert!(manager.contains_server("http"));
     assert!(
         !manager
-            .wait_for_server_ready(&McpServerKey::unscoped("stdio"), Duration::from_millis(10))
+            .wait_for_server_ready("stdio", Duration::from_millis(10))
             .await
     );
     let error = match manager.test_client("stdio").client().await {
@@ -5798,7 +5539,7 @@ async fn manager_with_reusable_ready_server(
     );
     let server = EffectiveMcpServer::from_host_config(config.clone());
     manager.servers.insert(
-        McpServerKey::unscoped("docs"),
+        "docs".to_string(),
         McpServerView {
             refresh_tool_list: true,
             refresh_timeout: DEFAULT_STARTUP_TIMEOUT,
@@ -5815,7 +5556,7 @@ async fn manager_with_reusable_ready_server(
                 legacy_fallback: None,
                 _diagnostics_guard: LIVE_CONNECTIONS.track(),
             }),
-            metadata: McpServerMetadata::new(McpServerKey::unscoped("docs"), &server),
+            metadata: McpServerMetadata::from(&server),
             tool_filter: ToolFilter::from_config(config),
             tool_timeout: Some(config.tool_timeout_sec.unwrap_or(DEFAULT_TOOL_TIMEOUT)),
             catalog_item_limit: crate::pagination::MAX_MCP_CATALOG_ITEMS,
@@ -5847,11 +5588,6 @@ async fn reconcile_reusable_server_with_mcp_config(
     runtime_context: McpRuntimeContext,
     mcp_config: crate::McpConfig,
 ) -> McpConnectionSet {
-    let key = mcp_config
-        .mcp_server_catalog
-        .resolve_server_name(server_name)
-        .cloned()
-        .unwrap_or_else(|| McpServerKey::unscoped(server_name));
     let (tx_event, _rx_event) = async_channel::unbounded();
     McpConnectionSet::new(
         /*ema_auth*/ None,
@@ -5868,7 +5604,10 @@ async fn reconcile_reusable_server_with_mcp_config(
             config: Arc::new(mcp_config),
             plugins_available: false,
             ready_selected_capability_roots: Vec::new(),
-            mcp_servers: HashMap::from([(key, EffectiveMcpServer::from_host_config(config))]),
+            mcp_servers: HashMap::from([(
+                server_name.to_string(),
+                EffectiveMcpServer::from_host_config(config),
+            )]),
             submit_id: "refresh".to_string(),
             tx_event: Some(tx_event),
             startup_cancellation_token: CancellationToken::new(),
@@ -5902,7 +5641,7 @@ async fn read_only_policy_does_not_reuse_a_writable_connection() {
     .await;
     for read_only in [false, true] {
         let mut mcp_config = crate::mcp::tests::test_mcp_config(codex_home.path().to_path_buf());
-        mcp_config.client.requires_read_only_mcp_tools = read_only;
+        mcp_config.requires_read_only_mcp_tools = read_only;
         let reconciled = reconcile_reusable_server_with_mcp_config(
             &previous,
             "docs",
@@ -6110,7 +5849,7 @@ async fn refreshed_catalog_follows_reused_client_without_mutating_old_bindings()
     let connection = Arc::get_mut(
         &mut manager
             .servers
-            .get_mut(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))
+            .get_mut(CODEX_APPS_MCP_SERVER_NAME)
             .expect("Apps server")
             .connection,
     )
@@ -6134,13 +5873,10 @@ async fn refreshed_catalog_follows_reused_client_without_mutating_old_bindings()
     let old_binding = capture_binding(&previous).await;
     let old_tools = serde_json::to_value(old_binding.tools())?;
     let old_call = old_binding
-        .prepare_call(
-            &McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
-            "startup",
-        )
+        .prepare_call(CODEX_APPS_MCP_SERVER_NAME, "startup")
         .expect("startup call");
     let unrelated_call = old_binding
-        .prepare_call(&McpServerKey::unscoped("docs"), "unrelated")
+        .prepare_call("docs", "unrelated")
         .expect("unrelated call");
 
     previous.refresh_codex_apps_tools_for_discovery().await?;
@@ -6257,7 +5993,7 @@ async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> a
     );
     let server = EffectiveMcpServer::from_host_config(config.clone());
     previous.servers.insert(
-        McpServerKey::unscoped("docs"),
+        "docs".to_string(),
         McpServerView {
             refresh_tool_list: true,
             refresh_timeout: DEFAULT_STARTUP_TIMEOUT,
@@ -6286,7 +6022,7 @@ async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> a
                 legacy_fallback: None,
                 _diagnostics_guard: LIVE_CONNECTIONS.track(),
             }),
-            metadata: McpServerMetadata::new(McpServerKey::unscoped("docs"), &server),
+            metadata: McpServerMetadata::from(&server),
             tool_filter: ToolFilter::from_config(&config),
             tool_timeout: Some(config.tool_timeout_sec.unwrap_or(DEFAULT_TOOL_TIMEOUT)),
             catalog_item_limit: crate::pagination::MAX_MCP_CATALOG_ITEMS,
@@ -6306,7 +6042,7 @@ async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> a
                 &ClientMcpExtensions::default(),
             ),
             Some((
-                previous.servers[&McpServerKey::unscoped("docs")]
+                previous.servers["docs"]
                     .connection
                     .identity
                     .as_ref()
@@ -6358,7 +6094,7 @@ async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> a
         vec!["old_search".to_string()]
     );
     let prepared = old_step
-        .prepare_call(&McpServerKey::unscoped("docs"), "old_search")
+        .prepare_call("docs", "old_search")
         .expect("prepared call");
     let (entered, started) = tokio::sync::oneshot::channel();
     let (release, resumed) = tokio::sync::oneshot::channel();
@@ -6398,11 +6134,11 @@ async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> a
     assert_eq!(failed.tools(), old_step.tools());
     assert_eq!(
         failed.list_all_resources(|_| true).await.by_server,
-        HashMap::from([(McpServerKey::unscoped("docs"), vec![])])
+        HashMap::from([("docs".to_string(), vec![])])
     );
     assert_eq!(
         failed.list_all_resource_templates(|_| true).await.by_server,
-        HashMap::from([(McpServerKey::unscoped("docs"), vec![])])
+        HashMap::from([("docs".to_string(), vec![])])
     );
     let retry_started = tokio::time::Instant::now();
     let retry = capture_binding(&reconciled).await;
@@ -6486,7 +6222,7 @@ async fn reconciliation_reuses_an_unchanged_pending_server_without_waiting() -> 
     let connection = Arc::get_mut(
         &mut previous
             .servers
-            .get_mut(&McpServerKey::unscoped("docs"))
+            .get_mut("docs")
             .expect("test server should exist")
             .connection,
     )
@@ -6533,7 +6269,7 @@ async fn reconciliation_cancels_a_reused_pending_server_when_disabled() -> anyho
     let connection = Arc::get_mut(
         &mut previous
             .servers
-            .get_mut(&McpServerKey::unscoped("docs"))
+            .get_mut("docs")
             .expect("test server should exist")
             .connection,
     )
@@ -6546,11 +6282,7 @@ async fn reconciliation_cancels_a_reused_pending_server_when_disabled() -> anyho
 
     config.enabled = false;
     let removed = reconcile_reusable_server(&reused, config, runtime_context).await;
-    assert!(
-        !removed
-            .servers
-            .contains_key(&McpServerKey::unscoped("docs"))
-    );
+    assert!(!removed.servers.contains_key("docs"));
     drop(previous);
     drop(reused);
 
@@ -6571,14 +6303,9 @@ async fn reconciliation_retries_non_oauth_authentication_failures() {
     let config = reusable_server_config("http://127.0.0.1:1");
     let mut previous =
         manager_with_reusable_ready_server(&config, &runtime_context, Vec::new()).await;
-    let connection = Arc::get_mut(
-        &mut previous
-            .servers
-            .get_mut(&McpServerKey::unscoped("docs"))
-            .expect("server")
-            .connection,
-    )
-    .expect("test server has one connection owner");
+    let connection =
+        Arc::get_mut(&mut previous.servers.get_mut("docs").expect("server").connection)
+            .expect("test server has one connection owner");
     connection.client.client = futures::future::ready(Err(StartupOutcomeError::Failed {
         error: "bearer token rejected".to_string(),
         is_authentication_required: true,
@@ -6778,14 +6505,18 @@ async fn reconciliation_replaces_connection_when_auth_mode_changes() -> anyhow::
         let mut catalog = crate::ResolvedMcpCatalog::builder();
         catalog.register(crate::McpServerRegistration::from_config(
             "docs".to_string(),
-            config,
+            config.clone(),
         ));
         mcp_config.mcp_server_catalog = catalog.build();
-        crate::effective_mcp_servers(&mcp_config, /*auth*/ None)
-            .remove(&McpServerKey::unscoped("docs"))
-            .expect("configured server should survive auth projection")
-            .config()
-            .clone()
+        crate::effective_mcp_servers_from_configured(
+            HashMap::from([("docs".to_string(), config)]),
+            &mcp_config,
+            /*auth*/ None,
+        )
+        .remove("docs")
+        .expect("configured server should survive auth projection")
+        .config()
+        .clone()
     });
     let previous = manager_with_reusable_ready_server(
         &config,
@@ -6797,7 +6528,7 @@ async fn reconciliation_replaces_connection_when_auth_mode_changes() -> anyhow::
     let reconciled = reconcile_reusable_server(&previous, refreshed_config, runtime_context).await;
     let outcome = reconciled
         .servers
-        .get(&McpServerKey::unscoped("docs"))
+        .get("docs")
         .expect("refreshed server should exist")
         .connection
         .client()
@@ -6837,7 +6568,7 @@ async fn reconciliation_replaces_connection_when_protocol_mode_changes() {
     .await;
     let codex_home = tempdir().expect("tempdir");
     let mut mcp_config = crate::mcp::tests::test_mcp_config(codex_home.path().to_path_buf());
-    mcp_config.client.protocol_mode = codex_rmcp_client::McpProtocolMode::V20260728;
+    mcp_config.protocol_mode = codex_rmcp_client::McpProtocolMode::V20260728;
 
     let reconciled = McpConnectionSet::new(
         /*ema_auth*/ None,
@@ -6855,7 +6586,7 @@ async fn reconciliation_replaces_connection_when_protocol_mode_changes() {
             plugins_available: false,
             ready_selected_capability_roots: Vec::new(),
             mcp_servers: HashMap::from([(
-                McpServerKey::unscoped("docs"),
+                "docs".to_string(),
                 EffectiveMcpServer::from_host_config(config),
             )]),
             submit_id: "refresh".to_string(),
@@ -6902,7 +6633,7 @@ async fn reconciliation_reuses_legacy_stdio_server_when_modern_protocol_is_enabl
     .await;
     let codex_home = tempdir().expect("tempdir");
     let mut mcp_config = crate::mcp::tests::test_mcp_config(codex_home.path().to_path_buf());
-    mcp_config.client.protocol_mode = codex_rmcp_client::McpProtocolMode::V20260728;
+    mcp_config.protocol_mode = codex_rmcp_client::McpProtocolMode::V20260728;
 
     let reconciled = McpConnectionSet::new(
         /*ema_auth*/ None,
@@ -6920,7 +6651,7 @@ async fn reconciliation_reuses_legacy_stdio_server_when_modern_protocol_is_enabl
             plugins_available: false,
             ready_selected_capability_roots: Vec::new(),
             mcp_servers: HashMap::from([(
-                McpServerKey::unscoped("docs"),
+                "docs".to_string(),
                 EffectiveMcpServer::from_host_config(config),
             )]),
             submit_id: "refresh".to_string(),
@@ -6964,7 +6695,6 @@ async fn reconciliation_updates_elicitation_policy_without_restarting_ready_serv
     );
     let (tx_event, events) = async_channel::unbounded();
     let sender = previous.elicitation_requests.make_sender(
-        McpServerKey::unscoped("docs"),
         "docs".to_string(),
         Some(tx_event),
         &ClientMcpExtensions::default(),
@@ -7105,7 +6835,7 @@ async fn reconciliation_replaces_closed_connections() -> anyhow::Result<()> {
         .await?;
     let view = previous
         .servers
-        .get_mut(&McpServerKey::unscoped("docs"))
+        .get_mut("docs")
         .expect("test server should exist");
     let mut connected_client = view.connection.client().await?;
     connected_client.client = Arc::clone(&client);
@@ -7207,19 +6937,12 @@ async fn reconciliation_reconnects_when_host_plugin_root_changes() {
     Arc::get_mut(
         &mut previous
             .servers
-            .get_mut(&McpServerKey::unscoped("docs"))
+            .get_mut("docs")
             .expect("test server should exist")
             .connection,
     )
     .expect("test server should have one connection owner")
     .identity = Some(original_identity);
-    let key = McpServerKey::in_environment(&server_config.environment_id, "docs");
-    let mut view = previous
-        .servers
-        .remove(&McpServerKey::unscoped("docs"))
-        .expect("test server");
-    view.metadata.server_key = key.clone();
-    previous.servers.insert(key.clone(), view);
 
     let codex_home = tempdir().expect("tempdir");
     let config_for_root = |root| {
@@ -7244,7 +6967,7 @@ async fn reconciliation_reconnects_when_host_plugin_root_changes() {
         config_for_root(original_root),
     )
     .await;
-    assert!(previous.shares_server_connection(&unchanged, &key));
+    assert!(previous.shares_test_connection_with(&unchanged, "docs"));
 
     let replacement_config = config_for_root(replacement_root);
     let replacement = reconcile_reusable_server_with_mcp_config(
@@ -7255,7 +6978,7 @@ async fn reconciliation_reconnects_when_host_plugin_root_changes() {
         replacement_config,
     )
     .await;
-    assert!(!unchanged.shares_server_connection(&replacement, &key));
+    assert!(!unchanged.shares_test_connection_with(&replacement, "docs"));
 }
 
 #[tokio::test]
@@ -7406,7 +7129,7 @@ async fn view_only_changes_reuse_connection_and_preserve_the_old_step() {
     );
     let old_step = capture_binding(&previous).await;
     let old_call = old_step
-        .prepare_call(&McpServerKey::unscoped("docs"), "search")
+        .prepare_call("docs", "search")
         .expect("old step should prepare search");
 
     let mut new_config = old_config;
@@ -7418,7 +7141,7 @@ async fn view_only_changes_reuse_connection_and_preserve_the_old_step() {
 
     let new_step = capture_binding(&reconciled).await;
     let new_call = new_step
-        .prepare_call(&McpServerKey::unscoped("docs"), "search")
+        .prepare_call("docs", "search")
         .expect("new step should prepare search");
     drop(previous);
 

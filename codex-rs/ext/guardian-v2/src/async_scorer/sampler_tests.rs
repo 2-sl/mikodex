@@ -71,8 +71,7 @@ impl LunaSampler {
             .into_iter()
             .map(codex_history::ResponseItemEnvelope::new)
             .collect();
-        let (input, input_tokens) =
-            Self::finish_input(&request, LunaSampler::prepare_setup(&request), evidence);
+        let (input, input_tokens) = Self::prepare_input(&request, /*history*/ None, evidence);
         let (ready, score) = tokio::sync::oneshot::channel();
         let sample = super::ConversationSample {
             input: crate::async_scorer::request::PreparedRequest {
@@ -863,9 +862,9 @@ async fn sampler_returns_classification_token_before_terminal_response_events() 
     .await?;
 
     let request = sample_request("turn-1");
-    let (input, input_tokens) = LunaSampler::finish_input(
+    let (input, input_tokens) = LunaSampler::prepare_input(
         &request,
-        LunaSampler::prepare_setup(&request),
+        /*history*/ None,
         request
             .input
             .iter()

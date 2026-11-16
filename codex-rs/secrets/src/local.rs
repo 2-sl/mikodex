@@ -78,30 +78,6 @@ struct CachedSecrets {
     file: Arc<SecretsFile>,
 }
 
-/// A point-in-time copy of the encrypted file. Reading a value still requires
-/// the current keyring passphrase, even when the decrypted contents are cached.
-pub struct LocalSecretsSnapshot<'a> {
-    backend: &'a LocalSecretsBackend,
-    ciphertext: Vec<u8>,
-}
-
-impl LocalSecretsSnapshot<'_> {
-    /// Looks up a value in the captured version, using the current keyring entry.
-    pub fn get(self, scope: &SecretScope, name: &SecretName) -> Result<Option<String>> {
-        let (mut file, _) = self.open()?;
-        Ok(file.secrets.remove(&scope.canonical_key(name)))
-    }
-
-    fn open(self) -> Result<(SecretsFile, SecretString)> {
-        let passphrase = self
-            .backend
-            .load_passphrase()?
-            .context("missing keyring passphrase for the existing encrypted secrets file")?;
-        let file = self.backend.decrypt_file(&self.ciphertext, &passphrase)?;
-        Ok((file, passphrase))
-    }
-}
-
 impl SecretsFile {
     fn new_empty() -> Self {
         Self {
@@ -154,39 +130,29 @@ impl LocalSecretsBackend {
     pub fn set(&self, scope: &SecretScope, name: &SecretName, value: &str) -> Result<()> {
         anyhow::ensure!(!value.is_empty(), "secret value must not be empty");
         let canonical_key = scope.canonical_key(name);
-        let (mut file, passphrase) = match self.read_snapshot()? {
-            Some(snapshot) => snapshot.open()?,
-            None => (SecretsFile::new_empty(), self.load_or_create_passphrase()?),
-        };
+        let mut file = self.load_file()?;
         file.secrets.insert(canonical_key, value.to_string());
-        self.save_file(&file, &passphrase)
+        self.save_file(&file)
     }
 
     pub fn get(&self, scope: &SecretScope, name: &SecretName) -> Result<Option<String>> {
-        let Some(snapshot) = self.read_snapshot()? else {
-            return Ok(None);
-        };
-        snapshot.get(scope, name)
+        let canonical_key = scope.canonical_key(name);
+        let file = self.load_file()?;
+        Ok(file.secrets.get(&canonical_key).cloned())
     }
 
     pub fn delete(&self, scope: &SecretScope, name: &SecretName) -> Result<bool> {
         let canonical_key = scope.canonical_key(name);
-        let Some(snapshot) = self.read_snapshot()? else {
-            return Ok(false);
-        };
-        let (mut file, passphrase) = snapshot.open()?;
+        let mut file = self.load_file()?;
         let removed = file.secrets.remove(&canonical_key).is_some();
         if removed {
-            self.save_file(&file, &passphrase)?;
+            self.save_file(&file)?;
         }
         Ok(removed)
     }
 
     pub fn list(&self, scope_filter: Option<&SecretScope>) -> Result<Vec<SecretListEntry>> {
-        let Some(snapshot) = self.read_snapshot()? else {
-            return Ok(Vec::new());
-        };
-        let (file, _) = snapshot.open()?;
+        let file = self.load_file()?;
         let mut entries = Vec::new();
         for canonical_key in file.secrets.keys() {
             let Some(entry) = parse_canonical_key(canonical_key) else {
@@ -228,24 +194,16 @@ impl LocalSecretsBackend {
         }
     }
 
-    /// Copies the ciphertext while the caller holds any required file lock.
-    /// The returned snapshot can be opened after releasing a shared read lock.
-    pub fn read_snapshot(&self) -> Result<Option<LocalSecretsSnapshot<'_>>> {
+    fn load_file(&self) -> Result<SecretsFile> {
         let path = self.secrets_path();
-        match fs::read(&path) {
-            Ok(ciphertext) => Ok(Some(LocalSecretsSnapshot {
-                backend: self,
-                ciphertext,
-            })),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error)
-                .with_context(|| format!("failed to read secrets file at {}", path.display())),
+        if !path.exists() {
+            return Ok(SecretsFile::new_empty());
         }
-    }
 
-    fn decrypt_file(&self, ciphertext: &[u8], passphrase: &SecretString) -> Result<SecretsFile> {
-        let path = self.secrets_path();
-        let ciphertext_hash: [u8; 32] = Sha256::digest(ciphertext).into();
+        let ciphertext = fs::read(&path)
+            .with_context(|| format!("failed to read secrets file at {}", path.display()))?;
+        let passphrase = self.load_or_create_passphrase()?;
+        let ciphertext_hash: [u8; 32] = Sha256::digest(&ciphertext).into();
         let passphrase_hash: [u8; 32] =
             Sha256::digest(passphrase.expose_secret().as_bytes()).into();
         // Hold the namespace lock through decryption so concurrent misses share
@@ -261,7 +219,7 @@ impl LocalSecretsBackend {
         {
             return Ok(cached.file.as_ref().clone());
         }
-        let plaintext = decrypt_with_passphrase(ciphertext, passphrase)?;
+        let plaintext = decrypt_with_passphrase(&ciphertext, &passphrase)?;
         let mut parsed: SecretsFile = serde_json::from_slice(&plaintext).with_context(|| {
             format!(
                 "failed to deserialize decrypted secrets file at {}",
@@ -286,13 +244,14 @@ impl LocalSecretsBackend {
         Ok(parsed)
     }
 
-    fn save_file(&self, file: &SecretsFile, passphrase: &SecretString) -> Result<()> {
+    fn save_file(&self, file: &SecretsFile) -> Result<()> {
         let dir = self.secrets_dir();
         fs::create_dir_all(&dir)
             .with_context(|| format!("failed to create secrets dir {}", dir.display()))?;
 
+        let passphrase = self.load_or_create_passphrase()?;
         let plaintext = serde_json::to_vec(file).context("failed to serialize secrets file")?;
-        let ciphertext = encrypt_with_passphrase(&plaintext, passphrase)?;
+        let ciphertext = encrypt_with_passphrase(&plaintext, &passphrase)?;
         let path = self.secrets_path();
         write_file_atomically(&path, &ciphertext)?;
         let mut cache = self
@@ -315,24 +274,20 @@ impl LocalSecretsBackend {
         Ok(())
     }
 
-    fn load_passphrase(&self) -> Result<Option<SecretString>> {
-        let account = compute_keyring_account(&self.codex_home, self.namespace);
-        self.keyring_store
-            .load(keyring_service(), &account)
-            .map(|loaded| loaded.map(SecretString::from))
-            .map_err(std::io::Error::from)
-            .with_context(|| format!("failed to load secrets key from keyring for {account}"))
-    }
-
     fn load_or_create_passphrase(&self) -> Result<SecretString> {
-        match self.load_passphrase()? {
-            Some(existing) => Ok(existing),
+        let account = compute_keyring_account(&self.codex_home, self.namespace);
+        let loaded = self
+            .keyring_store
+            .load(keyring_service(), &account)
+            .map_err(std::io::Error::from)
+            .with_context(|| format!("failed to load secrets key from keyring for {account}"))?;
+        match loaded {
+            Some(existing) => Ok(SecretString::from(existing)),
             None => {
                 // Generate a high-entropy key and persist it in the OS keyring.
                 // This keeps secrets out of plaintext config while remaining
                 // fully local/offline for the MVP.
                 let generated = generate_passphrase()?;
-                let account = compute_keyring_account(&self.codex_home, self.namespace);
                 self.keyring_store
                     .save(keyring_service(), &account, generated.expose_secret())
                     .map_err(std::io::Error::from)
@@ -519,12 +474,10 @@ mod tests {
             version: SECRETS_VERSION + 1,
             secrets: BTreeMap::new(),
         };
-        backend.save_file(&file, &backend.load_or_create_passphrase()?)?;
+        backend.save_file(&file)?;
 
         let error = backend
-            .read_snapshot()?
-            .expect("file was saved")
-            .open()
+            .load_file()
             .expect_err("must reject newer schema version");
         assert!(
             error.to_string().contains("newer than supported version"),

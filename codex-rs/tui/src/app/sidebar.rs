@@ -117,7 +117,6 @@ impl SidebarPane {
 
     pub(super) fn chat_tabs(&self) -> ChatTabs<'_> {
         ChatTabs {
-            label_style: crate::thread_label::ThreadLabelStyle::Plain,
             discovery: &self.discovery,
             opening: self.opening.as_ref(),
             ids: &self.tabs,
@@ -286,10 +285,13 @@ impl App {
         request: uuid::Uuid,
     ) {
         let area = if self.sidebar_parent() == Some(parent) && self.chooser_focus().is_some() {
-            let screen: Rect = tui.terminal.last_known_screen_size.into();
-            self.conversation_frame.panel_area().or_else(|| {
+            let screen = super::agents_overview_dock::conversation_viewport(
+                self,
+                tui.terminal.last_known_screen_size.into(),
+            );
+            self.conversation_frame.chooser_area().or_else(|| {
                 match side_pane::split_layout(self, tui, screen) {
-                    Some(SidebarLayout::Panel { sidebar, .. }) => Some(sidebar),
+                    Some(SidebarLayout::Chooser { sidebar, .. }) => Some(sidebar),
                     _ if screen.width < 100 && self.chooser_focus() == Some(PaneFocus::Sidebar) => {
                         Some(screen)
                     }
@@ -409,23 +411,15 @@ impl App {
             .filter(|_| pane.content == SidebarContent::Chooser)
     }
 
-    pub(super) fn panel_focus(&self) -> Option<PaneFocus> {
-        let pane = self.sidebar()?;
-        match pane.content {
-            SidebarContent::Chooser => pane.focus,
-            SidebarContent::Chat(_) => None,
-        }
-    }
-
     pub(super) fn sidebar_has_focus(&self) -> bool {
         self.active_side_parent_thread_id().is_some()
-            || self.panel_focus() == Some(PaneFocus::Sidebar)
+            || self.chooser_focus() == Some(PaneFocus::Sidebar)
     }
 }
 
 #[derive(PartialEq)]
 pub(super) enum SidebarLayout {
-    Panel {
+    Chooser {
         main: Rect,
         sidebar: Rect,
         focus: PaneFocus,
@@ -436,7 +430,7 @@ pub(super) enum SidebarLayout {
 impl SidebarLayout {
     pub(super) fn divider_area(&self) -> Option<Rect> {
         let (x, pane) = match self {
-            Self::Panel { main, .. } => (main.right(), *main),
+            Self::Chooser { main, .. } => (main.right(), *main),
             Self::Chat(panes) => (panes.divider, panes.focused.union(panes.tab_strip)),
         };
         (!pane.is_empty()).then(|| Rect::new(x, pane.y, side_pane::GAP, pane.height))
@@ -485,7 +479,7 @@ pub(super) fn content_layout(
     match content {
         SidebarContent::Chooser => (app.sidebar_chooser_available()
             && (focus == PaneFocus::Main || app.chat_widget.completion_can_yield_focus()))
-        .then_some(SidebarLayout::Panel {
+        .then_some(SidebarLayout::Chooser {
             main,
             sidebar,
             focus,

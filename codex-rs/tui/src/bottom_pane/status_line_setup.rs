@@ -168,13 +168,6 @@ pub(crate) enum StatusLineItem {
     Provider,
 }
 
-impl serde::Serialize for StatusLineItem {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        // Display emits the canonical config ID even when the item was parsed from an alias.
-        serializer.collect_str(self)
-    }
-}
-
 impl StatusLineItem {
     /// User-visible description shown in the popup.
     pub(crate) fn description(self) -> &'static str {
@@ -364,15 +357,13 @@ impl StatusLineSetupView {
                 let use_theme_colors = items
                     .iter()
                     .any(|item| item.id == STATUS_LINE_USE_THEME_COLORS_ITEM_ID && item.enabled);
-                preview_data
-                    .status_line_for_items(
-                        items
-                            .iter()
-                            .filter(|item| item.enabled)
-                            .filter_map(|item| item.id.parse::<StatusLineItem>().ok()),
-                        use_theme_colors,
-                    )
-                    .map(Into::into)
+                preview_data.status_line_for_items(
+                    items
+                        .iter()
+                        .filter(|item| item.enabled)
+                        .filter_map(|item| item.id.parse::<StatusLineItem>().ok()),
+                    use_theme_colors,
+                )
             })
             .on_confirm(|ids, app_event| {
                 let use_theme_colors = ids
@@ -458,7 +449,7 @@ impl Renderable for StatusLineSetupView {
 mod tests {
     use super::*;
     use crate::app_event_sender::AppEventSender;
-    use crate::terminal_hyperlinks::HyperlinkLine;
+    use crate::bottom_pane::footer_content::FooterContent;
     use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
     use ratatui::buffer::Buffer;
@@ -849,7 +840,7 @@ mod tests {
             .join("\n")
     }
 
-    fn line_text(content: Option<HyperlinkLine>) -> Option<String> {
-        content.map(|line| line.line.to_string())
+    fn line_text(content: Option<FooterContent>) -> Option<String> {
+        content.map(|content| content.into_hyperlink_line().line.to_string())
     }
 }

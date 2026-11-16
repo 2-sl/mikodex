@@ -36,15 +36,6 @@ pub(crate) struct DefaultColors {
 }
 
 #[cfg(unix)]
-fn alternate_scroll_report(input: &[u8]) -> Option<bool> {
-    match input {
-        b"\x1b[?1007;1$y" | b"\x1b[?1007;3$y" => Some(true),
-        b"\x1b[?1007;0$y" | b"\x1b[?1007;2$y" | b"\x1b[?1007;4$y" => Some(false),
-        _ => None,
-    }
-}
-
-#[cfg(unix)]
 #[cfg_attr(test, allow(dead_code))]
 mod imp {
     use super::DefaultColors;
@@ -75,7 +66,6 @@ mod imp {
     /// Results from the TUI's one-shot startup terminal probe.
     #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub(crate) struct StartupProbe {
-        pub(crate) alternate_scroll_enabled: Option<bool>,
         pub(crate) cursor_position: Option<Position>,
         pub(crate) default_colors: Option<DefaultColors>,
         pub(crate) keyboard_enhancement_supported: Option<bool>,
@@ -317,8 +307,6 @@ mod imp {
         if keyboard_probe == StartupKeyboardEnhancementProbe::Query {
             query.extend_from_slice(b"\x1B[?u");
         }
-        // Query before DA1 so its reply acts as a barrier even if mode 1007 is unsupported.
-        query.extend_from_slice(b"\x1B[?1007$p");
         // DA1 finishes keyboard detection and establishes whether we can use it at exit.
         query.extend_from_slice(b"\x1B[c\x1B[6n\x1B]10;?\x1B\\\x1B]11;?\x1B\\");
         if query_identity {
@@ -377,7 +365,6 @@ mod imp {
     ) -> io::Result<StartupProbe> {
         let deadline = Instant::now() + timeout;
         let mut probe = StartupProbe {
-            alternate_scroll_enabled: None,
             cursor_position: None,
             default_colors: None,
             keyboard_enhancement_supported: None,
@@ -413,10 +400,6 @@ mod imp {
         buffer: &[u8],
         keyboard_probe: StartupKeyboardEnhancementProbe,
     ) {
-        if probe.alternate_scroll_enabled.is_none() {
-            probe.alternate_scroll_enabled =
-                buffer.windows(11).find_map(super::alternate_scroll_report);
-        }
         if probe.cursor_position.is_none() {
             probe.cursor_position = parse_cursor_position(buffer);
         }
@@ -693,7 +676,6 @@ mod imp {
         #[test]
         fn startup_probe_parses_batched_terminal_responses() {
             let mut probe = StartupProbe {
-                alternate_scroll_enabled: None,
                 cursor_position: None,
                 default_colors: None,
                 keyboard_enhancement_supported: None,
@@ -703,14 +685,13 @@ mod imp {
             update_startup_probe(
                 &mut probe,
                 &mut saw_supported_keyboard,
-                b"\x1B[?1007;1$y\x1B[20;10R\x1B]11;rgb:1111/1111/1111\x07\x1B[?64;1;2c\x1B]10;rgb:eeee/eeee/eeee\x1B\\\x1B[?7u",
+                b"\x1B[20;10R\x1B]11;rgb:1111/1111/1111\x07\x1B[?64;1;2c\x1B]10;rgb:eeee/eeee/eeee\x1B\\\x1B[?7u",
                 StartupKeyboardEnhancementProbe::Query,
             );
 
             assert_eq!(
                 probe,
                 StartupProbe {
-                    alternate_scroll_enabled: Some(true),
                     cursor_position: Some(Position { x: 9, y: 19 }),
                     default_colors: Some(DefaultColors {
                         fg: (238, 238, 238),
@@ -729,7 +710,6 @@ mod imp {
         #[test]
         fn startup_probe_waits_for_identity_even_when_keyboard_probe_is_skipped() {
             let mut probe = StartupProbe {
-                alternate_scroll_enabled: None,
                 cursor_position: None,
                 default_colors: None,
                 keyboard_enhancement_supported: None,
@@ -782,7 +762,7 @@ mod imp {
         fn startup_probe_finds_responses_after_large_typeahead() {
             let mut input = vec![b'x'; 2_048];
             input.extend_from_slice(
-                b"\x1B[?1007;2$y\x1B[20;10R\x1B]11;rgb:1111/1111/1111\x07\x1B[?64;1;2c\x1B]10;rgb:eeee/eeee/eeee\x1B\\\x1B[?7u",
+                b"\x1B[20;10R\x1B]11;rgb:1111/1111/1111\x07\x1B[?64;1;2c\x1B]10;rgb:eeee/eeee/eeee\x1B\\\x1B[?7u",
             );
             let mut tty = tty_with_buffered_input(&input);
             let mut buffer = Vec::new();
@@ -799,7 +779,6 @@ mod imp {
             assert_eq!(
                 probe,
                 StartupProbe {
-                    alternate_scroll_enabled: Some(false),
                     cursor_position: Some(Position { x: 9, y: 19 }),
                     default_colors: Some(DefaultColors {
                         fg: (238, 238, 238),

@@ -114,7 +114,6 @@ impl SamplingExecution {
                 ApiError::Retryable { .. }
                 | ApiError::RateLimitExceeded { .. }
                 | ApiError::Stream(_)
-                | ApiError::WebsocketMessageTooLarge
                 | ApiError::ContentFilter
                 | ApiError::ServerOverloaded { .. }
                 | ApiError::PolicyCapacityUnavailable { .. }

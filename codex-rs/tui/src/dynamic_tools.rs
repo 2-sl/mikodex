@@ -22,6 +22,7 @@ use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SandboxMode;
+use codex_app_server_protocol::SandboxPolicy;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadArchiveParams;
@@ -59,7 +60,6 @@ use codex_features::Feature;
 use codex_features::Features;
 use codex_protocol::ThreadId;
 use codex_protocol::models::FunctionCallOutputBody;
-use codex_protocol::models::PermissionProfile;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -353,7 +353,6 @@ async fn execute_inner(
                     params: ThreadListParams {
                         include_attached_threads: false,
                         current_account_only: true,
-                        included_thread_ids: None,
                         excluded_thread_ids: None,
                         attached_to_thread_id: None,
                         originators: None,
@@ -536,38 +535,25 @@ async fn execute_inner(
             thread_start_params.runtime_workspace_roots = Some(source.runtime_workspace_roots);
             thread_start_params.approval_policy = Some(source.approval_policy);
             thread_start_params.approvals_reviewer = Some(source.approvals_reviewer);
-            let source_permissions =
-                PermissionProfile::from_legacy_sandbox_policy_template(&source.sandbox.to_core());
-            let permission_profile_override =
-                if let Some(profile) = source.active_permission_profile {
-                    thread_start_params.permissions = Some(profile.id);
-                    thread_start_params.sandbox = None;
-                    None
-                } else {
-                    thread_start_params.permissions = None;
-                    thread_start_params.sandbox = Some(match &source_permissions {
-                        PermissionProfile::Disabled => SandboxMode::DangerFullAccess,
-                        PermissionProfile::Managed { .. } => {
-                            if source_permissions
-                                .file_system_sandbox_policy()
-                                .entries
-                                .iter()
-                                .any(|entry| entry.access.can_write())
-                            {
-                                SandboxMode::WorkspaceWrite
-                            } else {
-                                SandboxMode::ReadOnly
-                            }
-                        }
-                        PermissionProfile::External { .. } => {
-                            return Err(
-                                "Cannot inherit an external sandbox without a permission profile"
-                                    .to_string(),
-                            );
-                        }
-                    });
-                    Some(source_permissions)
-                };
+            let sandbox_policy = if let Some(profile) = source.active_permission_profile {
+                thread_start_params.permissions = Some(profile.id);
+                thread_start_params.sandbox = None;
+                None
+            } else {
+                thread_start_params.permissions = None;
+                thread_start_params.sandbox = Some(match &source.sandbox {
+                    SandboxPolicy::DangerFullAccess => SandboxMode::DangerFullAccess,
+                    SandboxPolicy::ReadOnly { .. } => SandboxMode::ReadOnly,
+                    SandboxPolicy::WorkspaceWrite { .. } => SandboxMode::WorkspaceWrite,
+                    SandboxPolicy::ExternalSandbox { .. } => {
+                        return Err(
+                            "Cannot inherit an external sandbox without a permission profile"
+                                .to_string(),
+                        );
+                    }
+                });
+                Some(source.sandbox)
+            };
             if let Some(model) = arguments.model {
                 thread_start_params.model = Some(model);
             }
@@ -611,7 +597,7 @@ async fn execute_inner(
                 "create_thread",
                 prompt,
                 /*model*/ None,
-                permission_profile_override,
+                sandbox_policy,
                 cyber_access_program,
             )
             .await?;
@@ -749,7 +735,7 @@ async fn execute_inner(
                 "send_message_to_thread",
                 prompt,
                 arguments.model,
-                /*permission_profile_override*/ None,
+                /*sandbox_policy*/ None,
                 cyber_access_program,
             )
             .await?;
@@ -1257,13 +1243,9 @@ async fn start_turn(
     tool: &str,
     prompt: String,
     model: Option<String>,
-    permission_profile_override: Option<PermissionProfile>,
+    sandbox_policy: Option<SandboxPolicy>,
     cyber_access_program: Option<codex_app_server_protocol::CyberAccessProgram>,
 ) -> Result<TurnStartResponse, String> {
-    let sandbox_policy = permission_profile_override
-        .map(|profile| profile.to_legacy_sandbox_policy_template().map(Into::into))
-        .transpose()
-        .map_err(|error| error.to_string())?;
     request(handle, |request_id| ClientRequest::TurnStart {
         request_id,
         params: TurnStartParams {
@@ -1272,7 +1254,7 @@ async fn start_turn(
             // Older app-server/TUI versions are intentionally unsupported:
             // preserving tool authority takes precedence over legacy fallback.
             tool_output: Some(Box::new(TurnToolOutput {
-                retain: true,
+                retain: false,
                 name: tool.to_string(),
                 namespace: Some(NAMESPACE.to_string()),
                 output: FunctionCallOutputBody::Text(prompt),

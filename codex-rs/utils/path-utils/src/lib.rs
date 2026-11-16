@@ -3,8 +3,6 @@
 pub(crate) mod env;
 pub use env::is_wsl;
 mod system_commands;
-#[cfg(target_os = "linux")]
-pub use system_commands::linux_system_executable;
 pub use system_commands::system_executable;
 pub use system_commands::system_path;
 
@@ -163,13 +161,7 @@ pub fn write_atomically(write_path: &Path, contents: &str) -> io::Result<()> {
     std::fs::create_dir_all(parent)?;
     let mut tmp = NamedTempFile::new_in(parent)?;
     tmp.write_all(contents.as_bytes())?;
-    // Match credential-file replacement: std::fs::rename supports overlapping
-    // readers on Windows, while tempfile::persist's MoveFileExW does not.
-    // Clear the temporary attribute and retain cleanup if publication fails.
-    let (_file, path) = tmp.keep().map_err(|error| error.error)?;
-    let mut path = tempfile::TempPath::try_from_path(path)?;
-    std::fs::rename(&path, write_path)?;
-    path.disable_cleanup(/*disable_cleanup*/ true);
+    tmp.persist(write_path)?;
     Ok(())
 }
 

@@ -22,13 +22,6 @@
       ],
       "description": "Registration strategy for this login only; omission selects automatic discovery."
     },
-    "environmentId": {
-      "description": "Exact registration scope; omission preserves legacy name-only selection.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "name": {
       "type": "string"
     },

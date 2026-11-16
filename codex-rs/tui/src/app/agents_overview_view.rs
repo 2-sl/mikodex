@@ -37,7 +37,6 @@ use crate::terminal_hyperlinks::mark_buffer_hyperlinks;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use crate::terminal_hyperlinks::remap_wrapped_line;
 use crate::terminal_hyperlinks::visible_lines;
-use crate::thread_label::ThreadLabelStyle;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadActiveFlag;
@@ -110,8 +109,6 @@ fn is_subagent(thread: &Thread) -> bool {
 
 #[derive(Clone)]
 pub(super) struct AgentsOverviewRow {
-    pub(super) backend_id: Option<crate::backend_id::BackendId>,
-    pub(super) label_style: ThreadLabelStyle,
     pub(super) search_id: Option<uuid::Uuid>,
     pub(super) details: AgentsOverviewDetails,
     pub(super) thread: Thread,
@@ -234,7 +231,6 @@ pub(super) struct AgentsOverviewView {
     project_groups: Vec<AgentsOverviewProjectGroup>,
     directory_group_keys: Vec<PathBuf>,
     pub(super) pinned_thread_ranks: Option<HashMap<ThreadId, usize>>,
-    pub(super) pin_action_supported: bool,
     pub(super) pin_action_pending: bool,
     pub(super) can_return_to_chat: bool,
     selected: usize,
@@ -314,7 +310,6 @@ impl AgentsOverviewView {
             project_groups,
             directory_group_keys,
             pinned_thread_ranks: None,
-            pin_action_supported: true,
             pin_action_pending: false,
             can_return_to_chat: false,
             selected,
@@ -408,7 +403,6 @@ impl AgentsOverviewView {
 
     fn can_toggle_selected_pin(&self) -> bool {
         !self.pin_action_pending
-            && self.pin_action_supported
             && self.pinned_thread_ranks.is_some()
             && self
                 .selected_row()
@@ -560,14 +554,16 @@ impl AgentsOverviewView {
             ]),
             width,
         );
-        let title = Line::from(Span::styled(
-            display_title(&row.thread).to_owned(),
-            self.title_style(row.thread_id).bold(),
-        ));
         let mut lines = vec![
             Line::from("Task details".bold()),
             Line::default(),
-            row.label_style.render(title, width),
+            crate::line_truncation::truncate_line_with_ellipsis_if_overflow(
+                Line::from(Span::styled(
+                    display_title(&row.thread).to_owned(),
+                    self.title_style(row.thread_id).bold(),
+                )),
+                width,
+            ),
             Line::from(vec![dot, " ".into(), status.into()]),
             Line::default(),
             model,
@@ -832,7 +828,6 @@ impl BottomPaneView for AgentsOverviewView {
         }
         if self.agents_keymap.new_task.is_pressed(key) {
             self.app_event_tx.send(AppEvent::NewAgentsOverviewSession {
-                backend_id: self.selected_row().and_then(|row| row.backend_id),
                 cwd: self.selected_row().map(|row| row.thread.cwd.clone()),
             });
             return;
@@ -840,7 +835,6 @@ impl BottomPaneView for AgentsOverviewView {
         if self.agents_keymap.new_worktree.is_pressed(key) {
             if self.worktrees_enabled {
                 self.app_event_tx.send(AppEvent::NewAgentsOverviewWorktree {
-                    backend_id: self.selected_row().and_then(|row| row.backend_id),
                     cwd: self.selected_row().map(|row| row.thread.cwd.clone()),
                 });
             }

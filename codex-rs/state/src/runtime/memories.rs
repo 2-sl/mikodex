@@ -228,7 +228,6 @@ FROM threads
         push_thread_filters(
             &mut builder,
             ThreadFilterOptions {
-                included_thread_ids: None,
                 archived_only: false,
                 allowed_sources,
                 model_providers: None,

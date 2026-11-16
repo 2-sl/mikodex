@@ -109,8 +109,7 @@ async fn cloud_preference_preserves_aliases_reads_and_executor_fallback() -> Tes
             ("connected", true),
             ("disconnected", false),
         ] {
-            refresh_registered_catalogs_for_step(&registry, &session_store, &thread_store, stage)
-                .await;
+            start_registered_turn(&registry, &session_store, &thread_store, stage).await;
             let turn_store = ExtensionData::new(stage);
             let sections = prepared_world_state(
                 &registry,

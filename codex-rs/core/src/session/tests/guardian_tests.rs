@@ -1333,7 +1333,6 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
         attached_thread: false,
         startup: None,
         config,
-        request_country: Default::default(),
         prompt_cache_key: PromptCacheKey::default(),
         allow_provider_model_fallback: false,
         instructions: Default::default(),

@@ -192,9 +192,9 @@ pub enum InProcessServerEvent {
 
 /// Internal message sent from [`InProcessClientHandle`] methods to the runtime task.
 ///
-/// Requests carry a oneshot sender for the response. Startup notifications can
-/// acknowledge processing; ordinary notifications and server-request replies are
-/// fire-and-forget (transport errors are caught by `try_send` on the outer channel).
+/// Requests carry a oneshot sender for the response; notifications and server-request
+/// replies are fire-and-forget from the caller's perspective (transport errors are
+/// caught by `try_send` on the outer channel).
 enum InProcessClientMessage {
     Request {
         request: Box<ClientRequest>,
@@ -203,7 +203,6 @@ enum InProcessClientMessage {
     },
     Notification {
         notification: ClientNotification,
-        processed_tx: Option<oneshot::Sender<()>>,
     },
     ServerRequestResponse {
         request_id: RequestId,
@@ -220,10 +219,7 @@ enum InProcessClientMessage {
 
 enum ProcessorCommand {
     Request(Box<ClientRequest>, tokio_util::sync::CancellationToken),
-    Notification {
-        notification: ClientNotification,
-        processed_tx: Option<oneshot::Sender<()>>,
-    },
+    Notification(ClientNotification),
 }
 
 #[derive(Clone)]
@@ -250,10 +246,7 @@ impl InProcessClientSender {
     }
 
     pub fn notify(&self, notification: ClientNotification) -> IoResult<()> {
-        self.try_send_client_message(InProcessClientMessage::Notification {
-            notification,
-            processed_tx: None,
-        })
+        self.try_send_client_message(InProcessClientMessage::Notification { notification })
     }
 
     pub fn respond_to_server_request(&self, request_id: RequestId, result: Result) -> IoResult<()> {
@@ -386,10 +379,9 @@ impl InProcessClientHandle {
 
 /// Starts an in-process app-server runtime and performs initialize handshake.
 ///
-/// This function waits for `initialize` and `initialized` to be processed before
-/// returning the handle, so callers receive a ready-to-use runtime. Rejected
-/// initialization shuts down the runtime and returns an `InvalidData` error.
-/// Transport failures while processing `initialized` also shut down the runtime.
+/// This function sends `initialize` followed by `initialized` before returning
+/// the handle, so callers receive a ready-to-use runtime. If initialize fails,
+/// the runtime is shut down and an `InvalidData` error is returned.
 pub async fn start(mut args: InProcessStartArgs) -> IoResult<InProcessClientHandle> {
     if let Ok(Some(err)) = check_execpolicy_for_warnings(&args.config.config_layer_stack).await {
         let (path, range) = crate::exec_policy_warning_location(&err);
@@ -417,26 +409,7 @@ pub async fn start(mut args: InProcessStartArgs) -> IoResult<InProcessClientHand
             format!("in-process initialize failed: {}", error.message),
         ));
     }
-    let (processed_tx, processed_rx) = oneshot::channel();
-    let initialized_result = async {
-        client
-            .client
-            .try_send_client_message(InProcessClientMessage::Notification {
-                notification: ClientNotification::Initialized,
-                processed_tx: Some(processed_tx),
-            })?;
-        processed_rx.await.map_err(|err| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                format!("in-process initialized acknowledgment channel closed: {err}"),
-            )
-        })
-    }
-    .await;
-    if let Err(error) = initialized_result {
-        let _ = client.shutdown().await;
-        return Err(error);
-    }
+    client.notify(ClientNotification::Initialized)?;
 
     Ok(client)
 }
@@ -612,11 +585,8 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                                     processor.send_initialize_notifications().await;
                                 }
                             }
-                            Some(ProcessorCommand::Notification { notification, processed_tx }) => {
+                            Some(ProcessorCommand::Notification(notification)) => {
                                 processor.process_client_notification(notification).await;
-                                if let Some(processed_tx) = processed_tx {
-                                    let _ = processed_tx.send(());
-                                }
                             }
                             None => {
                                 break;
@@ -708,8 +678,8 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                                 }
                             }
                         }
-                        Some(InProcessClientMessage::Notification { notification, processed_tx }) => {
-                            match processor_tx.try_send(ProcessorCommand::Notification { notification, processed_tx }) {
+                        Some(InProcessClientMessage::Notification { notification }) => {
+                            match processor_tx.try_send(ProcessorCommand::Notification(notification)) {
                                 Ok(()) => {}
                                 Err(mpsc::error::TrySendError::Full(_)) => {
                                     warn!("dropping in-process client notification (queue full)");
@@ -1077,24 +1047,29 @@ mod tests {
         }
     }
 
-    #[test_case::test_case(0; "zero_capacity_is_clamped")]
-    #[test_case::test_case(1; "one_slot_capacity")]
     #[tokio::test]
-    async fn in_process_start_accepts_immediate_request(channel_capacity: usize) {
+    async fn in_process_start_clamps_zero_channel_capacity() {
         let client = start_test_client_with_options(
             SessionSource::Cli,
-            channel_capacity,
+            /*channel_capacity*/ 0,
             /*capabilities*/ None,
         )
         .await;
-        let response = client
-            .request(ClientRequest::ConfigRequirementsRead {
-                request_id: RequestId::Integer(4),
-                params: None,
-            })
-            .await
-            .expect("the first request should not compete with the initialize handshake")
-            .expect("request should succeed");
+        let response = loop {
+            match client
+                .request(ClientRequest::ConfigRequirementsRead {
+                    request_id: RequestId::Integer(4),
+                    params: None,
+                })
+                .await
+            {
+                Ok(response) => break response.expect("request should succeed"),
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    tokio::task::yield_now().await;
+                }
+                Err(err) => panic!("request transport should work: {err}"),
+            }
+        };
         let _parsed: ConfigRequirementsReadResponse =
             serde_json::from_value(response).expect("response should match v2 schema");
         client

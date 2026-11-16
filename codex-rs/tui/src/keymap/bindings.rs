@@ -466,7 +466,6 @@ define_runtime_action_bindings! {
         close,
         close_transcript,
         find,
-        mark_markdown,
     ],
     "list" => List, list, list [
         move_up,

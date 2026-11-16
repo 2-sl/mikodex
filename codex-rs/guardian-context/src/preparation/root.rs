@@ -78,25 +78,15 @@ pub trait RootConversationSource: Send + Sync {
 /// Shared ownership keeps captured source payloads alive without copying them.
 /// Equality identifies the same capture, rather than comparing potentially sensitive payloads.
 #[derive(Clone)]
-pub struct RootConversationInput {
-    source: std::sync::Arc<dyn RootConversationSource>,
-    fixed: std::sync::Arc<PreparedRootContext>,
-}
+pub struct RootConversationInput(std::sync::Arc<dyn RootConversationSource>);
 
 impl RootConversationInput {
     pub fn new(source: impl RootConversationSource + 'static) -> Self {
-        let fixed = source.prepare(ContextBudgeting::Fixed);
-        Self {
-            source: std::sync::Arc::new(source),
-            fixed: std::sync::Arc::new(fixed),
-        }
+        Self(std::sync::Arc::new(source))
     }
 
     pub fn prepare(&self, budgeting: ContextBudgeting) -> PreparedRootContext {
-        match budgeting {
-            ContextBudgeting::Fixed => self.fixed.as_ref().clone(),
-            ContextBudgeting::Elastic => self.source.prepare(budgeting),
-        }
+        self.0.prepare(budgeting)
     }
 }
 
@@ -108,7 +98,7 @@ impl std::fmt::Debug for RootConversationInput {
 
 impl PartialEq for RootConversationInput {
     fn eq(&self, other: &Self) -> bool {
-        std::sync::Arc::ptr_eq(&self.source, &other.source)
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
     }
 }
 
@@ -277,7 +267,6 @@ fn root_retained_assistant(
 }
 
 /// Bounded root view plus the existing cache and skill-scope selection metadata.
-#[derive(Clone)]
 pub struct PreparedRootContext {
     pub messages: Vec<GuardianRootMessage>,
     pub missing_root_instructions: bool,

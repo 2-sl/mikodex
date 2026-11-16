@@ -199,13 +199,6 @@ async fn run(
                     NativeOperation::Verify(request) => {
                         let proof = provider.verify(&request, &guard).map_err(native_error)?;
                         rpc::UserVerificationVerifyResponse {
-                            biometric_type: proof.biometric_type.map(|biometric_type| {
-                                match biometric_type {
-                                    native::UserVerificationBiometricType::Fingerprint => {
-                                        rpc::UserVerificationBiometricType::Fingerprint
-                                    }
-                                }
-                            }),
                             proof: rpc::UserVerificationProof {
                                 credential_id: proof.credential_id,
                                 signature: proof.signature,
