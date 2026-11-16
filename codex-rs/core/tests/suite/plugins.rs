@@ -2070,7 +2070,7 @@ async fn system_marketplace_plugin_honors_layered_activation_and_mcp_policy(
         ),
     )?;
     std::fs::create_dir_all(project.path().join(".git"))?;
-    std::fs::create_dir_all(project.path().join(".codex"))?;
+    std::fs::create_dir_all(project.path().join(".mikodex"))?;
     std::fs::write(
         project.path().join(".codex/config.toml"),
         format!(

@@ -30,7 +30,7 @@ fn bazel_build_rejects_tampered_bundled_bwrap() {
 
     let sandbox_binary = package.path().join("codex-linux-sandbox");
     copy_executable(
-        Path::new(env!("CARGO_BIN_EXE_codex-linux-sandbox")),
+        Path::new(env!("CARGO_BIN_EXE_mikodex-linux-sandbox")),
         &sandbox_binary,
     )
     .expect("sandbox binary should be copied into the package");

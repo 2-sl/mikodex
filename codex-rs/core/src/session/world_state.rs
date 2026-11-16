@@ -45,6 +45,9 @@ use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 
+const MAX_ENVIRONMENT_SUBAGENTS: usize = 8;
+const MAX_ENVIRONMENT_SUBAGENT_BYTES: usize = 1_024;
+
 impl Session {
     pub(super) fn host_roster_reader(
         &self,

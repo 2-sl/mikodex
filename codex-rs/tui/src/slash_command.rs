@@ -64,6 +64,8 @@ pub enum SlashCommand {
     Title,
     Statusline,
     Theme,
+    #[strum(to_string = "background", serialize = "bga")]
+    Background,
     #[strum(to_string = "pets", serialize = "pet")]
     Pets,
     Mcp,
@@ -92,10 +94,10 @@ impl SlashCommand {
     /// User-visible description shown in the popup.
     pub fn description(self) -> &'static str {
         match self {
-            SlashCommand::Config => "configure Codex preferences",
+            SlashCommand::Config => "configure Mikodex preferences",
             SlashCommand::Feedback => "send logs to maintainers or save a ZIP",
             SlashCommand::New => "start a new chat during a conversation",
-            SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
+            SlashCommand::Init => "create an AGENTS.md file with instructions for Mikodex",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
             SlashCommand::Recap => "summarize the current conversation now",
             SlashCommand::Review => "review my current changes and find issues",
@@ -107,14 +109,14 @@ impl SlashCommand {
             SlashCommand::Fork => "fork the current chat",
             SlashCommand::Worktree => "start or continue a conversation in a new worktree",
             SlashCommand::App => "continue this session in the Desktop app",
-            SlashCommand::Quit | SlashCommand::Exit => "exit Codex",
+            SlashCommand::Quit | SlashCommand::Exit => "exit Mikodex",
             SlashCommand::Copy => "copy the last response or part of it",
             SlashCommand::Export => "export the conversation as markdown",
             SlashCommand::Raw => "toggle raw scrollback mode for copy-friendly terminal selection",
             SlashCommand::Tui => "choose the TUI mode for the next launch",
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Mention => "mention a file",
-            SlashCommand::Skills => "use skills to improve how Codex performs specific tasks",
+            SlashCommand::Skills => "use skills to improve how Mikodex performs specific tasks",
             SlashCommand::Import => "import setup, this project, and recent chats from Claude Code",
             SlashCommand::Hooks => "view and manage lifecycle hooks",
             SlashCommand::Daemon => "Manage the local background server",
@@ -127,6 +129,9 @@ impl SlashCommand {
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
             SlashCommand::Theme => "choose a syntax highlighting theme",
+            SlashCommand::Background => {
+                "set, clear, or toggle the animated chat background; /bga is an alias"
+            }
             SlashCommand::Pets => "choose or hide the terminal pet",
             SlashCommand::Ps => "list background terminals",
             SlashCommand::Stop => "stop all background terminals",
@@ -143,8 +148,10 @@ impl SlashCommand {
             SlashCommand::Goal => "set or view the goal for a long-running task",
             SlashCommand::Agents => "open the agent command center",
             SlashCommand::MultiAgents => "switch between this session's subagents",
-            SlashCommand::Side | SlashCommand::Btw => "start a side conversation",
-            SlashCommand::Permissions => "choose what Codex is allowed to do",
+            SlashCommand::Side | SlashCommand::Btw => {
+                "start a side conversation in an ephemeral fork"
+            }
+            SlashCommand::Permissions => "choose what Mikodex is allowed to do",
             SlashCommand::Keymap => "remap TUI shortcuts",
             SlashCommand::Vim => "toggle Vim mode for the composer",
             SlashCommand::ElevateSandbox => "set up elevated agent sandbox",
@@ -156,7 +163,7 @@ impl SlashCommand {
             }
             SlashCommand::Apps => "manage apps",
             SlashCommand::Plugins => "browse plugins",
-            SlashCommand::Logout => "log out of Codex",
+            SlashCommand::Logout => "log out of Mikodex",
             SlashCommand::Rollout => "print the rollout file path",
             SlashCommand::TestApproval => "test approval request",
         }
@@ -196,6 +203,7 @@ impl SlashCommand {
                 | SlashCommand::Side
                 | SlashCommand::Btw
                 | SlashCommand::Resume
+                | SlashCommand::Background
         )
     }
 
@@ -216,6 +224,7 @@ impl SlashCommand {
                 | SlashCommand::Usage
                 | SlashCommand::Ide
                 | SlashCommand::Rename
+                | SlashCommand::Background
         )
     }
 
@@ -243,6 +252,7 @@ impl SlashCommand {
                 | SlashCommand::Rollout
                 | SlashCommand::Copy
                 | SlashCommand::Raw
+                | SlashCommand::Background
         )
     }
 
@@ -306,7 +316,8 @@ impl SlashCommand {
             | SlashCommand::Quit
             | SlashCommand::Exit
             | SlashCommand::Side
-            | SlashCommand::Btw => true,
+            | SlashCommand::Btw
+            | SlashCommand::Background => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
             SlashCommand::Agents | SlashCommand::MultiAgents => true,

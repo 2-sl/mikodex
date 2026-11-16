@@ -55,8 +55,8 @@ class PackageInputs:
 PACKAGE_VARIANTS: dict[str, PackageVariant] = {
     "codex": PackageVariant(
         name="codex",
-        cargo_bin="codex",
-        executable_stem="codex",
+        cargo_bin="mikodex",
+        executable_stem="mikodex",
     ),
     "codex-app-server": PackageVariant(
         name="codex-app-server",

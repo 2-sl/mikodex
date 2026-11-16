@@ -810,9 +810,9 @@ impl ExecServerClient {
                 // parent while measuring only the actual RPC as initialize_rpc.
                 let initialize_rpc_span = tracing::info_span!(
                     parent: &noise_context.span,
-                    "codex.exec_server.remote.initialize_rpc",
+                    "mikodex.exec_server.remote.initialize_rpc",
                     otel.kind = "client",
-                    otel.name = "codex.exec_server.remote.initialize_rpc",
+                    otel.name = "mikodex.exec_server.remote.initialize_rpc",
                 );
                 let response = rpc_client
                     .call_untraced(INITIALIZE_METHOD, &params)
@@ -1135,7 +1135,7 @@ impl ExecServerClient {
     }
 
     #[tracing::instrument(
-        name = "codex.exec_server.process_start",
+        name = "mikodex.exec_server.process_start",
         skip_all,
         fields(process.id = trace_process_id(params.process_id.as_str())),
     )]

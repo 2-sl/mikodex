@@ -35,7 +35,7 @@ impl Fixture {
         std::fs::create_dir_all(repo.join(".git"))?;
         std::fs::write(repo.join(".git/HEAD"), "ref: refs/heads/main\n")?;
         for (dir, model) in [(&repo, "ancestor"), (&project, "project"), (&cwd, "child")] {
-            std::fs::create_dir_all(dir.join(".codex"))?;
+            std::fs::create_dir_all(dir.join(".mikodex"))?;
             std::fs::write(
                 dir.join(".codex/config.toml"),
                 format!("model = \"{model}\"\n"),
@@ -107,7 +107,7 @@ fn assert_discovery(
     };
     let expected_dirs = expected_dirs
         .iter()
-        .map(|dir| dir.join(".codex"))
+        .map(|dir| dir.join(".mikodex"))
         .collect::<Vec<_>>();
     assert_eq!(
         (

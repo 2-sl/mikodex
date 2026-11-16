@@ -126,7 +126,7 @@ async fn first_encrypted_request_frame_exposes_only_its_trace_context() -> Resul
             exporter
                 .get_finished_spans()?
                 .iter()
-                .all(|span| span.name != "codex.exec_server.noise_request_write")
+                .all(|span| span.name != "mikodex.exec_server.noise_request_write")
         );
     }
     control.grant_writes(/*count*/ 1);
@@ -154,7 +154,7 @@ async fn first_encrypted_request_frame_exposes_only_its_trace_context() -> Resul
     let spans = exporter.get_finished_spans()?;
     let write_span = spans
         .iter()
-        .find(|span| span.name == "codex.exec_server.noise_request_write")
+        .find(|span| span.name == "mikodex.exec_server.noise_request_write")
         .context("expected finished request write span")?;
     assert_eq!(
         write_span.span_context.trace_id().to_string(),
@@ -721,7 +721,7 @@ async fn blocked_write_reports_timeout_with_pong_still_queued() -> Result<()> {
         .iter()
         .filter(|e| {
             e.get("event.name")
-                .is_some_and(|name| name == "\"codex.exec_server.noise_transport_closed\"")
+                .is_some_and(|name| name == "\"mikodex.exec_server.noise_transport_closed\"")
         })
         .collect();
     assert_eq!(terminal.len(), 1);
@@ -763,7 +763,7 @@ async fn read_error_reports_safe_terminal_category() -> Result<()> {
     let event = events.last().context("expected terminal event")?;
     assert_eq!(
         event["event.name"],
-        "\"codex.exec_server.noise_transport_closed\""
+        "\"mikodex.exec_server.noise_transport_closed\""
     );
     assert_eq!(event["noise_reason"], "\"websocket_read\"");
     assert_eq!(event["read_reason"], "\"websocket_read_io_other\"");

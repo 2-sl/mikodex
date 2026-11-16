@@ -42,7 +42,7 @@ async fn sandbox_starts_with_nested_writable_metadata(layout: RootLayout, relati
             std::os::unix::fs::symlink(target, &home).expect("create home alias");
         }
     }
-    let codex_home = home.join(".codex");
+    let codex_home = home.join(".mikodex");
     let visualization = codex_home.join("visualizations/thread");
     std::fs::create_dir_all(&visualization).expect("create visualization directory");
     let protected_file = codex_home.join("config.toml");
@@ -61,7 +61,7 @@ async fn sandbox_starts_with_nested_writable_metadata(layout: RootLayout, relati
     ];
     // Remote clients expand generated workspace metadata rules to concrete
     // paths, including paths that do not yet exist on the executor.
-    for name in [".git", ".agents", ".codex", ".aws"] {
+    for name in [".git", ".agents", ".mikodex", ".aws"] {
         entries.push(FileSystemSandboxEntry::skip_missing_path(
             visualization.join(name).into(),
             FileSystemAccessMode::Read,
@@ -80,10 +80,10 @@ printf visualization > "$visualization/allowed.txt"
 if (rm "$workspace") 2>/dev/null; then
     exit 13
 fi
-if (printf changed > "$workspace/.codex/config.toml") 2>/dev/null; then
+if (printf changed > "$workspace/.mikodex/config.toml") 2>/dev/null; then
     exit 10
 fi
-if (touch "$workspace/.codex/forbidden.txt") 2>/dev/null; then
+if (touch "$workspace/.mikodex/forbidden.txt") 2>/dev/null; then
     exit 11
 fi
 for name in .git .agents .codex .aws; do
@@ -125,7 +125,7 @@ printf nested-metadata-protected
     ] {
         assert_eq!(std::fs::read_to_string(path).expect("read file"), expected);
     }
-    for name in [".git", ".agents", ".codex", ".aws"] {
+    for name in [".git", ".agents", ".mikodex", ".aws"] {
         assert!(
             !visualization.join(name).exists(),
             "temporary {name} mountpoint should be cleaned up"

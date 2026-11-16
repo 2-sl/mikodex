@@ -3,9 +3,9 @@
 > `codex-app-server-daemon` is experimental and its lifecycle contract may
 > change while the remote-management flow is still being developed.
 
-`codex-app-server-daemon` backs the machine-readable `codex app-server`
+`codex-app-server-daemon` backs the machine-readable `mikodex app-server`
 lifecycle commands used by remote clients such as the desktop and mobile apps.
-It is intended for Codex instances launched over SSH, including fresh developer
+It is intended for Mikodex instances launched over SSH, including fresh developer
 machines that should expose app-server with `remote_control` enabled.
 
 ## Platform support
@@ -17,7 +17,7 @@ whose host permits detached child processes.
 Windows automatic attachment requires the canonical socket address to fit the
 108-byte AF_UNIX limit (including its terminator). A short junction alias whose
 resolved address exceeds that limit falls back to the embedded server. Use a
-shorter `CODEX_HOME` to share the daemon; discovery does not trust a mutable alias.
+shorter `MIKODEX_HOME` to share the daemon; discovery does not trust a mutable alias.
 
 Shared clients use the environment inherited when the daemon started. Opening a
 new terminal or clearing variables there does not clear the running daemon's
@@ -30,14 +30,14 @@ initialize the connection, the TUI starts an embedded server instead. Explicit
 ## Commands
 
 ```sh
-codex app-server daemon start
-codex app-server daemon restart
-codex app-server daemon update
-codex app-server daemon enable-remote-control
-codex app-server daemon disable-remote-control
-codex app-server daemon stop
-codex app-server daemon version
-codex app-server daemon bootstrap --remote-control
+mikodex app-server daemon start
+mikodex app-server daemon restart
+mikodex app-server daemon update
+mikodex app-server daemon enable-remote-control
+mikodex app-server daemon disable-remote-control
+mikodex app-server daemon stop
+mikodex app-server daemon version
+mikodex app-server daemon bootstrap --remote-control
 ```
 
 On success, every command writes exactly one JSON object to stdout. Consumers
@@ -46,7 +46,7 @@ responses report the resolved backend, socket path, local CLI version, and
 running app-server version when applicable.
 
 Eligible managed daemons check for updates after five minutes, then hourly by
-default. Edit `CODEX_HOME/app-server-daemon/settings.json` to change this:
+default. Edit `MIKODEX_HOME/app-server-daemon/settings.json` to change this:
 
 ```json
 {
@@ -58,7 +58,7 @@ default. Edit `CODEX_HOME/app-server-daemon/settings.json` to change this:
 
 Positive minute intervals have no configured cap. `daemon restart` applies the
 enabled state; the next updater wait reads a new interval. The preference does
-not affect an explicit `codex update` command or `daemon update`.
+not affect an explicit `mikodex update` command or `daemon update`.
 
 `daemon update` selects the latest stable release, even with automatic updates
 disabled. It also returns pinned or local managed packages to production update
@@ -77,39 +77,33 @@ running.
 
 ## Bootstrap flow
 
-For a new Linux or macOS machine:
+The bootstrap command requires a complete Mikodex CLI package. This checkout
+does not configure a Mikodex release installer; the OpenAI Codex installer
+installs the separate Codex product. After installing a complete Mikodex
+package, run:
 
 ```sh
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
-$HOME/.codex/packages/standalone/current/codex app-server daemon bootstrap --remote-control
-```
-
-On Windows, use a non-elevated PowerShell terminal whose host allows breakaway:
-
-```powershell
-irm https://chatgpt.com/codex/install.ps1 | iex
-$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
-& "$codexHome\packages\standalone\current\bin\codex.exe" app-server daemon bootstrap --remote-control
+mikodex app-server daemon bootstrap --remote-control
 ```
 
 `bootstrap` can use any complete CLI package. If no daemon package is installed,
-it copies the invoking package into `CODEX_HOME/packages/app-server-daemon` and
+it copies the invoking package into `MIKODEX_HOME/packages/app-server-daemon` and
 prints an installation message without asking for confirmation. Existing daemon
 packages are reused, including legacy installations; a broken selection is not
 silently replaced. A bare executable cannot supply a new installation.
 
-It records the daemon settings under `CODEX_HOME/app-server-daemon/`, starts app-server as a
+It records the daemon settings under `MIKODEX_HOME/app-server-daemon/`, starts app-server as a
 pidfile-backed detached process. It launches a detached updater loop when
 automatic updates are enabled, the installer selected the stable `latest`
 channel, and the managed binary supports the updater command.
 
 ## Installation and update cases
 
-New daemons use `CODEX_HOME/packages/app-server-daemon/current/bin/codex`
-(`codex.exe` on Windows). The package contains the executable and its helpers.
+New daemons use `MIKODEX_HOME/packages/app-server-daemon/current/bin/mikodex`
+(`mikodex.exe` on Windows). The package contains the executable and its helpers.
 Daemon-only installer updates leave the user's CLI command and shell setup alone.
 
-Previously launched legacy daemons retain `CODEX_HOME/packages/standalone/current`,
+Previously launched legacy daemons retain `MIKODEX_HOME/packages/standalone/current`,
 including its flat binary layout when present. Starts and scheduled updates keep
 using that location. An explicit production update prepares and validates a
 compatible dedicated package before stopping the legacy updater and daemon,
@@ -156,7 +150,7 @@ other tool updates the managed binary path:
   once that replacement starts successfully
 - if the updater was absent during a same-version binary replacement, a later
   managed start recovers it but cannot infer the running server's previous
-  executable identity; use `codex app-server daemon restart` to refresh the server
+  executable identity; use `mikodex app-server daemon restart` to refresh the server
 
 ## Lifecycle semantics
 
@@ -169,11 +163,11 @@ JSON-RPC initialize handshake on the Unix control socket.
 for future starts. If a managed app-server is already running, they restart it
 so the new setting takes effect immediately.
 
-Top-level `codex remote-control start` enables and persists remote control for
+Top-level `mikodex remote-control start` enables and persists remote control for
 the managed daemon, overriding a saved disabled value. It starts or bootstraps
-the daemon as needed. Plain `codex remote-control` uses the managed daemon when
-eligible; `codex remote-control --no-daemon` runs a separate foreground server.
-`codex remote-control stop` stops the managed daemon without clearing its saved
+the daemon as needed. Plain `mikodex remote-control` uses the managed daemon when
+eligible; `mikodex remote-control --no-daemon` runs a separate foreground server.
+`mikodex remote-control stop` stops the managed daemon without clearing its saved
 remote-control preference.
 `daemon start` and `daemon restart` use that saved preference. `daemon bootstrap`
 sets it according to `--remote-control` (disabled when omitted).
@@ -181,13 +175,13 @@ sets it according to `--remote-control` (disabled when omitted).
 `stop` sends a graceful termination request first, then force-terminates the
 process after the configured grace window if it is still alive.
 
-All mutating lifecycle commands are serialized per `CODEX_HOME`, so a concurrent
+All mutating lifecycle commands are serialized per `MIKODEX_HOME`, so a concurrent
 `start`, `restart`, `enable-remote-control`, `disable-remote-control`, `stop`,
 or `bootstrap` does not race another in-flight lifecycle operation.
 
 ## State
 
-The daemon stores its local state under `CODEX_HOME/app-server-daemon/`:
+The daemon stores its local state under `MIKODEX_HOME/app-server-daemon/`:
 
 - `settings.json` for remote-control launch settings and updater preferences
 - `app-server.pid` for the app-server process record

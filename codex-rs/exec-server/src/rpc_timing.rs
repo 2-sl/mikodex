@@ -42,10 +42,10 @@ impl RpcCompletion {
             ) => return,
         };
         tracing::event!(
-            name: "codex.exec_server.response_received",
+            name: "mikodex.exec_server.response_received",
             target: "codex_otel.trace_safe",
             tracing::Level::INFO,
-            event.name = "codex.exec_server.response_received",
+            event.name = "mikodex.exec_server.response_received",
             rpc.method = method,
             outcome,
             process.start_error_code = start_error_code,

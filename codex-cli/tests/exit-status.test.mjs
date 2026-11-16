@@ -15,16 +15,16 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import test from "node:test";
 
-async function installWrapper(directory, executable) {
+async function installWrapper(directory, executable, commandName = "codex") {
   const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
   const target = `${arch}-${process.platform === "darwin" ? "apple-darwin" : "unknown-linux-musl"}`;
   const bin = path.join(directory, "vendor", target, "bin");
   await mkdir(bin, { recursive: true });
-  await symlink(executable, path.join(bin, "codex"));
+  await symlink(executable, path.join(bin, commandName));
   await mkdir(path.join(directory, "bin"));
   await writeFile(path.join(directory, "package.json"), '{"type":"module"}');
-  const wrapper = path.join(directory, "bin", "codex.js");
-  await copyFile(new URL("../bin/codex.js", import.meta.url), wrapper);
+  const wrapper = path.join(directory, "bin", `${commandName}.js`);
+  await copyFile(new URL(`../bin/${commandName}.js`, import.meta.url), wrapper);
   return wrapper;
 }
 
@@ -76,10 +76,11 @@ test(
       const wrapper = await installWrapper(
         directory,
         path.resolve(process.env.CODEX_TEST_BINARY),
+        "mikodex",
       );
       const home = path.join(directory, "home");
       await mkdir(home);
-      const env = { ...process.env, CODEX_HOME: home, CODEX_SQLITE_HOME: home };
+      const env = { ...process.env, MIKODEX_HOME: home, MIKODEX_SQLITE_HOME: home };
 
       // A normal CLI argument error must retain its numeric exit status.
       const invalid = spawnSync(

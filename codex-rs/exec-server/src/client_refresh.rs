@@ -224,7 +224,7 @@ impl LazyRemoteExecServerClient {
         client.environment_status().await.map(drop)
     }
 
-    #[tracing::instrument(name = "codex.exec_server.remote.connect", skip_all)]
+    #[tracing::instrument(name = "mikodex.exec_server.remote.connect", skip_all)]
     pub(super) fn connect_once<'a>(
         &'a self,
         attempt: &'a ConnectionAttempt,

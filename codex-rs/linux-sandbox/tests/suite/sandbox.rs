@@ -64,7 +64,7 @@ fn create_env_from_core_vars() -> HashMap<String, String> {
 }
 
 fn codex_linux_sandbox_exe() -> PathBuf {
-    let sandbox_program = PathBuf::from(env!("CARGO_BIN_EXE_codex-linux-sandbox"));
+    let sandbox_program = PathBuf::from(env!("CARGO_BIN_EXE_mikodex-linux-sandbox"));
     match sandbox_program.canonicalize() {
         Ok(path) => path,
         Err(_) => sandbox_program,
@@ -902,7 +902,7 @@ async fn sandbox_blocks_nc() {
 }
 
 #[test_case::test_case(".git", "config")]
-#[test_case::test_case(".codex", "config.toml")]
+#[test_case::test_case(".mikodex", "config.toml")]
 #[test_case::test_case(".aws", "config")]
 #[tokio::test]
 async fn sandbox_blocks_metadata_writes_inside_writable_root(name: &str, config: &str) {
@@ -960,7 +960,7 @@ async fn sandbox_blocks_codex_symlink_replacement_attack() {
     let decoy = tmpdir.path().join("decoy-codex");
     std::fs::create_dir_all(&decoy).expect("create decoy dir");
 
-    let dot_codex = tmpdir.path().join(".codex");
+    let dot_codex = tmpdir.path().join(".mikodex");
     symlink(&decoy, &dot_codex).expect("create .codex symlink");
 
     let codex_target = dot_codex.join("config.toml");
@@ -996,7 +996,7 @@ async fn sandbox_reports_codex_symlink_build_failure_without_panicking() {
     let decoy = tmpdir.path().join("decoy-codex");
     std::fs::create_dir_all(&decoy).expect("create decoy dir");
 
-    let dot_codex = tmpdir.path().join(".codex");
+    let dot_codex = tmpdir.path().join(".mikodex");
     symlink(&decoy, &dot_codex).expect("create .codex symlink");
 
     let output = match run_cmd_result_with_writable_roots(
@@ -1206,7 +1206,7 @@ fi
 
     let mkdir_codex_output = expect_denied(
         run_cmd_result_with_cwd_and_writable_roots(
-            &["mkdir", ".codex"],
+            &["mkdir", ".mikodex"],
             &subdir,
             std::slice::from_ref(&subdir),
             LONG_TIMEOUT_MS,
@@ -1217,7 +1217,7 @@ fi
         "child .codex directory creation should be denied",
     );
     assert_ne!(mkdir_codex_output.exit_code, 0);
-    assert!(!subdir.join(".codex").exists());
+    assert!(!subdir.join(".mikodex").exists());
 
     let script = format!(
         r#"set -e
@@ -1244,7 +1244,7 @@ printf '%s\n' '{{"message":"ok"}}' | python3 jsonl_viewer.py | grep -q ok
 
     assert!(subdir.join("jsonl_viewer.py").is_file());
     assert!(!subdir.join(".git").exists());
-    assert!(!subdir.join(".codex").exists());
+    assert!(!subdir.join(".mikodex").exists());
     assert!(!subdir.join(".agents").exists());
 }
 

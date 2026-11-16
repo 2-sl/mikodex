@@ -1,81 +1,73 @@
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
-<p align="center">
-  <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
-</p>
-</br>
-If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
-</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
+# Mikodex
 
----
+Mikodex is an unofficial, independently maintained project derived from the
+OpenAI Codex CLI. It is not affiliated with, endorsed by, or sponsored by OpenAI.
+Its command is `mikodex`, and its configuration, login tokens, session history,
+and background-server state use a separate home directory so they do not share
+state with an installed Codex.
 
-## Quickstart
+## Features
 
-### Installing and running Codex CLI
+- **Mikodex user-facing name.** The CLI is presented as Mikodex and runs with
+  the `mikodex` command. OpenAI-facing APIs, protocols, authentication, and
+  service identifiers retain Codex naming where compatibility requires it.
+- **Agent Command Center sidebar.** The Agent Command Center stays pinned in a
+  left sidebar while the selected agent session appears in the main chat area.
+- **Command reference sidebar.** A right sidebar lists available slash commands
+  with short descriptions.
+- **Animated chat backgrounds.** The built-in Codex logo animation runs when no
+  personal background image is configured. During chat sessions, the animation
+  or selected image remains visible as a subtle watermark in unused transcript
+  cells.
 
-Run the following on Mac or Linux to install Codex CLI:
+## Build and run
 
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
+For quick source development on macOS, Linux, or Windows through WSL2, run:
+
+```sh
+cargo run --manifest-path codex-rs/Cargo.toml -p codex-cli --bin mikodex
 ```
 
-Run the following on Windows to install Codex CLI:
+That command builds a development executable, not a complete local package. To
+build the complete package with its runtime helpers, use the canonical package
+builder:
 
-```shell
-powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
+```sh
+just assemble-codex-package --variant codex --cargo-profile release --package-dir codex-rs/target/mikodex-package --force
 ```
 
-The standalone installers download from `https://releases.openai.com/codex` by default and fall back to GitHub Releases if a metadata or asset download is unavailable. To force GitHub Releases, set `CODEX_INSTALLER_USE_RELEASES_OPENAI_COM` to `false` (`0` and `no` are also accepted):
+Run `codex-rs/target/mikodex-package/bin/mikodex.exe` on Windows or
+`codex-rs/target/mikodex-package/bin/mikodex` on macOS and Linux. The package
+includes the metadata and helper binaries required by daemon installation and
+sandbox setup.
 
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALLER_USE_RELEASES_OPENAI_COM=false sh
-```
+Native Windows x64 builds are also supported. Install the Rust
+`x86_64-pc-windows-msvc` toolchain and Visual Studio 2022 Build Tools with the
+**Desktop development with C++** workload and a Windows SDK. Run the same Cargo
+package build from an x64 Native Tools Command Prompt or Developer PowerShell so
+the MSVC environment is configured. The local `.toolchain/build-mikodex.cmd`
+script runs this canonical package build. See [Rust installation](https://rust-lang.org/tools/install/),
+[MSVC command-line setup](https://learn.microsoft.com/en-us/cpp/build/building-on-the-command-line?view=msvc-170),
+and the repository [build instructions](docs/install.md).
 
-```powershell
-$env:CODEX_INSTALLER_USE_RELEASES_OPENAI_COM='false'; irm https://chatgpt.com/codex/install.ps1 | iex
-```
+To sign in, run `mikodex login` and choose the ChatGPT sign-in option. Mikodex
+uses the upstream Codex authentication implementation.
 
-Codex CLI can also be installed via the following package managers:
+## Local data
 
-```shell
-# Install using npm
-npm install -g @openai/codex
-```
+By default Mikodex stores its data under `%USERPROFILE%\.mikodex` on Windows
+and `~/.mikodex` on macOS and Linux. Set `MIKODEX_HOME` to use another directory.
 
-```shell
-# Install using Homebrew
-brew install --cask codex
-```
+## Animated chat background
 
-Then simply run `codex` to get started.
+Set a personal image with `/background "<image path>"` or its `/bga` alias.
+Mikodex copies it to
+`$MIKODEX_HOME/background/custom.png` (normally `%USERPROFILE%\.mikodex\background\custom.png`)
+and reuses that copy on later launches. PNG, JPEG, GIF, and WebP input files are
+supported. Use `/background off` to disable the animation, `/background on` to
+enable it again, and `/background clear` to remove the saved image while keeping
+the current enabled or disabled state. The off/on setting persists across launches.
 
-<details>
-<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
-
-Each GitHub Release contains many executables, but in practice, you likely want one of these:
-
-- macOS
-  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
-  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
-- Linux
-  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
-  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
-
-Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
-
-</details>
-
-### Using Codex with your ChatGPT plan
-
-Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Business, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
-
-You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
-
-## Docs
-
-- [**Codex Documentation**](https://developers.openai.com/codex)
-- [**Contributing**](./docs/contributing.md)
-- [**Installing & building**](./docs/install.md)
-- [**Open source fund**](./docs/open-source-fund.md)
-
-This repository is licensed under the [Apache-2.0 License](LICENSE).
+This repository is licensed under the [Apache-2.0 License](LICENSE). See
+[contributing](docs/contributing.md) and [build instructions](docs/install.md)
+for repository development details.

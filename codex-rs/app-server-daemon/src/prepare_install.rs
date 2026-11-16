@@ -74,7 +74,7 @@ pub async fn update_from_cli(
             .ok()
             .map(|info| info.app_server_version),
         managed_codex_path,
-        message: "The CLI package is selected and pinned. Run `codex app-server daemon update` to return to production updates.".to_string(),
+        message: "The CLI package is selected and pinned. Run `mikodex app-server daemon update` to return to production updates.".to_string(),
     }))
 }
 
@@ -96,7 +96,7 @@ async fn prepare_from_package(
         .settings_file
         .parent()
         .and_then(Path::parent)
-        .context("daemon settings path has no Codex home")?;
+        .context("daemon settings path has no Mikodex home")?;
     let previous_root = managed_install::package_root(home);
     let root = home.join("packages/app-server-daemon");
     anyhow::ensure!(
@@ -120,7 +120,7 @@ async fn prepare_from_package(
     } else {
         anyhow::ensure!(
             previous_root.join("current").symlink_metadata().is_ok(),
-            "no daemon package is selected; run `codex app-server daemon start` first"
+            "no daemon package is selected; run `mikodex app-server daemon start` first"
         );
     }
     std::fs::create_dir_all(&root)?;
@@ -131,7 +131,7 @@ async fn prepare_from_package(
     let backend = daemon.running_backend_instance(settings).await?;
     anyhow::ensure!(
         backend.is_some() || crate::client::probe(&daemon.socket_path).await.is_err(),
-        "app server is running but is not managed by codex app-server daemon"
+        "app server is running but is not managed by mikodex app-server daemon"
     );
     let selected = managed_install::managed_codex_bin(home);
     let previous_release = previous_root.join("current").canonicalize().ok();
@@ -146,11 +146,11 @@ async fn prepare_from_package(
         );
     }
     let source = source.context(
-        "this CLI has no complete local package; install a packaged Codex CLI or use the standalone installer",
+        "this CLI has no complete local package; install a packaged Mikodex CLI or use the standalone installer",
     )?;
     anyhow::ensure!(
         !root.canonicalize()?.starts_with(source.canonicalize()?),
-        "CODEX_HOME must be outside the source CLI package"
+        "MIKODEX_HOME must be outside the source CLI package"
     );
     let manifest_bytes = std::fs::read(source.join("codex-package.json"))?;
     let manifest: CodexPackageManifest = serde_json::from_slice(&manifest_bytes)?;
@@ -158,14 +158,14 @@ async fn prepare_from_package(
     let target = platform_target()?;
     let mut metadata: serde_json::Value = serde_json::from_slice(&manifest_bytes)?;
     let entrypoint = if cfg!(windows) {
-        "bin/codex.exe"
+        "bin/mikodex.exe"
     } else {
-        "bin/codex"
+        "bin/mikodex"
     };
     let source_entrypoint = metadata["entrypoint"].as_str().unwrap_or_default();
     let winget = cfg!(windows)
         && metadata["layoutVersion"] == 1
-        && source_entrypoint == format!("codex-{target}.exe");
+        && source_entrypoint == format!("mikodex-{target}.exe");
     anyhow::ensure!(
         metadata["target"] == target && (source_entrypoint == entrypoint || winget),
         "the CLI package does not match this platform or executable"
@@ -310,8 +310,8 @@ async fn prepare_from_package(
         );
     } else {
         #[cfg(unix)]
-        if !stage.path().join("codex").exists() {
-            std::os::unix::fs::symlink("bin/codex", stage.path().join("codex"))?;
+        if !stage.path().join("mikodex").exists() {
+            std::os::unix::fs::symlink("bin/mikodex", stage.path().join("mikodex"))?;
         }
         #[cfg(windows)]
         windows::publish_release(stage.path(), &release).await?;
@@ -413,7 +413,7 @@ async fn prepare_from_package(
             ..daemon.clone()
         };
         selected.start_managed_backend(settings).await.context(
-            "daemon package selected but could not start; retry with `codex app-server daemon start`",
+            "daemon package selected but could not start; retry with `mikodex app-server daemon start`",
         )?;
         selected.wait_until_ready().await?;
     }
@@ -440,7 +440,7 @@ fn package_tree(
         // The Unix installer adds this alias outside the package layout.
         if cfg!(unix)
             && relative == Path::new("codex")
-            && std::fs::read_link(&path).ok().as_deref() == Some(Path::new("bin/codex"))
+            && std::fs::read_link(&path).ok().as_deref() == Some(Path::new("bin/mikodex"))
         {
             continue;
         }
@@ -532,7 +532,7 @@ fn validate_package(root: &Path, entrypoint: &str) -> Result<()> {
     for name in names {
         if !root.join(name).is_file() {
             return Err(anyhow!(
-                "local Codex package is missing {name}; reinstall the CLI or use the standalone installer"
+                "local Mikodex package is missing {name}; reinstall the CLI or use the standalone installer"
             ));
         }
         #[cfg(unix)]
@@ -540,7 +540,7 @@ fn validate_package(root: &Path, entrypoint: &str) -> Result<()> {
             use std::os::unix::fs::PermissionsExt;
             if std::fs::metadata(root.join(name))?.permissions().mode() & 0o111 == 0 {
                 return Err(anyhow!(
-                    "local Codex package file {name} is not executable; reinstall the CLI or use the standalone installer"
+                    "local Mikodex package file {name} is not executable; reinstall the CLI or use the standalone installer"
                 ));
             }
         }

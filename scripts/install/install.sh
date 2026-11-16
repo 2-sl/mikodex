@@ -13,13 +13,13 @@ RELEASES_METADATA_TIMEOUT=30
 RELEASES_ASSET_TIMEOUT=300
 release_source="github"
 
-BIN_DIR="${CODEX_INSTALL_DIR:-$HOME/.local/bin}"
-BIN_PATH="$BIN_DIR/codex"
+BIN_DIR="${MIKODEX_INSTALL_DIR:-$HOME/.local/bin}"
+BIN_PATH="$BIN_DIR/mikodex"
 CODE_MODE_HOST_BIN_PATH="$BIN_DIR/codex-code-mode-host"
-CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
-STANDALONE_ROOT="$CODEX_HOME_DIR/packages/standalone"
+MIKODEX_HOME_DIR="${MIKODEX_HOME:-$HOME/.mikodex}"
+STANDALONE_ROOT="$MIKODEX_HOME_DIR/packages/standalone"
 if [ "$DAEMON_ONLY" = "1" ]; then
-  STANDALONE_ROOT="$CODEX_HOME_DIR/packages/app-server-daemon"
+  STANDALONE_ROOT="$MIKODEX_HOME_DIR/packages/app-server-daemon"
 fi
 RELEASES_DIR="$STANDALONE_ROOT/releases"
 CURRENT_LINK="$STANDALONE_ROOT/current"
@@ -755,7 +755,7 @@ cleanup_stale_install_artifacts() {
   find "$STANDALONE_ROOT" -mindepth 1 -maxdepth 1 -name '.current.*' -exec rm -f {} +
 
   if [ "$DAEMON_ONLY" != "1" ] && [ -d "$BIN_DIR" ]; then
-    find "$BIN_DIR" -mindepth 1 -maxdepth 1 -name '.codex.*' -exec rm -f {} +
+    find "$BIN_DIR" -mindepth 1 -maxdepth 1 -name '.mikodex.*' -exec rm -f {} +
   fi
 }
 
@@ -775,14 +775,14 @@ record_standalone_releases_in_use() {
         printf 'n%s\n' "$executable" >> "$tmp_dir/in-use" || return 1
       elif [ -d "$process" ]; then
         # Even same-user ssh-agent/systemd processes may deny exe inspection.
-        # Only an unreadable Codex or bundled helper prevents safe pruning.
+        # Only an unreadable Mikodex or bundled helper prevents safe pruning.
         process_name="$(cat "$process/comm" 2>/dev/null)" || {
           [ ! -d "$process" ] && continue
           return 1
         }
         # Linux truncates comm to 15 bytes, including the code-mode host.
         case "$process_name" in
-          codex* | rg | bwrap)
+          mikodex* | codex* | rg | bwrap)
             # A zombie has no files left open, even if its parent never reaps it.
             grep -Eq '^State:[[:space:]]*Z' "$process/status" 2>/dev/null && continue
             [ ! -d "$process" ] && continue
@@ -794,14 +794,14 @@ record_standalone_releases_in_use() {
   else
     # macOS lsof silently omits other users' processes, even with no errors.
     # ps can still report their executable names. As on Linux, decline to
-    # prune when an uninspectable Codex or helper may be using a release.
+    # prune when an uninspectable Mikodex or helper may be using a release.
     current_uid="$(id -u)" || return 1
     ps -axo uid=,comm= > "$tmp_dir/processes" || return 1
     [ -s "$tmp_dir/processes" ] || return 1
     while read -r process_uid process_name; do
       [ "$process_uid" = "$current_uid" ] && continue
       case "${process_name##*/}" in
-        codex* | rg | bwrap) return 1 ;;
+        mikodex* | codex* | rg | bwrap) return 1 ;;
       esac
     done < "$tmp_dir/processes"
     if /usr/sbin/lsof -nP -F n +D "$releases" > "$tmp_dir/in-use" 2> "$tmp_dir/lsof-error"; then
@@ -819,7 +819,7 @@ release_is_unused() {
   if [ "$os" = "linux" ]; then
     path_field="n$1"
   else
-    # lsof +D scopes the scan to this tree, but may escape bytes in CODEX_HOME.
+    # lsof +D scopes the scan to this tree, but may escape bytes in MIKODEX_HOME.
     # Match the installer-owned ASCII path, including the temporary retirement name.
     path_field="/packages/${STANDALONE_ROOT##*/}/releases/${1#"$releases"/}"
   fi
@@ -830,7 +830,7 @@ release_is_unused() {
 # Run under the install lock, after the visible command has been verified.
 # Only retire ordinary, manifest-owned packages; never retry a retired tree.
 prune_standalone_releases() (
-  [ ! -L "$CODEX_HOME_DIR/packages" ] &&
+  [ ! -L "$MIKODEX_HOME_DIR/packages" ] &&
     [ ! -L "$STANDALONE_ROOT" ] && [ ! -L "$RELEASES_DIR" ] || return 1
   releases="$(cd -P "$RELEASES_DIR" && pwd)" || return 1
   # Local process inspection cannot establish whether a network home is in
@@ -867,7 +867,7 @@ prune_standalone_releases() (
     target="$(printf '%s\n' "$metadata" | awk -F '\t' '$1 == "target" {print $2}')"
     entrypoint="$(printf '%s\n' "$metadata" | awk -F '\t' '$1 == "entrypoint" {print $2}')"
     [ "${candidate##*/}" = "$version-$target" ] && [ "$version" != "latest" ] &&
-      [ "$entrypoint" = "bin/codex" ] && [ -f "$candidate/bin/codex" ] || continue
+      [ "$entrypoint" = "bin/mikodex" ] && [ -f "$candidate/bin/mikodex" ] || continue
     validate_version "$version" >/dev/null 2>&1 || continue
     case "$target" in
       aarch64-apple-darwin | x86_64-apple-darwin | aarch64-unknown-linux-musl | x86_64-unknown-linux-musl) ;;
@@ -876,8 +876,8 @@ prune_standalone_releases() (
 
     # Reject symlinks (except the installer's own alias), special files and
     # mounts before rm -r. find -xdev alone would not protect nested mounts.
-    [ "$(readlink "$candidate/codex" 2>/dev/null)" = "bin/codex" ] || continue
-    if ! find "$candidate" -xdev ! -type f ! -type d ! -path "$candidate/codex" -print > "$tmp_dir/unowned"; then
+    [ "$(readlink "$candidate/mikodex" 2>/dev/null)" = "bin/mikodex" ] || continue
+    if ! find "$candidate" -xdev ! -type f ! -type d ! -path "$candidate/mikodex" -print > "$tmp_dir/unowned"; then
       continue
     fi
     [ ! -s "$tmp_dir/unowned" ] || continue
@@ -954,13 +954,13 @@ version_from_binary() {
 }
 
 current_installed_version() {
-  version="$(version_from_binary "$CURRENT_LINK/bin/codex" || true)"
+  version="$(version_from_binary "$CURRENT_LINK/bin/mikodex" || true)"
   if [ -n "$version" ]; then
     printf '%s\n' "$version"
     return 0
   fi
 
-  version="$(version_from_binary "$CURRENT_LINK/codex" || true)"
+  version="$(version_from_binary "$CURRENT_LINK/mikodex" || true)"
   if [ -n "$version" ]; then
     printf '%s\n' "$version"
     return 0
@@ -970,7 +970,7 @@ current_installed_version() {
 }
 
 resolve_existing_codex() {
-  command -v codex 2>/dev/null || true
+  command -v mikodex 2>/dev/null || true
 }
 
 classify_existing_codex() {
@@ -1040,30 +1040,30 @@ prompt_yes_no() {
 print_launch_instructions() {
   case "$path_action" in
     added)
-      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && codex"
-      step "Future terminals: open a new terminal and run: codex"
+      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && mikodex"
+      step "Future terminals: open a new terminal and run: mikodex"
       step "PATH was added to $path_profile"
       ;;
     updated)
-      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && codex"
-      step "Future terminals: open a new terminal and run: codex"
+      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && mikodex"
+      step "Future terminals: open a new terminal and run: mikodex"
       step "PATH was updated in $path_profile"
       ;;
     configured)
-      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && codex"
-      step "Future terminals: open a new terminal and run: codex"
+      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && mikodex"
+      step "Future terminals: open a new terminal and run: mikodex"
       step "PATH is already configured in $path_profile"
       ;;
     *)
-      step "Current terminal: codex"
-      step "Future terminals: open a new terminal and run: codex"
+      step "Current terminal: mikodex"
+      step "Future terminals: open a new terminal and run: mikodex"
       ;;
   esac
 }
 
 maybe_launch_codex_now() {
-  if prompt_yes_no "Start Codex now?"; then
-    step "Launching Codex"
+  if prompt_yes_no "Start Mikodex now?"; then
+    step "Launching Mikodex"
     "$BIN_PATH"
   fi
 }
@@ -1089,23 +1089,23 @@ handle_conflicting_install() {
 
   case "$conflict_manager" in
     brew)
-      uninstall_cmd="brew uninstall --cask codex"
+      uninstall_cmd="brew uninstall --cask mikodex"
       ;;
     bun)
-      uninstall_cmd="bun remove -g @openai/codex"
+      uninstall_cmd="bun remove -g mikodex"
       ;;
     *)
-      uninstall_cmd="npm uninstall -g @openai/codex"
+      uninstall_cmd="npm uninstall -g mikodex"
       ;;
   esac
 
-  if prompt_yes_no "Uninstall the existing $conflict_manager-managed Codex now?"; then
+  if prompt_yes_no "Uninstall the existing $conflict_manager-managed Mikodex now?"; then
     step "Running: $uninstall_cmd"
     if ! sh -c "$uninstall_cmd"; then
-      warn "Failed to uninstall the existing $conflict_manager-managed Codex. Continuing with the standalone install."
+      warn "Failed to uninstall the existing $conflict_manager-managed Mikodex. Continuing with the standalone install."
     fi
   else
-    warn "Leaving the existing $conflict_manager-managed Codex installed. PATH order will determine which codex runs."
+    warn "Leaving the existing $conflict_manager-managed Mikodex installed. PATH order will determine which mikodex runs."
   fi
 }
 
@@ -1119,7 +1119,7 @@ install_package_release() {
   mkdir -p "$stage_release"
   tar -xzf "$archive_path" -C "$stage_release"
   chmod 0755 \
-    "$stage_release/bin/codex" \
+    "$stage_release/bin/mikodex" \
     "$stage_release/bin/codex-code-mode-host" \
     "$stage_release/codex-path/rg"
   if [ -f "$stage_release/codex-resources/bwrap" ]; then
@@ -1128,7 +1128,7 @@ install_package_release() {
   if [ -f "$stage_release/bin/codex-exec-server" ]; then
     chmod 0755 "$stage_release/bin/codex-exec-server"
   fi
-  ln -sf "bin/codex" "$stage_release/codex"
+  ln -sf "bin/mikodex" "$stage_release/mikodex"
 
   if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
     rm -rf "$release_dir"
@@ -1149,9 +1149,9 @@ install_legacy_platform_npm_release() {
   mkdir -p "$stage_release/codex-resources" "$extract_dir"
   tar -xzf "$archive_path" -C "$extract_dir"
 
-  cp "$vendor_root/codex/codex" "$stage_release/codex"
+  cp "$vendor_root/codex/mikodex" "$stage_release/mikodex"
   cp "$vendor_root/path/rg" "$stage_release/codex-resources/rg"
-  chmod 0755 "$stage_release/codex" "$stage_release/codex-resources/rg"
+  chmod 0755 "$stage_release/mikodex" "$stage_release/codex-resources/rg"
   if [ -f "$vendor_root/codex-resources/bwrap" ]; then
     cp "$vendor_root/codex-resources/bwrap" "$stage_release/codex-resources/bwrap"
     chmod 0755 "$stage_release/codex-resources/bwrap"
@@ -1176,9 +1176,9 @@ release_dir_is_complete() {
   case "$layout" in
     package)
       [ -f "$release_dir/codex-package.json" ] &&
-        [ -x "$release_dir/bin/codex" ] &&
+        [ -x "$release_dir/bin/mikodex" ] &&
         [ -x "$release_dir/bin/codex-code-mode-host" ] &&
-        [ -x "$release_dir/codex" ] &&
+        [ -x "$release_dir/mikodex" ] &&
         [ -x "$release_dir/codex-path/rg" ] ||
         return 1
       # Older canonical packages do not advertise or contain the executor.
@@ -1187,7 +1187,7 @@ release_dir_is_complete() {
       fi
       ;;
     legacy-platform-npm)
-      [ -x "$release_dir/codex" ] &&
+      [ -x "$release_dir/mikodex" ] &&
         [ -x "$release_dir/codex-resources/rg" ] ||
         return 1
       ;;
@@ -1202,7 +1202,7 @@ release_dir_is_complete() {
       ;;
   esac
 
-  installed_version="$(version_from_binary "$release_dir/bin/codex" || version_from_binary "$release_dir/codex" || true)"
+  installed_version="$(version_from_binary "$release_dir/bin/mikodex" || version_from_binary "$release_dir/mikodex" || true)"
   [ "$installed_version" = "$expected_version" ]
 }
 
@@ -1216,17 +1216,17 @@ update_current_link() {
 release_codex_relative_path() {
   release_dir="$1"
 
-  if [ -x "$release_dir/bin/codex" ]; then
-    printf 'bin/codex\n'
+  if [ -x "$release_dir/bin/mikodex" ]; then
+    printf 'bin/mikodex\n'
   else
-    printf 'codex\n'
+    printf 'mikodex\n'
   fi
 }
 
 update_visible_command() {
   release_dir="$1"
   mkdir -p "$BIN_DIR"
-  tmp_link="$BIN_DIR/.codex.$$"
+  tmp_link="$BIN_DIR/.mikodex.$$"
   codex_relative_path="$(release_codex_relative_path "$release_dir")"
 
   replace_path_with_symlink "$BIN_PATH" "$CURRENT_LINK/$codex_relative_path" "$tmp_link"
@@ -1344,9 +1344,9 @@ if [ "${CODEX_INSTALL_DEFER_SELECTION:-0}" = "1" ] &&
   echo "A dedicated daemon is already selected; retry the update." >&2
   exit 1
 fi
-updater_record="$CODEX_HOME_DIR/app-server-daemon/app-server-updater.pid"
+updater_record="$MIKODEX_HOME_DIR/app-server-daemon/app-server-updater.pid"
 if [ "$DAEMON_ONLY" = "1" ]; then
-  updater_record="$CODEX_HOME_DIR/app-server-daemon/daemon-updater.pid"
+  updater_record="$MIKODEX_HOME_DIR/app-server-daemon/daemon-updater.pid"
 fi
 old_updater_parent="false"
 if [ "${CODEX_INSTALL_IF_LATEST:-}" != "1" ] && [ "${CODEX_INSTALL_IF_CURRENT:-}" != "1" ] && [ -f "$updater_record" ]; then
@@ -1431,9 +1431,9 @@ if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target"
   exit 1
 fi
 if [ "$DAEMON_ONLY" = "1" ] && [ "${CODEX_INSTALL_DEFER_SELECTION:-0}" != "1" ]; then
-  installed_codex="$release_dir/codex"
+  installed_codex="$release_dir/mikodex"
   if [ "$install_layout" = "package" ]; then
-    installed_codex="$release_dir/bin/codex"
+    installed_codex="$release_dir/bin/mikodex"
   fi
   if ! "$installed_codex" app-server daemon pid-update-loop --check-package-ownership >/dev/null 2>&1; then
     echo "The production release does not support daemon-owned packages; the current selection was left unchanged." >&2

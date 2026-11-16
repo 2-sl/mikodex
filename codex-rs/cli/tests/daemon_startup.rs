@@ -93,11 +93,11 @@ async fn elevated_local_tui_uses_embedded_without_starting_daemon() -> Result<()
     for command in ["elevated", "elevated-resume", "elevated-fork"] {
         daemon_startup(command).await?;
     }
-    let codex = codex_utils_cargo_bin::cargo_bin("codex")?;
+    let codex = codex_utils_cargo_bin::cargo_bin("mikodex")?;
     let home = tempfile::tempdir()?;
     for operation in ["start", "restart"] {
         let output = Command::new(&codex)
-            .env("CODEX_HOME", home.path())
+            .env("MIKODEX_HOME", home.path())
             .args(["app-server", "daemon", operation])
             .output()?;
         ensure!(
@@ -122,7 +122,7 @@ async fn restrictive_launcher_uses_embedded_if_daemon_cannot_start() -> Result<(
         // The PTY creates its own breakaway-permitted job. Add Cargo's
         // restriction *inside* the PTY so it is the CLI's innermost job.
         let job = codex_utils_pty::JobObject::create_without_breakaway()?;
-        let codex = codex_utils_cargo_bin::cargo_bin("codex")?;
+        let codex = codex_utils_cargo_bin::cargo_bin("mikodex")?;
         let mut command = tokio::process::Command::new(codex);
         command
             .arg("--no-alt-screen")
@@ -158,7 +158,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
     #[cfg(not(windows))]
     let elevated = false;
     let elevated_launch = command.starts_with("elevated");
-    let codex = codex_utils_cargo_bin::cargo_bin("codex")?.canonicalize()?;
+    let codex = codex_utils_cargo_bin::cargo_bin("mikodex")?.canonicalize()?;
     let workspace = tempfile::tempdir()?;
     let workspace_path = workspace.path().canonicalize()?;
     #[cfg(unix)]
@@ -169,7 +169,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
     anyhow::ensure!(
         Command::new(&codex)
-            .env("CODEX_HOME", home.path())
+            .env("MIKODEX_HOME", home.path())
             .arg("--version")
             .output()?
             .status
@@ -226,9 +226,9 @@ async fn daemon_startup(command: &str) -> Result<()> {
     ] {
         env.remove(key);
     }
-    env.insert("CODEX_HOME".into(), home.path().display().to_string());
+    env.insert("MIKODEX_HOME".into(), home.path().display().to_string());
     env.insert(
-        "CODEX_SQLITE_HOME".into(),
+        "MIKODEX_SQLITE_HOME".into(),
         home.path().display().to_string(),
     );
     env.insert("TERM".into(), "xterm-256color".into());
@@ -250,7 +250,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
         let managed = home
             .path()
             .join("packages/app-server-daemon/current/bin")
-            .join(if cfg!(windows) { "codex.exe" } else { "codex" });
+            .join(if cfg!(windows) { "mikodex.exe" } else { "codex" });
         fs::create_dir_all(home.path().join("packages/app-server-daemon/current/bin"))?;
         // Hard links change the executable's ctime and invalidate Rosetta's translation cache.
         #[cfg(unix)]
@@ -537,7 +537,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
                             screen.screen().contents()
                         )
                         .replace(&*workspace_path.to_string_lossy(), "[WORKSPACE]")
-                        .replace(&*home.path().to_string_lossy(), "[CODEX_HOME]")
+                        .replace(&*home.path().to_string_lossy(), "[MIKODEX_HOME]")
                         .replace("     tab/⇧tab filter", "tab/shift+tab filter");
                         let transition = transition.lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
                         let snapshot = codex_utils_cargo_bin::find_resource!(

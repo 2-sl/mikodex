@@ -279,7 +279,7 @@ async fn inactive_profiles_keep_snapshots_but_active_brokers_require_sandbox() -
     use tokio_util::sync::CancellationToken;
 
     let dir = tempdir()?;
-    std::fs::create_dir(dir.path().join(".codex"))?;
+    std::fs::create_dir(dir.path().join(".mikodex"))?;
     std::fs::write(
         dir.path().join(".codex/startup.sh"),
         "printf started > startup-ran\n",
@@ -354,7 +354,7 @@ async fn inactive_profiles_keep_snapshots_but_active_brokers_require_sandbox() -
                 ShellEnvironmentPolicy {
                     r#set: HashMap::from([(
                         "BASH_ENV".to_string(),
-                        "./.codex/startup.sh".to_string(),
+                        "./.mikodex/startup.sh".to_string(),
                     )]),
                     ..ShellEnvironmentPolicy::default()
                 },

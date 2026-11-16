@@ -26,7 +26,8 @@ impl App {
         }
         let side = self.sidebar_has_focus();
         let can_switch = self.panel_focus().is_some() || self.switchable_side_child().is_some();
-        let can_size = super::side_pane::split_layout(self, tui, area).is_some();
+        let conversation = super::agents_overview_dock::conversation_viewport(self, area);
+        let can_size = super::side_pane::split_layout(self, tui, conversation).is_some();
         let can_resize = can_size && side && self.zoomed_thread.is_none();
         let mut groups = [
             ("Panes", Vec::new()),
