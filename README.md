@@ -14,7 +14,14 @@ state with an installed Codex.
 - **Agent Command Center sidebar.** The Agent Command Center stays pinned in a
   left sidebar while the selected agent session appears in the main chat area.
 - **Command reference sidebar.** A right sidebar lists available slash commands
-  with short descriptions.
+  with short descriptions when the terminal is wide enough (120 columns or
+  more).
+- **Resizable sidebars.** Drag either dock divider with the mouse, or use the
+  keyboard controls below. Mikodex saves each width in your user config.
+- **Korean keyboard input for slash commands.** Slash commands work when typed
+  with a Korean 2-set keyboard layout active. For example, `/벼ㅑㅅ` and `/ㄷ턋`
+  are accepted as `/quit` and `/exit`; the same conversion works for other
+  built-in commands.
 - **Animated chat backgrounds.** The built-in Codex logo animation runs when no
   personal background image is configured. During chat sessions, the animation
   or selected image remains visible as a subtle watermark in unused transcript
@@ -52,6 +59,23 @@ and the repository [build instructions](docs/install.md).
 
 To sign in, run `mikodex login` and choose the ChatGPT sign-in option. Mikodex
 uses the upstream Codex authentication implementation.
+
+## Resizing the sidebars
+
+Drag a vertical divider to resize the Agent Command Center or command reference
+sidebar. For keyboard resizing, press `Ctrl+X`, then `R` (the default
+`resize_panes` shortcut). Use the left and right arrow keys to adjust by one
+column, or `Shift+Left` and `Shift+Right` to adjust by ten columns. Press
+`Enter` to save the preview or `Esc` to cancel it. The widths are stored as
+`tui.agents_overview_width_percent` and `tui.command_reference_width_percent`
+in your Mikodex config.
+
+## Automated checks
+
+Pushes and pull requests do not start CI checks automatically in this fork.
+Run the relevant build and tests locally. Some test workflows can still be
+started manually from GitHub Actions; release and issue workflows have their
+own triggers.
 
 ## Local data
 
