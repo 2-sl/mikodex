@@ -554,7 +554,7 @@ pub(super) fn paint_divider(
     let guide = drag.filter(|drag| drag.guide_only).map_or(divider, |drag| {
         drag.screen.right()
             - drag.percent().map_or(drag.initial_width, |p| {
-                preferred_width(drag.screen.width, Some(p))
+                preferred_width(drag.screen.width, Some(p), drag.initial_width)
             })
             - GAP
     });
