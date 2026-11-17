@@ -775,7 +775,7 @@ fn parse_socket_path(raw: &str) -> Result<AbsolutePathBuf, String> {
 }
 
 /// Handle the app exit and print the results. Optionally run the update action.
-fn handle_app_exit(
+async fn handle_app_exit(
     exit_info: AppExitInfo,
     cli_executable: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
@@ -797,6 +797,18 @@ fn handle_app_exit(
     if is_fatal {
         std::io::stdout().flush()?;
         std::process::exit(1);
+    }
+    if update_action == Some(UpdateAction::MikodexRolling) {
+        #[cfg(windows)]
+        {
+            anyhow::ensure!(
+                rolling_update::run_if_supported().await?,
+                "This Mikodex installation cannot use the rolling updater"
+            );
+            return Ok(());
+        }
+        #[cfg(not(windows))]
+        anyhow::bail!("The Mikodex rolling updater is only available on Windows x64");
     }
     if let Some(action) = update_action {
         run_update_action(action, cli_executable)?;
@@ -1123,7 +1135,7 @@ async fn dispatch_cli(
     let launch_tui = move |interactive, remote, auth_token_env, arg0_paths| async move {
         let exit_info =
             run_interactive_tui(interactive, remote, auth_token_env, arg0_paths).await?;
-        handle_app_exit(exit_info, daemon_cli_executable.as_deref())
+        handle_app_exit(exit_info, daemon_cli_executable.as_deref()).await
     };
     let open_agents_overview = matches!(&subcommand, Some(Subcommand::Agents(_)));
     match subcommand {

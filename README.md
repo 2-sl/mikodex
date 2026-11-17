@@ -40,6 +40,9 @@ state with an installed Codex.
   It detects rebuilt files even when the package version stays the same, verifies
   the complete ZIP before installing, and replaces the package after the update
   command exits.
+- **Startup update prompt.** Windows x64 package installs check the rolling
+  release during startup and offer Update now, Skip, or Skip until next version.
+  The check detects a rebuilt package when its version number is unchanged.
 
 ## Build and run
 
