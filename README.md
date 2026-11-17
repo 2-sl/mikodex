@@ -35,6 +35,11 @@ state with an installed Codex.
   personal background image is configured. During chat sessions, the animation
   or selected image remains visible as a subtle watermark in unused transcript
   cells.
+- **Rolling release updates.** On Windows x64 package installs,
+  `mikodex update` checks the Mikodex rolling release and its SHA-256 digest.
+  It detects rebuilt files even when the package version stays the same, verifies
+  the complete ZIP before installing, and replaces the package after the update
+  command exits.
 
 ## Build and run
 
@@ -68,6 +73,18 @@ and the repository [build instructions](docs/install.md).
 
 To sign in, run `mikodex login` and choose the ChatGPT sign-in option. Mikodex
 uses the upstream Codex authentication implementation.
+
+## Updating Mikodex
+
+On Windows x64, run `mikodex update` to check the latest
+[Mikodex rolling release](https://github.com/2-sl/mikodex/releases/tag/mikodex-rolling).
+The updater compares the published package SHA-256, so it notices when a new
+ZIP replaces the rolling release asset even if its version number is unchanged.
+It verifies the release checksum and the complete package before installing.
+Windows keeps a running executable locked, so a helper finishes the package swap
+after the update command exits and shows a confirmation dialog when it is done.
+Start Mikodex again after that confirmation. This updater currently supports the
+canonical Windows x64 package layout.
 
 ## Resizing the sidebars
 
