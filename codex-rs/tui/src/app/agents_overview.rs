@@ -69,6 +69,7 @@ pub(super) struct AgentsOverviewState {
     pub(super) visible_thread_ids: Vec<ThreadId>,
     /// The persistent left-rail view, separate from the chat widget's full-screen view stack.
     pub(super) sidebar_view: Option<AgentsOverviewView>,
+    pub(super) details_divider_drag: Option<super::agents_overview_dock::DetailsDividerDrag>,
     /// Keyboard focus belongs to the command-center rail while its list is being operated.
     pub(super) sidebar_focused: bool,
     /// Keyboard focus belongs to the slash-command reference rail.

@@ -2,6 +2,7 @@
 
 use super::App;
 use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
+use super::agents_overview_view::AgentsOverviewView;
 use crate::key_hint::KeyBindingListExt;
 use crate::legacy_core::config::edit::ConfigEdit;
 use crate::legacy_core::config::edit::ConfigEditsBuilder;
@@ -46,6 +47,13 @@ pub(super) struct DockDividerDrag {
     press: u16,
     initial_width: u16,
     pub(super) width: u16,
+    screen: Rect,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct DetailsDividerDrag {
+    press_y: u16,
+    initial_height: u16,
     screen: Rect,
 }
 
@@ -335,6 +343,14 @@ impl App {
             }
         } else if let TuiEvent::Mouse(mouse) = event {
             self.handle_agents_overview_dock_mouse(tui, mouse).await
+        } else if matches!(event, TuiEvent::Resize(_) | TuiEvent::FocusLost)
+            && self.agents_overview.details_divider_drag.take().is_some()
+        {
+            if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
+                view.set_docked_details_resizing(false);
+            }
+            tui.frame_requester().schedule_frame();
+            Ok(false)
         } else if let TuiEvent::Key(key) = event
             && key.kind == KeyEventKind::Press
             && (self.agents_overview.sidebar_focused || !self.can_resize_sidebar(tui))
@@ -379,10 +395,63 @@ impl App {
             || self.overlay.is_some()
             || self.chat_widget.has_active_modal()
         {
-            if self.agents_overview_dock_drag.take().is_some() {
+            let dock_drag_cleared = self.agents_overview_dock_drag.take().is_some();
+            let details_drag_cleared =
+                self.agents_overview.details_divider_drag.take().is_some();
+            if details_drag_cleared
+                && let Some(view) = self.agents_overview.sidebar_view.as_ref()
+            {
+                view.set_docked_details_resizing(false);
+            }
+            if dock_drag_cleared || details_drag_cleared {
                 tui.frame_requester().schedule_frame();
             }
             return Ok(false);
+        }
+        if let Some(drag) = self.agents_overview.details_divider_drag {
+            let viewport: Rect = tui.prepare_draw_size()?.into();
+            if viewport != drag.screen {
+                self.agents_overview.details_divider_drag = None;
+                if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
+                    view.set_docked_details_resizing(false);
+                }
+                tui.frame_requester().schedule_frame();
+                return Ok(false);
+            }
+            match mouse.kind {
+                MouseEventKind::Drag(MouseButton::Left)
+                | MouseEventKind::Up(MouseButton::Left) => {
+                    let delta_y = i32::from(mouse.row) - i32::from(drag.press_y);
+                    let requested_height = (i32::from(drag.initial_height) - delta_y)
+                        .clamp(0, i32::from(u16::MAX)) as u16;
+                    let details_height =
+                        AgentsOverviewView::clamp_docked_details_height(
+                            requested_height,
+                            viewport.height,
+                        );
+                    if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
+                        view.set_docked_details_height(details_height);
+                        if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+                            view.set_docked_details_resizing(false);
+                        }
+                    }
+                    if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+                        self.agents_overview.details_divider_drag = None;
+                    } else {
+                        self.agents_overview.details_divider_drag = Some(drag);
+                    }
+                    tui.frame_requester().schedule_frame();
+                    return Ok(true);
+                }
+                _ => {
+                    self.agents_overview.details_divider_drag = None;
+                    if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
+                        view.set_docked_details_resizing(false);
+                    }
+                    tui.frame_requester().schedule_frame();
+                    return Ok(false);
+                }
+            }
         }
         if let Some(mut drag) = self.agents_overview_dock_drag {
             let viewport = tui.prepare_draw_size()?.into();
@@ -438,6 +507,25 @@ impl App {
                 return Ok(false);
             };
             let point = (mouse.column, mouse.row).into();
+            if let Some(view) = self.agents_overview.sidebar_view.as_ref()
+                && let Some((divider, initial_height)) =
+                    view.docked_details_divider(dock.sidebar)
+                && divider.contains(point)
+            {
+                self.agents_overview.details_divider_drag =
+                    Some(DetailsDividerDrag {
+                        press_y: mouse.row,
+                        initial_height,
+                        screen: viewport,
+                    });
+                view.set_docked_details_resizing(true);
+                self.agents_overview_dock_drag = None;
+                self.pane_resize = None;
+                self.divider_drag = None;
+                self.cancel_pending_key_chord();
+                tui.frame_requester().schedule_frame();
+                return Ok(true);
+            }
             let (divider, initial_width) = if dock.divider.contains(point) {
                 (DockDivider::AgentsOverview, dock.sidebar.width)
             } else if dock.command_divider.contains(point) && !dock.command_divider.is_empty() {

@@ -6,6 +6,8 @@ use crate::bottom_pane::render_filled_tab_bar;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crossterm::cursor::SetCursorStyle;
 use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
 use ratatui::widgets::WidgetRef;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -40,6 +42,9 @@ fn visible_suffix(input: &str, available: usize) -> &str {
     &input[start..]
 }
 
+const MIN_DOCKED_LIST_HEIGHT: u16 = 12;
+const MIN_DOCKED_DETAILS_HEIGHT: u16 = 8;
+
 struct CenterLayout {
     header: Rect,
     list: Rect,
@@ -50,6 +55,49 @@ struct CenterLayout {
 }
 
 impl AgentsOverviewView {
+    fn docked_details_height(&self, area_height: u16) -> u16 {
+        let default_height =
+            (u32::from(area_height) * 2 / 5).clamp(12, 26) as u16;
+        let preferred_height = self
+            .state()
+            .docked_details_height
+            .unwrap_or(default_height);
+        Self::clamp_docked_details_height(preferred_height, area_height)
+    }
+
+    pub(in crate::app) fn clamp_docked_details_height(
+        requested: u16,
+        area_height: u16,
+    ) -> u16 {
+        let maximum = area_height
+            .saturating_sub(MIN_DOCKED_LIST_HEIGHT + 1)
+            .max(MIN_DOCKED_DETAILS_HEIGHT);
+        requested.clamp(MIN_DOCKED_DETAILS_HEIGHT, maximum)
+    }
+
+    pub(in crate::app) fn docked_details_divider(
+        &self,
+        area: Rect,
+    ) -> Option<(Rect, u16)> {
+        if area.height < 34 || area.width < 20 {
+            return None;
+        }
+        let details_height = self.docked_details_height(area.height);
+        let list_height = area.height.saturating_sub(details_height + 1);
+        Some((
+            Rect::new(area.x, area.y + list_height, area.width, 1),
+            details_height,
+        ))
+    }
+
+    pub(in crate::app) fn set_docked_details_height(&self, height: u16) {
+        self.state().docked_details_height = Some(height);
+    }
+
+    pub(in crate::app) fn set_docked_details_resizing(&self, resizing: bool) {
+        self.state().docked_details_resizing = resizing;
+    }
+
     fn center_layout(&self, area: Rect) -> CenterLayout {
         let state = self.state();
         let footer_height = u16::from(area.height >= 2);
@@ -89,8 +137,9 @@ impl AgentsOverviewView {
             self.render(area, buf);
             return;
         }
-        let details_height = (area.height * 2 / 5).clamp(12, 26);
+        let details_height = self.docked_details_height(area.height);
         let list_height = area.height.saturating_sub(details_height + 1);
+        let resizing = self.state().docked_details_resizing;
         let [list, divider, details] = Layout::vertical([
             Constraint::Length(list_height),
             Constraint::Length(1),
@@ -98,14 +147,19 @@ impl AgentsOverviewView {
         ])
         .areas(area);
         self.render(list, buf);
+        let divider_style = if resizing {
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else if self.docked_focus {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().dim()
+        };
         for x in divider.x..divider.right() {
             buf[(x, divider.y)]
                 .set_symbol("-")
-                .set_style(if self.docked_focus {
-                    Style::default().fg(Color::Cyan)
-                } else {
-                    Style::default().dim()
-                });
+                .set_style(divider_style);
         }
         Clear.render(details, buf);
         self.render_details(
