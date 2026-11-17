@@ -8,9 +8,17 @@
 
 - Never push, publish, or open a pull request against `https://github.com/openai/codex.git`.
 - Treat the upstream Codex repository as read-only; fetching releases is allowed.
-- After committing changes on the active Mikodex branch, immediately push that branch to `origin` when it points to `https://github.com/2-sl/mikodex.git`, unless the user explicitly says to hold the push. Do not force-push.
+- After committing changes on the active Mikodex branch, build the canonical Windows package and confirm the build succeeds before pushing. If the build fails, fix the issue and rebuild; do not push a failing build.
+- After the successful build, immediately push that branch to `origin` when it points to `https://github.com/2-sl/mikodex.git`, unless the user explicitly says to hold the push. Do not force-push.
 - Do not push to any other remote unless the user explicitly asks for that push.
 - Make descriptive local Git commits at meaningful milestones.
+
+## Rolling release publication
+
+- When publishing a Mikodex rolling release, build the canonical Windows package from the exact commit being published.
+- Package the contents of `codex-rs/target/mikodex-package` at the ZIP root as `mikodex-windows-x64.zip` and create `mikodex-windows-x64.zip.sha256` for that archive.
+- After the source commit has been pushed to `origin`, replace both assets on the existing `mikodex-rolling` release. Do not recreate or move the rolling tag.
+- Update the release description source-commit entry to the full commit SHA used to build the package, then verify the uploaded archive digest matches its checksum file.
 
 ## Stable-release updates
 
