@@ -16,6 +16,10 @@ state with an installed Codex.
 - **Command reference sidebar.** A right sidebar lists available slash commands
   with short descriptions when the terminal is wide enough (120 columns or
   more).
+- **Side conversations beside the main chat.** In the full-screen terminal
+  layout, `/side` keeps the main thread visible on the left and opens the side
+  thread on the right. Click either pane or use `Ctrl+/` to switch which
+  conversation receives input.
 - **Resizable sidebars.** Drag either dock divider with the mouse, or use the
   keyboard controls below. Mikodex saves each width in your user config.
 - **Korean keyboard input for slash commands.** Slash commands work when typed
@@ -68,7 +72,14 @@ sidebar. For keyboard resizing, press `Ctrl+X`, then `R` (the default
 column, or `Shift+Left` and `Shift+Right` to adjust by ten columns. Press
 `Enter` to save the preview or `Esc` to cancel it. The widths are stored as
 `tui.agents_overview_width_percent` and `tui.command_reference_width_percent`
-in your Mikodex config.
+in your Mikodex config. The `/side` conversation split uses
+`tui.sidebar_width_percent` and defaults to equal widths.
+
+When the full-screen transcript layout is active, `/side` keeps the main
+conversation visible while the side session runs in a second pane. Click either
+pane or press `Ctrl+/` (the default side-conversation toggle) to switch focus.
+Drag the divider or use the keyboard resize shortcut above to change the split;
+the side pane starts at half the central chat area's width.
 
 ## Automated checks
 
