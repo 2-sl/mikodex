@@ -294,7 +294,9 @@ impl App {
     }
 
     pub(super) fn side_retention_enabled(&self, tui: &tui::Tui) -> bool {
-        self.local_settings.workspace_enabled(&self.config) && tui.is_owned_screen()
+        // Keep /side conversations paired on owned screens without requiring the separate
+        // experimental workspace feature. Terminal scrollback mode cannot retain two panes.
+        tui.is_owned_screen()
     }
 
     pub(super) fn conversation_focus_available(&self, tui: &tui::Tui) -> bool {

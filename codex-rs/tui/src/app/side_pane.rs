@@ -32,6 +32,8 @@ use ratatui::widgets::StatefulWidgetRef;
 use std::time::Duration;
 
 pub(super) const GAP: u16 = 1;
+const MIN_SIDEBAR_WIDTH: u16 = 36;
+const MIN_MAIN_PANE_WIDTH: u16 = 48;
 pub(super) const RESIZE_HINT: &str = "Resize · ←/h →/l · Shift+←/→ 10 cols · Enter/Esc done";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -73,11 +75,18 @@ fn width_percent(width: u16, total: u16) -> u8 {
 }
 
 fn sidebar_width(width: i32, total: u16) -> u16 {
-    width.clamp(36, i32::from(total.saturating_sub(64 + GAP).max(36))) as u16
+    width.clamp(
+        i32::from(MIN_SIDEBAR_WIDTH),
+        i32::from(
+            total
+                .saturating_sub(MIN_MAIN_PANE_WIDTH + GAP)
+                .max(MIN_SIDEBAR_WIDTH),
+        ),
+    ) as u16
 }
 
-fn preferred_width(total: u16, percent: Option<u8>) -> u16 {
-    let width = percent.map_or(total / 3, |p| {
+fn preferred_width(total: u16, percent: Option<u8>, default_width: u16) -> u16 {
+    let width = percent.map_or(default_width, |p| {
         ((u32::from(total) * u32::from(p) + 50) / 100) as u16
     });
     sidebar_width(i32::from(width), total)
@@ -177,6 +186,13 @@ pub(super) fn sidebar_areas(app: &App, tui: &Tui, area: Rect, fraction: f64) -> 
         })
         .map(|drag| drag.width);
     let saved = app.local_settings.tui.sidebar_width_percent;
+    let default_width = if target.is_some_and(|target| {
+        matches!(target.content, sidebar::SidebarContent::Chat(_))
+    }) {
+        area.width / 2
+    } else {
+        area.width / 3
+    };
     let keyboard_width = app
         .pane_resize
         .filter(|mode| mode.parent == app.sidebar_parent())
@@ -189,7 +205,7 @@ pub(super) fn sidebar_areas(app: &App, tui: &Tui, area: Rect, fraction: f64) -> 
         {
             width
         }
-        _ => preferred_width(area.width, saved),
+        _ => preferred_width(area.width, preview.or(saved), default_width),
     };
     // A newly focused composer needs a cell even on the first opening frame.
     let open = target.is_some();
