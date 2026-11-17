@@ -20,6 +20,11 @@ state with an installed Codex.
   layout, `/side` keeps the main thread visible on the left and opens the side
   thread on the right. Click either pane or use `Ctrl+/` to switch which
   conversation receives input.
+- **Keyboard focus across panes.** With an empty chat draft, use the left and
+  right arrows to move through the Agent Command Center, main chat, optional
+  side chat, and command reference. The right reference scrolls with Up and
+  Down when focused. Enter in the Agent Command Center still opens the selected
+  session; arrows keep editing a nonempty draft while chat has focus.
 - **Resizable sidebars.** Drag either dock divider with the mouse, or use the
   keyboard controls below. Mikodex saves each width in your user config.
 - **Korean keyboard input for slash commands.** Slash commands work when typed
@@ -80,6 +85,13 @@ conversation visible while the side session runs in a second pane. Click either
 pane or press `Ctrl+/` (the default side-conversation toggle) to switch focus.
 Drag the divider or use the keyboard resize shortcut above to change the split;
 the side pane starts at half the central chat area's width.
+
+When the chat draft is empty, the left and right arrows move keyboard focus
+between visible panes. The main chat moves left to the Agent Command Center;
+moving right enters an open side conversation, then the command reference.
+From a side conversation, Left returns to the main chat. Focus the command
+reference to scroll its list with Up and Down, or click a dock to focus it.
+Arrow keys edit a nonempty draft normally while chat has focus.
 
 ## Automated checks
 

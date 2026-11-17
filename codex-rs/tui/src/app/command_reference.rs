@@ -44,7 +44,13 @@ pub(super) fn max_scroll(items: &[(String, String)], area: Rect) -> usize {
     first_visible
 }
 
-pub(super) fn render(area: Rect, buf: &mut Buffer, items: &[(String, String)], scroll: usize) {
+pub(super) fn render(
+    area: Rect,
+    buf: &mut Buffer,
+    items: &[(String, String)],
+    scroll: usize,
+    focused: bool,
+) {
     Clear.render(area, buf);
     let inner = area.inner(Margin::new(/*horizontal*/ 1, /*vertical*/ 0));
     if inner.is_empty() {
@@ -84,7 +90,12 @@ pub(super) fn render(area: Rect, buf: &mut Buffer, items: &[(String, String)], s
         }
     }
     if inner.height > 3 {
-        Line::from("Wheel to browse".dim())
+        let hint = if focused {
+            Line::from("Up/Down scroll".cyan().bold())
+        } else {
+            Line::from("Click or Right focus".dim())
+        };
+        hint
             .render(Rect::new(inner.x, inner.bottom() - 1, inner.width, 1), buf);
     }
 }

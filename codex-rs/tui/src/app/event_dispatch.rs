@@ -550,6 +550,7 @@ impl App {
             }
             AppEvent::OpenResumePicker => {
                 self.agents_overview.sidebar_focused = false;
+                self.agents_overview.command_reference_focused = false;
                 self.pending_open_resume_picker = true;
             }
             AppEvent::OpenExternalAgentConfigMigration => {
@@ -3222,6 +3223,7 @@ impl App {
             }
             AppEvent::SelectAgentsOverviewThread { thread_id } => {
                 self.agents_overview.sidebar_focused = false;
+                self.agents_overview.command_reference_focused = false;
                 match self
                     .select_agents_overview_thread(tui, app_server, thread_id)
                     .await?
@@ -3254,6 +3256,7 @@ impl App {
                     && self.current_displayed_thread_id() == Some(thread_id)
                 {
                     self.agents_overview.sidebar_focused = false;
+                    self.agents_overview.command_reference_focused = false;
                     if let Some(input) = self.chat_widget.capture_thread_input_state() {
                         self.agents_overview.input_states.insert(thread_id, input);
                     }

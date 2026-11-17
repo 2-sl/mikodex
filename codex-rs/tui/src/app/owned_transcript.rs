@@ -258,9 +258,18 @@ impl App {
             .chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
             .is_some();
+        if caller_inset.is_some() || agents_overview_present {
+            self.agents_overview.command_reference_focused = false;
+        }
         let agents_dock = (caller_inset.is_none() && !agents_overview_present)
             .then(|| agents_overview_dock::layout(self, full_viewport))
             .flatten();
+        if agents_dock
+            .as_ref()
+            .is_none_or(|dock| dock.command_reference.is_empty())
+        {
+            self.agents_overview.command_reference_focused = false;
+        }
         let conversation_viewport = agents_dock
             .as_ref()
             .map_or(full_viewport, |dock| dock.conversation);
@@ -501,6 +510,7 @@ impl App {
                         frame.buffer,
                         &command_items,
                         command_scroll,
+                        self.agents_overview.command_reference_focused,
                     );
                 }
             }
@@ -623,13 +633,15 @@ impl App {
         let max_composer_height = ((u32::from(area.height) * 2 / 3) as u16)
             .max(8)
             .min(area.height);
-        let unfocused = matches!(
-            self.conversation_frame.sidebar,
-            Some(sidebar::SidebarLayout::Chooser {
-                focus: PaneFocus::Sidebar,
-                ..
-            })
-        );
+        let unfocused = self.agents_overview.sidebar_focused
+            || self.agents_overview.command_reference_focused
+            || matches!(
+                self.conversation_frame.sidebar,
+                Some(sidebar::SidebarLayout::Chooser {
+                    focus: PaneFocus::Sidebar,
+                    ..
+                })
+            );
         let options = |interacting| ComposerRenderOptions {
             unfocused,
             max_height: Some(max_composer_height),
