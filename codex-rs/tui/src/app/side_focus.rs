@@ -680,6 +680,104 @@ impl App {
         }
     }
 
+    pub(super) async fn handle_dock_arrow_focus(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        key: KeyEvent,
+    ) -> bool {
+        let direction = match (key.code, key.modifiers) {
+            (KeyCode::Left, KeyModifiers::NONE) => -1,
+            (KeyCode::Right, KeyModifiers::NONE) => 1,
+            _ => return false,
+        };
+        if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+            || self.routed_key_activation.is_some()
+            || self.key_chord_matcher.is_pending()
+            || self.overlay.is_some()
+            || !self.chat_widget.no_modal_or_popup_active()
+            || self.conversation_frame.has_caller_inset()
+            || self
+                .chat_widget
+                .selected_index_for_present_view(agents_overview::AGENTS_OVERVIEW_VIEW_ID)
+                .is_some()
+        {
+            return false;
+        }
+        let viewport = tui.terminal.viewport_area;
+        let Some(dock) = agents_overview_dock::layout(self, viewport) else {
+            self.agents_overview.command_reference_focused = false;
+            return false;
+        };
+        if !self.agents_overview.sidebar_focused
+            && !self.agents_overview.command_reference_focused
+            && (!self.chat_widget.composer_text_with_pending().is_empty()
+                || self.transcript_view.has_active_interaction()
+                || self.backtrack.overlay_preview_active)
+        {
+            return false;
+        }
+        if key.kind == KeyEventKind::Repeat {
+            return true;
+        }
+
+        let command_reference_available = !dock.command_reference.is_empty();
+        let side_child = self.switchable_side_child();
+        let side_available = side_child.is_some()
+            && side_pane::layout(self, tui, viewport).is_some();
+        let on_side_conversation = side_child
+            .is_some_and(|id| self.current_displayed_thread_id() == Some(id));
+        let mut changed = false;
+        let mut toggle_side = false;
+
+        if self.agents_overview.command_reference_focused {
+            if direction < 0 {
+                self.agents_overview.command_reference_focused = false;
+                changed = true;
+            }
+        } else if self.agents_overview.sidebar_focused {
+            if direction > 0 {
+                toggle_side = on_side_conversation;
+                self.agents_overview.sidebar_focused = false;
+                self.agents_overview.command_reference_focused = false;
+                changed = true;
+            }
+        } else if on_side_conversation {
+            if direction < 0 {
+                toggle_side = true;
+            } else if command_reference_available {
+                self.agents_overview.command_reference_focused = true;
+                changed = true;
+            }
+        } else if direction < 0 {
+            self.agents_overview.sidebar_focused = true;
+            self.agents_overview.command_reference_focused = false;
+            changed = true;
+        } else if side_available {
+            toggle_side = true;
+        } else if command_reference_available {
+            self.agents_overview.command_reference_focused = true;
+            changed = true;
+        }
+
+        if toggle_side {
+            match self.toggle_side_conversation(tui, app_server).await {
+                Ok(()) => changed = true,
+                Err(err) => self.chat_widget.add_error_message(err.to_string()),
+            }
+        }
+        if changed {
+            self.cancel_pending_key_chord();
+            tui.frame_requester().schedule_frame();
+            self.chat_widget.suppress_current_view_key_until_release(
+                KeyBinding::from_event(key),
+                Instant::now(),
+                ActivationKeySuppression::ViewTransition,
+            );
+        }
+        true
+    }
+
     pub(super) async fn handle_side_focus_key(
         &mut self,
         tui: &mut tui::Tui,

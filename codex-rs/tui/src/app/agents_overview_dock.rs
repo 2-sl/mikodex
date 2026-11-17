@@ -79,9 +79,10 @@ impl AgentsOverviewDockLayout {
                 .set_symbol("|")
                 .set_style(left_style);
         }
-        let right_style = if app
-            .agents_overview_dock_resize
-            .is_some_and(|mode| mode.divider == DockDivider::CommandReference)
+        let right_style = if app.agents_overview.command_reference_focused
+            || app
+                .agents_overview_dock_resize
+                .is_some_and(|mode| mode.divider == DockDivider::CommandReference)
             || app
                 .agents_overview_dock_drag
                 .is_some_and(|drag| drag.divider == DockDivider::CommandReference)

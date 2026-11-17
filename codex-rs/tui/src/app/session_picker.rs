@@ -123,6 +123,7 @@ impl App {
             }
             SessionSelection::AgentsOverview => {
                 self.agents_overview.sidebar_focused = true;
+                self.agents_overview.command_reference_focused = false;
                 self.refresh_in_memory_config_from_disk_best_effort("closing the session picker")
                     .await;
             }

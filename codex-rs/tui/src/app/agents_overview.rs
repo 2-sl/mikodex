@@ -82,6 +82,8 @@ pub(super) struct AgentsOverviewState {
     pub(super) sidebar_view: Option<AgentsOverviewView>,
     /// Keyboard focus belongs to the command-center rail while its list is being operated.
     pub(super) sidebar_focused: bool,
+    /// Keyboard focus belongs to the slash-command reference rail.
+    pub(super) command_reference_focused: bool,
     /// First slash-command entry shown by the right reference rail.
     pub(super) command_reference_scroll: usize,
     /// One-shot successor selected before a removal invalidates the displayed rows.
@@ -137,6 +139,7 @@ impl App {
             self.cancel_pending_key_chord();
         }
         self.agents_overview.sidebar_focused = true;
+        self.agents_overview.command_reference_focused = false;
         self.ensure_agents_overview_sidebar_view();
         if let Some(view) = self.agents_overview.sidebar_view.as_mut() {
             view.set_docked_focus(true);

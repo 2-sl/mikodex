@@ -26,10 +26,12 @@ impl App {
         }
         let Some(view) = self.agents_overview.sidebar_view.as_mut() else {
             self.agents_overview.sidebar_focused = false;
+            self.agents_overview.command_reference_focused = false;
             return false;
         };
         if view.handle_docked_key_event(key_event, activation_key) {
             self.agents_overview.sidebar_focused = false;
+            self.agents_overview.command_reference_focused = false;
         }
         true
     }

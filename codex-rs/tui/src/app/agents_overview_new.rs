@@ -252,6 +252,7 @@ impl App {
             }
         } else {
             self.agents_overview.sidebar_focused = false;
+            self.agents_overview.command_reference_focused = false;
         }
         Ok(control)
     }
