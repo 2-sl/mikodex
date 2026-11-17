@@ -204,7 +204,7 @@ async fn update(install: Install) -> anyhow::Result<()> {
     }
 
     println!(
-        "Downloaded and verified Mikodex {}. Windows will replace the package after this command exits and show a confirmation dialog. Update log: {}",
+        "Downloaded and verified Mikodex {}. Windows will replace the package after this command exits. Update log: {}",
         package_version,
         log_path.display()
     );
@@ -620,10 +620,6 @@ try {
         Add-Content -LiteralPath $LogPath -Value "Installed Mikodex $PackageVersion; old package cleanup failed: $_"
     }
     Add-Content -LiteralPath $LogPath -Value "Installed Mikodex $PackageVersion successfully."
-    try {
-        Add-Type -AssemblyName System.Windows.Forms
-        [System.Windows.Forms.MessageBox]::Show("Mikodex $PackageVersion is installed. Start Mikodex again to use it.", 'Mikodex update complete', 'OK', 'Information') | Out-Null
-    } catch {}
     Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
 } catch {
     if ($movedOldPackage -and -not (Test-Path -LiteralPath $InstallRoot) -and (Test-Path -LiteralPath $backup)) {
