@@ -1,5 +1,9 @@
 # Mikodex repository instructions
 
+## Documentation
+
+- When adding or changing a user-visible feature, update `README.md` in the same change so the feature and its usage are documented.
+
 ## Git and remote safety
 
 - Never push, publish, or open a pull request against `https://github.com/openai/codex.git`.
