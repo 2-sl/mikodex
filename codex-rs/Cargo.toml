@@ -598,6 +598,11 @@ zstd = "0.13"
 wiremock = "0.6"
 zeroize = "1.8.2"
 
+codex-utils-model-facing-id = { path = "utils/model-facing-id" }
+hyper = { version = "1.8.1", features = ["http2", "server"] }
+spiffe = { version = "0.18.0", default-features = false, features = ["transport-grpc"] }
+unicode-bidi = "0.3.18"
+
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(codex_bazel)'] }
 
