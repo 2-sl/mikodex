@@ -31,3 +31,9 @@
 - For a usable local CLI package, use the canonical builder at `scripts/build_codex_package.py` (or `just assemble-codex-package`). A raw `cargo build --bin mikodex` only produces the entrypoint and is not a complete package.
 - The canonical package must include its metadata, code-mode host, exec server, ripgrep, and platform helpers. Windows packages specifically require `codex-command-runner.exe` and `codex-windows-sandbox-setup.exe` under `codex-resources`.
 - `.toolchain/build-mikodex.cmd` must build the canonical Windows package at `codex-rs/target/mikodex-package`. Point the user's `mikodex` command to `codex-rs/target/mikodex-package/bin`, never to the raw `codex-rs/target/release` executable.
+
+## Upstream main merges
+
+- When merging https://github.com/openai/codex.git main, check the latest official stable rust-vX.Y.Z release tag.
+- Set codex-rs/Cargo.toml [workspace.package].version to the release X.Y.Z, even when upstream main uses a development placeholder. Do not use a prerelease version.
+- Confirm the built package reports the selected release version.
