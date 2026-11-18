@@ -40,6 +40,8 @@ use ratatui::widgets::Wrap;
 use tokio_stream::StreamExt;
 
 const RELEASE_NOTES_URL: &str = "https://github.com/openai/codex/releases/latest";
+const MIKODEX_ROLLING_RELEASE_URL: &str =
+    "https://github.com/2-sl/mikodex/releases/tag/mikodex-rolling";
 
 #[cfg(not(debug_assertions))]
 pub(crate) enum UpdatePromptOutcome {
@@ -206,6 +208,10 @@ impl WidgetRef for &UpdatePromptScreen {
         let mut column = FlexRenderable::new();
 
         let update_command = self.update_action.command_str();
+        let release_notes_url = match self.update_action {
+            UpdateAction::MikodexRolling => MIKODEX_ROLLING_RELEASE_URL,
+            _ => RELEASE_NOTES_URL,
+        };
 
         column.push(/*flex*/ 1, RenderableItem::Borrowed(&""));
         column.push(
@@ -227,7 +233,7 @@ impl WidgetRef for &UpdatePromptScreen {
             /*flex*/ 1,
             Paragraph::new(Line::from(vec![
                 "Release notes: ".dim(),
-                RELEASE_NOTES_URL.dim().underlined(),
+                release_notes_url.dim().underlined(),
             ]))
             .wrap(Wrap { trim: false })
             .inset(Insets::vh(/*v*/ 0, /*h*/ 2)),
@@ -266,7 +272,7 @@ impl WidgetRef for &UpdatePromptScreen {
         };
         render_menu_surface(panel, buf);
         column.render(panel, buf);
-        crate::terminal_hyperlinks::mark_underlined_hyperlink(buf, area, RELEASE_NOTES_URL);
+        crate::terminal_hyperlinks::mark_underlined_hyperlink(buf, area, release_notes_url);
     }
 }
 

@@ -22,13 +22,42 @@ pub enum UpdateAction {
     BrewUpgrade,
     /// Update via the standalone Unix installer.
     StandaloneUnix,
+    /// Update the Windows Mikodex package from its rolling release.
+    MikodexRolling,
     /// Update via `$env:CODEX_NON_INTERACTIVE=1; irm https://chatgpt.com/codex/install.ps1 | iex`.
     StandaloneWindows,
+}
+
+#[cfg(any(not(debug_assertions), test))]
+pub(crate) fn mikodex_rolling_package_root(context: &InstallContext) -> Option<std::path::PathBuf> {
+    let layout = context.package_layout.as_ref()?;
+    let root = layout.package_dir.as_path();
+    let metadata = std::fs::read(root.join("codex-package.json")).ok()?;
+    let metadata: serde_json::Value = serde_json::from_slice(&metadata).ok()?;
+    if metadata["layoutVersion"].as_u64() != Some(1)
+        || metadata["target"].as_str() != Some("x86_64-pc-windows-msvc")
+        || metadata["variant"].as_str() != Some("codex")
+        || metadata["entrypoint"].as_str() != Some("bin/mikodex.exe")
+    {
+        return None;
+    }
+
+    let executable = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let package_executable = layout
+        .package_dir
+        .join("bin/mikodex.exe")
+        .canonicalize()
+        .ok()?;
+    (executable.as_path() == package_executable.as_path()).then(|| root.to_path_buf())
 }
 
 impl UpdateAction {
     #[cfg(any(not(debug_assertions), test))]
     pub(crate) fn from_install_context(context: &InstallContext) -> Option<Self> {
+        if mikodex_rolling_package_root(context).is_some() {
+            return Some(UpdateAction::MikodexRolling);
+        }
+
         match &context.method {
             InstallMethod::Npm => Some(UpdateAction::NpmGlobalLatest),
             InstallMethod::Bun => Some(UpdateAction::BunGlobalLatest),
@@ -52,6 +81,7 @@ impl UpdateAction {
             UpdateAction::VitePlusGlobalLatest => ("vp", &["install", "-g", "@openai/codex"]),
             UpdateAction::PnpmGlobalLatest => ("pnpm", &["add", "-g", "@openai/codex"]),
             UpdateAction::BrewUpgrade => ("brew", &["upgrade", "--cask", "codex"]),
+            UpdateAction::MikodexRolling => ("mikodex", &["update"]),
             UpdateAction::StandaloneUnix => (
                 "sh",
                 &[
