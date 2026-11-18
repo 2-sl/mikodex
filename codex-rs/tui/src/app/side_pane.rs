@@ -197,7 +197,7 @@ pub(super) fn sidebar_areas(app: &App, tui: &Tui, area: Rect, fraction: f64) -> 
         {
             width
         }
-        _ => preferred_width(area.width, preview.or(saved), default_width),
+        _ => preview.unwrap_or_else(|| preferred_width(area.width, saved, default_width)),
     };
     // A newly focused composer needs a cell even on the first opening frame.
     let open = target.is_some();
