@@ -17,6 +17,7 @@ use codex_protocol::AgentPath;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::input_text;
+use codex_protocol::protocol::NetworkAccess;
 use codex_utils_path_uri::PathUri;
 use serde::Deserialize;
 use serde::Serialize;
@@ -36,6 +37,8 @@ static POWERSHELL_VERSIONS: LazyLock<Mutex<BTreeMap<PathBuf, Option<String>>>> =
 #[derive(Clone, Debug, Default)]
 pub(crate) struct EnvironmentsState {
     environments: BTreeMap<String, EnvironmentState>,
+    // Keep each environment named and its rules grouped together, even when there is only one.
+    per_environment: bool,
     shell_version: Option<String>,
     current_date: Option<String>,
     current_date_is_utc: bool,
@@ -51,6 +54,10 @@ impl EnvironmentsState {
         environments: &TurnEnvironmentSnapshot,
         current_date: Option<String>,
     ) -> Self {
+        let per_environment = turn_context
+            .config
+            .features
+            .enabled(Feature::PerEnvironmentContext);
         let shell_version = if turn_context
             .config
             .features
@@ -64,7 +71,8 @@ impl EnvironmentsState {
             None
         };
         Self {
-            environments: environment_states(environments),
+            environments: environment_states(environments, per_environment),
+            per_environment,
             shell_version,
             current_date_is_utc: current_date.is_some()
                 && turn_context
@@ -77,12 +85,15 @@ impl EnvironmentsState {
                 .clone()
                 .filter(|_| turn_context.config.include_environment_context_time),
             network: network_from_turn_context(turn_context),
-            filesystem: environments.primary().map(|environment| {
-                FileSystemContext::from_permission_profile(
-                    environment.permission_profile(),
-                    environment.workspace_roots(),
-                )
-            }),
+            filesystem: environments
+                .primary()
+                .filter(|_| !per_environment)
+                .map(|environment| {
+                    FileSystemContext::from_permission_profile(
+                        environment.permission_profile(),
+                        environment.workspace_roots(),
+                    )
+                }),
             subagents: None,
         }
     }
@@ -94,6 +105,18 @@ impl EnvironmentsState {
         self
     }
 
+    fn rendered_network(&self) -> Option<String> {
+        self.network.as_ref().map(|network| {
+            let network = network.render();
+            if self.per_environment {
+                // This shared list does not include each environment's own domain restrictions.
+                format!("<thread_network_requirements>{network}</thread_network_requirements>")
+            } else {
+                network
+            }
+        })
+    }
+
     fn rendered_full(&self) -> RenderedEnvironments {
         RenderedEnvironments {
             updates: self
@@ -103,7 +126,7 @@ impl EnvironmentsState {
                     (id.clone(), EnvironmentUpdate::Current(environment.clone()))
                 })
                 .collect(),
-            legacy_single: is_legacy_single(&self.environments),
+            legacy_single: !self.per_environment && is_legacy_single(&self.environments),
             include_primary: self.environments.len() > 1,
             shell_version: self.shell_version.clone(),
             shell_version_removed: false,
@@ -111,7 +134,7 @@ impl EnvironmentsState {
             current_date_removed: false,
             current_date_is_utc: self.current_date_is_utc,
             timezone: self.timezone.clone(),
-            network: self.network.clone(),
+            network: self.rendered_network(),
             filesystem: self.filesystem.clone(),
             subagents: self.subagents.clone(),
         }
@@ -127,6 +150,7 @@ impl WorldStateSection for EnvironmentsState {
         previous: PreviousSectionState<'_, Self::Snapshot>,
     ) -> SectionTransition<Self::Snapshot> {
         let current = EnvironmentsSnapshot {
+            per_environment: self.per_environment,
             environments: self
                 .environments
                 .iter()
@@ -139,6 +163,8 @@ impl WorldStateSection for EnvironmentsState {
                             error: environment.error.clone(),
                             shell: environment.shell.clone(),
                             is_primary: self.environments.len() > 1 && environment.is_primary,
+                            filesystem: environment.filesystem.clone(),
+                            network_access: environment.network_access,
                         },
                     )
                 })
@@ -147,7 +173,7 @@ impl WorldStateSection for EnvironmentsState {
             current_date: self.current_date.clone(),
             current_date_is_utc: self.current_date_is_utc,
             timezone: self.timezone.clone(),
-            network: self.network.as_ref().map(NetworkContext::render),
+            network: self.rendered_network(),
             filesystem: self.filesystem.as_ref().map(FileSystemContext::render),
             subagents: self.subagents.clone(),
         };
@@ -158,7 +184,9 @@ impl WorldStateSection for EnvironmentsState {
         };
         let shell_version_added =
             current.shell_version.is_some() && previous.shell_version.is_none();
-        let turn_context_values_changed = current.shell_version != previous.shell_version
+        let format_changed = current.per_environment != previous.per_environment;
+        let turn_context_values_changed = format_changed
+            || current.shell_version != previous.shell_version
             || current.current_date != previous.current_date
             || current.current_date_is_utc != previous.current_date_is_utc
             || current.timezone != previous.timezone
@@ -172,7 +200,8 @@ impl WorldStateSection for EnvironmentsState {
             .filter(|(id, _)| {
                 let environment = &current.environments[*id];
                 previous.environments.get(*id).is_none_or(|previous| {
-                    multiple_environments != previous_multiple_environments
+                    format_changed
+                        || multiple_environments != previous_multiple_environments
                         || (shell_version_added && previous.shell.is_none())
                         || !environment.has_same_diff_value(previous)
                 })
@@ -186,7 +215,8 @@ impl WorldStateSection for EnvironmentsState {
                 .filter(|id| !self.environments.contains_key(*id))
                 .map(|id| (id.clone(), EnvironmentUpdate::Unavailable)),
         );
-        let legacy_single = is_legacy_single(&self.environments)
+        let legacy_single = !self.per_environment
+            && is_legacy_single(&self.environments)
             && updates
                 .values()
                 .all(|update| matches!(update, EnvironmentUpdate::Current(_)));
@@ -207,7 +237,7 @@ impl WorldStateSection for EnvironmentsState {
                     previous.current_date_is_utc
                 },
                 timezone: self.timezone.clone(),
-                network: self.network.clone(),
+                network: self.rendered_network(),
                 filesystem: self.filesystem.clone(),
                 subagents: self.subagents.clone(),
             });
@@ -252,7 +282,7 @@ pub(crate) struct RenderedEnvironments {
     current_date_removed: bool,
     current_date_is_utc: bool,
     timezone: Option<String>,
-    network: Option<NetworkContext>,
+    network: Option<String>,
     filesystem: Option<FileSystemContext>,
     pub(crate) subagents: Option<String>,
 }
@@ -332,7 +362,7 @@ impl ContextualUserFragment for RenderedEnvironments {
         push_optional_element(&mut rendered, "timezone", self.timezone.as_deref());
         if let Some(network) = &self.network {
             rendered.push_str("  ");
-            rendered.push_str(&network.render());
+            rendered.push_str(network);
             rendered.push('\n');
         }
         if let Some(filesystem) = &self.filesystem {
@@ -378,6 +408,15 @@ fn push_environment_values(rendered: &mut String, environment: &EnvironmentState
         push_xml_escaped_text(rendered, shell);
         rendered.push_str("</shell>\n");
     }
+    if let Some(access) = environment.network_access {
+        rendered.push_str(indent);
+        rendered.push_str(&format!("<network access=\"{access}\" />\n"));
+    }
+    if let Some(filesystem) = &environment.filesystem {
+        rendered.push_str(indent);
+        rendered.push_str(filesystem);
+        rendered.push('\n');
+    }
 }
 
 fn push_optional_element(rendered: &mut String, name: &str, value: Option<&str>) {
@@ -400,11 +439,15 @@ struct EnvironmentState {
     shell: Option<String>,
     error: Option<String>,
     is_primary: bool,
+    filesystem: Option<String>,
+    network_access: Option<NetworkAccess>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
 pub(crate) struct EnvironmentsSnapshot {
     environments: BTreeMap<String, EnvironmentSnapshot>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    per_environment: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     shell_version: Option<String>,
     current_date: Option<String>,
@@ -426,6 +469,10 @@ struct EnvironmentSnapshot {
     error: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     is_primary: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    filesystem: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    network_access: Option<NetworkAccess>,
 }
 
 impl EnvironmentSnapshot {
@@ -434,6 +481,8 @@ impl EnvironmentSnapshot {
             && self.status == other.status
             && self.error == other.error
             && self.is_primary == other.is_primary
+            && self.filesystem == other.filesystem
+            && self.network_access == other.network_access
             && self
                 .shell
                 .as_ref()
@@ -490,7 +539,10 @@ async fn powershell_version(shell_path: &Path) -> Option<String> {
     version
 }
 
-fn environment_states(snapshot: &TurnEnvironmentSnapshot) -> BTreeMap<String, EnvironmentState> {
+fn environment_states(
+    snapshot: &TurnEnvironmentSnapshot,
+    per_environment: bool,
+) -> BTreeMap<String, EnvironmentState> {
     let mut environments = snapshot
         .turn_environments()
         .enumerate()
@@ -506,6 +558,25 @@ fn environment_states(snapshot: &TurnEnvironmentSnapshot) -> BTreeMap<String, En
                         .as_ref()
                         .map(|shell| shell.name().to_string()),
                     is_primary: index == 0,
+                    // These are this captured environment's rules, not the primary's defaults.
+                    filesystem: per_environment.then(|| {
+                        FileSystemContext::from_permission_profile(
+                            environment.permission_profile(),
+                            environment.workspace_roots(),
+                        )
+                        .render()
+                    }),
+                    network_access: per_environment.then(|| {
+                        if environment
+                            .permission_profile()
+                            .network_sandbox_policy()
+                            .is_enabled()
+                        {
+                            NetworkAccess::Enabled
+                        } else {
+                            NetworkAccess::Restricted
+                        }
+                    }),
                 },
             )
         })
@@ -519,6 +590,8 @@ fn environment_states(snapshot: &TurnEnvironmentSnapshot) -> BTreeMap<String, En
                 error: None,
                 shell: None,
                 is_primary: false,
+                filesystem: None,
+                network_access: None,
             });
     }
     // Bound the additional model context even when many selected environments fail.
@@ -542,6 +615,8 @@ fn environment_states(snapshot: &TurnEnvironmentSnapshot) -> BTreeMap<String, En
                     shell: None,
                     error: (!detail.is_empty()).then_some(detail),
                     is_primary: false,
+                    filesystem: None,
+                    network_access: None,
                 },
             );
         }

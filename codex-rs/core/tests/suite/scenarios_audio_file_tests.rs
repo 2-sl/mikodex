@@ -7,6 +7,7 @@ use codex_attachment_store::UploadContent;
 use codex_attachment_store::UploadRequest;
 use codex_protocol::models::AudioReference;
 use codex_protocol::openai_models::InputModality;
+use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::turn_input::TurnInputSubmission;
 use core_test_support::responses;
 use core_test_support::responses::mount_response_sequence;

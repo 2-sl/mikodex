@@ -34,6 +34,10 @@ use futures::future::BoxFuture;
 use std::collections::HashSet;
 
 impl AgentControl for LocalAgentControl {
+    fn native_rollout_budget(&self) -> Option<std::sync::Arc<crate::RolloutBudget>> {
+        Some(std::sync::Arc::clone(&self.runtime.rollout_budget))
+    }
+
     fn identity(&self) -> SessionId {
         self.session_id()
     }
@@ -180,7 +184,7 @@ impl AgentControl for LocalAgentControl {
     }
 
     fn take_mailbox(&self, agent: ThreadId) -> Vec<crate::PendingAgentMessage> {
-        self.runtime.mailboxes.take(agent)
+        self.runtime.mailboxes.take(agent, |_| true)
     }
 
     fn watch_mailbox(&self, agent: ThreadId) -> tokio::sync::watch::Receiver<bool> {
@@ -283,8 +287,12 @@ impl AgentControl for LocalAgentControl {
         self.execution_guard(version, source)
     }
 
-    fn record_usage(&self, usage: TokenUsage) -> BoxFuture<'_, Result<()>> {
-        Box::pin(async move { self.record_rollout_budget_usage(&usage) })
+    fn record_usage(
+        &self,
+        usage: Option<TokenUsage>,
+        hook_charge: codex_hooks::HookCharge,
+    ) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move { self.record_rollout_budget_usage(usage.as_ref(), hook_charge) })
     }
 
     fn turn_finished<'a>(

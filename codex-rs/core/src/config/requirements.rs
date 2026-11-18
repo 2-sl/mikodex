@@ -155,10 +155,10 @@ pub(super) fn push_sqlite_home_env_override_warning(
     tracing::warn!(
         ?source,
         ?value,
-        "`MIKODEX_SQLITE_HOME` is overridden by an exact requirement for sqlite_home"
+        "`CODEX_SQLITE_HOME` is overridden by an exact requirement for sqlite_home"
     );
     startup_warnings.push(format!(
-        "Environment value for `$MIKODEX_SQLITE_HOME` is overridden by the required `sqlite_home` value {value:?} from {source}."
+        "Environment value for `$CODEX_SQLITE_HOME` is overridden by the required `sqlite_home` value {value:?} from {source}."
     ));
 }
 

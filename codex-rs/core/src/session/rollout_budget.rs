@@ -7,6 +7,7 @@ use crate::client_common::ChargePosting;
 use crate::client_common::SamplingUsage;
 use crate::context::ContextualUserFragment;
 use codex_protocol::error::CodexErr;
+use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::protocol::TokenUsage;
 
@@ -26,9 +27,7 @@ pub(super) async fn maybe_record_reminder(
     else {
         return;
     };
-    let response_item = ContextualUserFragment::into(crate::context::RolloutBudgetContext {
-        remaining_tokens: reminder.remaining_tokens,
-    });
+    let response_item = sess.budget_reminder_item(&reminder);
     sess.record_conversation_items(
         turn_context,
         turn_context.model_info(),
@@ -41,10 +40,84 @@ pub(super) async fn maybe_record_reminder(
 }
 
 impl Session {
+    pub(crate) fn budget_reminder_item(
+        &self,
+        reminder: &crate::RolloutBudgetReminder,
+    ) -> codex_protocol::models::ResponseItem {
+        ContextualUserFragment::into(crate::context::RolloutBudgetContext {
+            remaining_units: reminder.remaining_units,
+        })
+    }
+
+    pub(crate) fn native_rollout_budget(&self) -> Option<std::sync::Arc<crate::RolloutBudget>> {
+        match &self.agent_runtime {
+            AgentRuntimeServices::Controller => self.services.agent_control.native_rollout_budget(),
+            AgentRuntimeServices::Host(_) => None,
+        }
+    }
+
+    /// All threads consult the same work gate, even when a host owns one thread's bill.
+    pub(crate) fn work_budget(&self) -> &crate::RolloutBudget {
+        &self.services.local_agent_runtime.rollout_budget
+    }
+
+    pub(crate) fn check_rollout_budget(&self) -> CodexResult<()> {
+        self.services.budget_policy.check_start()
+    }
+
+    /// Return the diagnostic for a refused tool or propagate an accounting error.
+    pub(crate) fn tool_start_denial(&self) -> CodexResult<Option<String>> {
+        match self.check_rollout_budget() {
+            Ok(()) => Ok(None),
+            Err(error) => match error.details() {
+                CodexErrorDetails::SessionBudgetExceeded => {
+                    Ok(Some("rollout budget exhausted".into()))
+                }
+                _ => Err(error),
+            },
+        }
+    }
+
+    pub(crate) fn inline_compaction_allowed(&self, _turn: &TurnContext) -> CodexResult<bool> {
+        self.check_rollout_budget().map(|()| true)
+    }
+
+    /// A final-only root can decline an inline compaction before it sends anything.
+    /// Do not show the client a live compaction item unless a checkpoint will install.
+    pub(crate) fn defer_compaction_start(
+        &self,
+        turn: &TurnContext,
+        phase: codex_analytics::CompactionPhase,
+    ) -> bool {
+        !matches!(phase, codex_analytics::CompactionPhase::StandaloneTurn)
+            && !turn.session_source.is_non_root_agent()
+            && self.work_budget().can_force_root_final()
+    }
+
+    pub(crate) fn finish_compaction(
+        &self,
+        turn: &TurnContext,
+        phase: codex_analytics::CompactionPhase,
+        result: CodexResult<bool>,
+    ) -> CodexResult<bool> {
+        let standalone = matches!(phase, codex_analytics::CompactionPhase::StandaloneTurn);
+        match result {
+            Ok(installed) => {
+                if standalone {
+                    self.check_rollout_budget()?;
+                } else {
+                    self.inline_compaction_allowed(turn)?;
+                }
+                Ok(installed)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     pub(crate) async fn record_rollout_budget_usage(
         &self,
         turn_id: &str,
-        usage: &TokenUsage,
+        usage: &SamplingUsage,
     ) -> CodexResult<()> {
         let result = match usage.charge.posting {
             ChargePosting::Unposted => {
@@ -106,11 +179,15 @@ impl Session {
                     .report_usage(AgentUsageReport {
                         thread_id: self.thread_id(),
                         turn_id: turn_id.to_owned(),
-                        usage: usage.clone(),
+                        usage: usage.cloned(),
+                        additional_budget_units: hook_charge.units,
+                        additional_budget_units_overflowed: hook_charge.overflowed,
                     })
                     .await
                     .map_err(|error| {
-                        CodexErr::Fatal(format!("Host usage accounting failed: {error}"))
+                        CodexErr::UsageAccountingFailed(format!(
+                            "Host usage accounting failed: {error}"
+                        ))
                     })?;
                 match decision {
                     UsageAccountingDecision::Continue => false,
@@ -120,6 +197,10 @@ impl Session {
                     }
                 }
             }
+        };
+        if stop_new_work {
+            self.work_budget().stop_new_work();
         }
-    };
+        Ok(())
+    }
 }

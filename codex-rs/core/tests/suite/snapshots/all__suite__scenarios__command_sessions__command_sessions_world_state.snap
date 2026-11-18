@@ -175,8 +175,8 @@ Scenario: A Code Mode script drops its command handle. WorldState retains it whi
     </command_sessions>
 11:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-12:additional_tools/developer (1; hash=b35547cfcd768d37):
-        - namespace/functions; hash=73138b3f4a7eafaf
+12:additional_tools/developer (1; hash=fd836d9e37127de2):
+        - namespace/functions; hash=04341bdad1d8e6f6
           - custom/exec
 13:message/developer:
     <model_instructions>

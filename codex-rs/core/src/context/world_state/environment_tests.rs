@@ -110,6 +110,8 @@ fn snapshots() -> Result<()> {
                 error: None,
                 shell: None,
                 is_primary: false,
+                filesystem: None,
+                network_access: None,
             },
         )]
         .into_iter()
@@ -374,6 +376,8 @@ fn available(cwd: &str, shell: &str) -> Result<EnvironmentState> {
         error: None,
         shell: Some(shell.to_string()),
         is_primary: false,
+        filesystem: None,
+        network_access: None,
     })
 }
 
@@ -391,6 +395,8 @@ fn starting(cwd: &str) -> Result<EnvironmentState> {
         error: None,
         shell: None,
         is_primary: false,
+        filesystem: None,
+        network_access: None,
     })
 }
 
@@ -405,6 +411,8 @@ fn failure_context_is_escaped_incremental_and_cleared_on_recovery() -> Result<()
                 error: Some("Repository <empty> & unavailable".to_string()),
                 shell: None,
                 is_primary: false,
+                filesystem: None,
+                network_access: None,
             },
         )]
         .into_iter()
@@ -474,7 +482,7 @@ fn failure_context_limits_total_detail_bytes_at_utf8_boundaries() {
             })
             .collect(),
     };
-    let states = environment_states(&snapshot);
+    let states = environment_states(&snapshot, /*per_environment*/ false);
     let details: Vec<_> = states
         .values()
         .map(|state| state.error.as_deref())
