@@ -4,11 +4,16 @@ use codex_config::types::OtelHttpProtocol as Protocol;
 use codex_features::Feature;
 use codex_login::default_client::originator;
 use codex_otel::OtelExporter;
+use codex_otel::OtelHeadersHelper;
 use codex_otel::OtelHttpProtocol;
 use codex_otel::OtelProvider;
 use codex_otel::OtelSettings;
 use codex_otel::OtelTlsConfig as OtelTlsSettings;
 use std::error::Error;
+use std::num::NonZeroU64;
+use std::time::Duration;
+
+const DEFAULT_HEADERS_HELPER_REFRESH_INTERVAL_MS: u64 = 29 * 60 * 1_000;
 
 /// Build an OpenTelemetry provider from the app Config.
 ///
@@ -107,6 +112,7 @@ pub fn build_provider(
             ),
         });
     OtelProvider::try_new(&OtelSettings {
+        headers_helper,
         http_client_factory: config.http_client_factory(),
         service_name: service_name.to_string(),
         service_version: service_version.to_string(),
