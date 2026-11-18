@@ -36,6 +36,13 @@ use std::collections::VecDeque;
 
 pub(crate) const AGENTS_OVERVIEW_VIEW_ID: &str = "agents-overview";
 
+#[derive(Clone, Copy)]
+pub(super) struct DetailsDividerDrag {
+    pub(super) press_y: u16,
+    pub(super) initial_height: u16,
+    pub(super) screen: Rect,
+}
+
 #[derive(Default)]
 pub(super) struct AgentsOverviewState {
     /// Missing metadata records a local resume until the next metadata refresh.
@@ -75,6 +82,7 @@ pub(super) struct AgentsOverviewState {
     pub(super) refresh_task: Option<tokio::task::AbortHandle>,
     pub(super) refresh_notifications: HashMap<ThreadId, Vec<ServerNotification>>,
     pub(super) rendered_full_screen: bool,
+    pub(super) details_divider_drag: Option<DetailsDividerDrag>,
     pub(super) visible_thread_ids: Vec<ThreadId>,
     /// One-shot successor selected before a removal invalidates the displayed rows.
     pub(super) selection_after_removal: Option<ThreadId>,
@@ -95,6 +103,23 @@ pub(super) struct AgentsOverviewState {
 }
 
 impl AgentsOverviewState {
+    pub(super) fn cancel_details_divider_drag(&mut self) {
+        self.details_divider_drag = None;
+        let mut view = self
+            .view_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        view.docked_details_resizing = false;
+        view.details_divider_area = None;
+    }
+
+    pub(super) fn update_details_divider_height(&mut self, height: u16) {
+        let mut view = self
+            .view_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        view.docked_details_height = Some(height);
+    }
     pub(super) fn refill_count(&self, owner: BackendId) -> usize {
         self.refill_by_backend
             .get(&owner)
@@ -124,6 +149,95 @@ impl Drop for AgentsOverviewState {
 }
 
 impl App {
+    pub(super) fn handle_agents_overview_details_mouse(
+        &mut self,
+        tui: &mut Tui,
+        mouse: crossterm::event::MouseEvent,
+    ) -> anyhow::Result<bool> {
+        use crossterm::event::MouseButton;
+        use crossterm::event::MouseEventKind;
+
+        let viewport: Rect = tui.prepare_draw_size()?.into();
+        if let Some(drag) = self.agents_overview.details_divider_drag {
+            if viewport != drag.screen {
+                self.agents_overview.cancel_details_divider_drag();
+                tui.frame_requester().schedule_frame();
+                return Ok(false);
+            }
+            match mouse.kind {
+                MouseEventKind::Drag(MouseButton::Left)
+                | MouseEventKind::Up(MouseButton::Left) => {
+                    let area_height = self
+                        .agents_overview
+                        .view_state
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .docked_area_height;
+                    let delta_y = i32::from(mouse.row) - i32::from(drag.press_y);
+                    let requested = (i32::from(drag.initial_height) - delta_y)
+                        .clamp(0, i32::from(u16::MAX)) as u16;
+                    let height =
+                        AgentsOverviewView::clamp_docked_details_height(requested, area_height);
+                    self.agents_overview.update_details_divider_height(height);
+                    if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+                        self.agents_overview.details_divider_drag = None;
+                        let mut view = self
+                            .agents_overview
+                            .view_state
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        view.docked_details_resizing = false;
+                    }
+                    tui.frame_requester().schedule_frame();
+                    return Ok(true);
+                }
+                _ => {
+                    self.agents_overview.cancel_details_divider_drag();
+                    tui.frame_requester().schedule_frame();
+                    return Ok(false);
+                }
+            }
+        }
+
+        if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+            return Ok(false);
+        }
+        let (divider, initial_height, area_height) = {
+            let view = self
+                .agents_overview
+                .view_state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (
+                view.details_divider_area,
+                view.docked_details_height,
+                view.docked_area_height,
+            )
+        };
+        let Some(divider) = divider else {
+            return Ok(false);
+        };
+        if !divider.contains((mouse.column, mouse.row).into()) {
+            return Ok(false);
+        }
+        let Some(initial_height) = initial_height else {
+            return Ok(false);
+        };
+        self.agents_overview.details_divider_drag = Some(DetailsDividerDrag {
+            press_y: mouse.row,
+            initial_height,
+            screen: viewport,
+        });
+        let mut view = self
+            .agents_overview
+            .view_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        view.docked_details_resizing = true;
+        drop(view);
+        tui.frame_requester().schedule_frame();
+        Ok(true)
+    }
     pub(super) fn open_agents_overview(&mut self, app_server: &AppServerSession) {
         let threads = self
             .agents_overview

@@ -183,6 +183,10 @@ pub(super) struct AgentsOverviewViewState {
     searching: bool,
     pub(super) grouping: AgentsOverviewGrouping,
     pub(super) rename_target: Option<ThreadId>,
+    pub(super) docked_details_height: Option<u16>,
+    pub(super) docked_details_resizing: bool,
+    pub(super) details_divider_area: Option<Rect>,
+    pub(super) docked_area_height: u16,
     // The picker can finish this retained view when it selects the already active session.
     pub(super) completion: Option<ViewCompletion>,
 }

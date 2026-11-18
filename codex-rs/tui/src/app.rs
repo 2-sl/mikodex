@@ -1083,6 +1083,9 @@ impl App {
             return Ok(AppRunControl::Exit(ExitReason::UserRequested));
         }
         let screen_size = tui.screen_size_for_event(&event)?;
+        if matches!(&event, TuiEvent::Resize(_) | TuiEvent::FocusLost) {
+            self.agents_overview.cancel_details_divider_drag();
+        }
         if !matches!(
             &event,
             TuiEvent::Key(_) | TuiEvent::Mouse(_) | TuiEvent::Paste(_) | TuiEvent::FocusLost
@@ -1149,6 +1152,11 @@ impl App {
 
         if let TuiEvent::Key(key) = &event
             && self.handle_side_focus_key(tui, app_server, *key).await
+        {
+            return Ok(AppRunControl::Continue);
+        }
+        if let TuiEvent::Mouse(mouse) = &event
+            && self.handle_agents_overview_details_mouse(tui, *mouse)?
         {
             return Ok(AppRunControl::Continue);
         }
