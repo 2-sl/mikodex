@@ -1192,8 +1192,6 @@ impl App {
         if !composer_paste && Box::pin(self.handle_sidebar_input(tui, app_server, &event)).await {
             return Ok(AppRunControl::Continue);
         }
-            return Ok(AppRunControl::Continue);
-        }
         if let TuiEvent::Mouse(mouse) = &event
             && mouse.kind == MouseEventKind::Down(MouseButton::Left)
             && let Some(dock) = agents_overview_dock::layout(self, tui.terminal.viewport_area)
