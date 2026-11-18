@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use codex_attachment_store::AttachmentStore;
 use codex_attachment_store::FormatSpecificMetadata;
 use codex_attachment_store::ResolveRequest;
 use codex_attachment_store::UploadContent;
@@ -15,9 +16,12 @@ use codex_attachment_store::UploadRequest;
 use codex_attachment_store::UploadResult;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::models::AudioReference;
-use codex_protocol::models::ContentItem;
+use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_utils_audio::estimate_file_audio_tokens;
+use codex_utils_output_truncation::TruncationPolicy;
+use codex_utils_output_truncation::approx_token_count;
+use codex_utils_output_truncation::truncate_measured_tool_output;
 use futures::StreamExt;
 use futures::stream;
 
@@ -40,9 +44,44 @@ pub(crate) async fn snapshot(session: &Session) -> Arc<FileAudioDurations> {
 pub(super) fn file_ids(items: &[ResponseItemEnvelope]) -> impl Iterator<Item = &String> {
     items
         .iter()
-        .filter_map(|envelope| match &envelope.item {
-            ResponseItem::Message { content, .. } => Some(content),
-            _ => None,
+        .flat_map(|envelope| envelope.item.file_audio_ids())
+}
+
+/// Only fresh results pass through the store. A replay keeps the representation in the rollout.
+pub(super) async fn prepare_new_items(
+    items: &mut [ResponseItemEnvelope],
+    store: &dyn AttachmentStore,
+    thread_id: &str,
+    ephemeral: bool,
+    default_token_limit: usize,
+) {
+    for ResponseItemEnvelope { item, metadata } in items {
+        let (ResponseItem::FunctionCallOutput { output, .. }
+        | ResponseItem::CustomToolCallOutput { output, .. }) = item
+        else {
+            codex_utils_audio::prepare_response_items(std::slice::from_mut(item));
+            continue;
+        };
+        if !output.contains_audio() {
+            continue;
+        }
+        let metadata = metadata.get_or_insert_default();
+        // The producer's output limit can be larger than the history limit (e.g. Code Mode).
+        // Apply the latter to the whole result while audio still has its inline cost.
+        let limit = metadata
+            .history_truncation_token_limit
+            .unwrap_or(default_token_limit);
+        let producer_budgeted = std::mem::take(&mut metadata.producer_bounded_tool_audio);
+        // Validate and measure on a worker. Only clips retained by history need their
+        // decoded bytes materialized for upload, one at a time.
+        let Some(parts) = output.content_items_mut() else {
+            continue;
+        };
+        let parts = std::mem::take(parts);
+        let preserve_producer_limit =
+            producer_budgeted && metadata.history_truncation_token_limit.is_none();
+        let Ok((mut admitted, repair_limit)) = tokio::task::spawn_blocking(move || {
+            admit_tool_audio(parts, limit, preserve_producer_limit)
         })
         .await
         else {
@@ -168,9 +207,39 @@ fn tool_audio_after_upload(
         Ok(UploadResult::File { file_id }) if !file_id.trim().is_empty() => {
             FunctionCallOutputContentItem::InputAudio {
                 audio: AudioReference::File { file_id },
-            } => Some(file_id),
-            _ => None,
-        })
+            }
+        }
+        Ok(UploadResult::Inline { bytes }) => FunctionCallOutputContentItem::inline_audio(
+            codex_utils_audio::audio_data_url(mime, &bytes),
+        ),
+        Err(error) if error.kind() == codex_attachment_store::AttachmentStoreErrorKind::Backend => {
+            tracing::warn!(kind = ?error.kind(), "tool audio upload failed; using inline audio");
+            // decode_audio validated the base64 and normalized the MIME alias.
+            if let Some(separator) = inline_url.find(',') {
+                inline_url.replace_range(..separator, &format!("data:{mime};base64"));
+            }
+            FunctionCallOutputContentItem::inline_audio(inline_url)
+        }
+        Err(error)
+            if error.kind()
+                == codex_attachment_store::AttachmentStoreErrorKind::InvalidAttachment =>
+        {
+            FunctionCallOutputContentItem::InputText {
+                text: "audio content omitted because the attachment store rejected the clip".into(),
+            }
+        }
+        Ok(UploadResult::File { .. }) | Err(_) => {
+            tracing::warn!("could not store tool audio attachment");
+            FunctionCallOutputContentItem::InputText {
+                text: "audio content omitted because it could not be stored".to_owned(),
+            }
+        }
+    }
+}
+
+pub(super) async fn resolve_pending(session: &Session) {
+    let ids = std::mem::take(&mut session.state.lock().await.pending_audio_duration_ids);
+    resolve(session, ids).await;
 }
 
 pub(super) async fn resolve(session: &Session, mut file_ids: BTreeSet<String>) {
