@@ -55,6 +55,8 @@ pub enum SlashCommand {
     Mention,
     Status,
     Daemon,
+    #[strum(to_string = "rc", serialize = "remote")]
+    Rc,
     Warnings,
     Cd,
     #[strum(to_string = "pwd", serialize = "cwd")]
@@ -122,6 +124,7 @@ impl SlashCommand {
             SlashCommand::Import => "import setup, this project, and recent chats from Claude Code",
             SlashCommand::Hooks => "view and manage lifecycle hooks",
             SlashCommand::Daemon => "Manage the local background server",
+            SlashCommand::Rc => "manage remote control for the local background server",
             SlashCommand::Warnings => "view retained warnings and diagnostic details",
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::Cd => "change the current working directory",
@@ -150,7 +153,9 @@ impl SlashCommand {
             SlashCommand::Goal => "set or view the goal for a long-running task",
             SlashCommand::Agents => "open the agent command center",
             SlashCommand::MultiAgents => "switch between this session's subagents",
-            SlashCommand::Side | SlashCommand::Btw => "start a side conversation",
+            SlashCommand::Side | SlashCommand::Btw => {
+                "start a side conversation in an ephemeral fork"
+            }
             SlashCommand::Permissions => "choose what Mikodex is allowed to do",
             SlashCommand::Keymap => "remap TUI shortcuts",
             SlashCommand::Vim => "toggle Vim mode for the composer",
@@ -158,7 +163,9 @@ impl SlashCommand {
             SlashCommand::Experimental => "toggle experimental features",
             SlashCommand::AutoReview => "approve one retry of a recent auto-review denial",
             SlashCommand::Memories => "configure memory use and generation",
-            SlashCommand::Mcp => "list MCP tools; use /mcp verbose or /mcp login <name>",
+            SlashCommand::Mcp => {
+                "list MCP tools; /mcp verbose or /mcp login <name> [--environment <id>]"
+            }
             SlashCommand::Apps => "manage apps",
             SlashCommand::Plugins => "browse plugins",
             SlashCommand::Logout => "log out of Mikodex",
@@ -201,6 +208,7 @@ impl SlashCommand {
                 | SlashCommand::Side
                 | SlashCommand::Btw
                 | SlashCommand::Resume
+                | SlashCommand::Rc
                 | SlashCommand::Background
         )
     }
@@ -217,6 +225,7 @@ impl SlashCommand {
                 | SlashCommand::Mention
                 | SlashCommand::Status
                 | SlashCommand::Daemon
+                | SlashCommand::Rc
                 | SlashCommand::Warnings
                 | SlashCommand::Pwd
                 | SlashCommand::Usage
@@ -244,6 +253,7 @@ impl SlashCommand {
                 | SlashCommand::Quit
                 | SlashCommand::Exit
                 | SlashCommand::Status
+                | SlashCommand::Rc
                 | SlashCommand::Warnings
                 | SlashCommand::DebugConfig
                 | SlashCommand::Pwd
@@ -294,6 +304,7 @@ impl SlashCommand {
             | SlashCommand::Hooks
             | SlashCommand::Status
             | SlashCommand::Daemon
+            | SlashCommand::Rc
             | SlashCommand::Warnings
             | SlashCommand::Pwd
             | SlashCommand::Usage

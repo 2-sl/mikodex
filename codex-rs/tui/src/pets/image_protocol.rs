@@ -71,7 +71,7 @@ impl PetImageUnsupportedReason {
     fn message(self) -> &'static str {
         match self {
             Self::Tmux => {
-                "Pets are unavailable in this tmux pane. Use fullscreen Codex with allow-passthrough all, or run Mikodex outside tmux."
+                "Pets are unavailable in this tmux pane. Use fullscreen Mikodex with allow-passthrough all, or run Mikodex outside tmux."
             }
             Self::Zellij => {
                 "Pets are disabled in Zellij. Terminal images don’t stay reliably pane-local in Zellij. Run Mikodex outside Zellij to use pets."
@@ -257,6 +257,14 @@ impl KittyPlacement {
         }
         Ok(())
     }
+}
+
+pub(crate) fn kitty_move_image(id: u32, area: ratatui::layout::Rect) -> String {
+    let (columns, rows) = (area.width, area.height);
+    // Lowercase i removes placements but keeps the uploaded pixel data.
+    wrap_for_tmux_if_needed(&format!(
+        "{ESC}_Ga=d,d=i,i={id},q=2;{ST}{ESC}_Ga=p,i={id},c={columns},r={rows},C=1,q=2;{ST}"
+    ))
 }
 
 pub fn kitty_transmit_png_with_id(

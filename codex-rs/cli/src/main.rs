@@ -32,6 +32,7 @@ use codex_tui::AppExitInfo;
 use codex_tui::Cli as TuiCli;
 use codex_tui::ExitReason;
 use codex_tui::UpdateAction;
+use codex_tui::resolve_remote_endpoint;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::ProfileV2Name;
@@ -53,6 +54,7 @@ static ALLOCATOR: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod app_cmd;
+mod app_server_proxy;
 mod config_override_args;
 mod daemon_install;
 mod daemon_telemetry;
@@ -112,21 +114,20 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::user_input::UserInput;
 use codex_terminal_detection::TerminalName;
 
-/// Mikodex CLI
+/// Codex CLI
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
 #[clap(
-    name = "Mikodex",
     author,
     version,
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
-    // `mikodex-x86_64-unknown-linux-musl`, but the help output should always use
-    // the stable `mikodex` command name that users run.
-    bin_name = "mikodex",
-    override_usage = "mikodex [OPTIONS] [PROMPT]\n       mikodex [OPTIONS] <COMMAND> [ARGS]"
+    // `codex-x86_64-unknown-linux-musl`, but the help output should always use
+    // the generic `codex` command name that users run.
+    bin_name = "codex",
+    override_usage = "codex [OPTIONS] [PROMPT]\n       codex [OPTIONS] <COMMAND> [ARGS]"
 )]
 struct MultitoolCli {
     #[clap(flatten)]
@@ -154,7 +155,7 @@ enum Subcommand {
     #[clap(hide = true)]
     TcpTunnel(codex_tcp_tunnel::Args),
 
-    /// Run Mikodex non-interactively.
+    /// Run Codex non-interactively.
     #[clap(visible_alias = "e")]
     Exec(ExecCli),
 
@@ -171,10 +172,10 @@ enum Subcommand {
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
-    /// Manage external MCP servers for Mikodex.
+    /// Manage external MCP servers for Codex.
     Mcp(McpCli),
 
-    /// Manage Mikodex plugins.
+    /// Manage Codex plugins.
     Plugin(PluginCli),
 
     /// [experimental] Run the app server or related tooling.
@@ -190,13 +191,13 @@ enum Subcommand {
     /// Generate shell completion scripts.
     Completion(CompletionCommand),
 
-    /// Update Mikodex to the latest version.
+    /// Update Codex to the latest version.
     Update,
 
-    /// Diagnose local Mikodex installation, config, auth, and runtime health.
+    /// Diagnose local Codex installation, config, auth, and runtime health.
     Doctor(DoctorCommand),
 
-    /// Run commands within a Mikodex-provided sandbox.
+    /// Run commands within a Codex-provided sandbox.
     Sandbox(SandboxCommand),
 
     /// Debugging tools.
@@ -206,7 +207,7 @@ enum Subcommand {
     #[clap(hide = true)]
     Execpolicy(ExecpolicyCommand),
 
-    /// Apply the latest diff produced by Mikodex agent as a `git apply` to your local working tree.
+    /// Apply the latest diff produced by Codex agent as a `git apply` to your local working tree.
     #[clap(visible_alias = "a")]
     Apply(ApplyCommand),
 
@@ -234,17 +235,13 @@ enum Subcommand {
     /// Fork a previous interactive session (picker by default; use --last to fork the most recent).
     Fork(ForkCommand),
 
-    /// [EXPERIMENTAL] Browse tasks from Mikodex Cloud and apply changes locally.
+    /// [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally.
     #[clap(name = "cloud", alias = "cloud-tasks")]
     Cloud(CloudTasksCli),
 
     /// Internal: run the responses API proxy.
     #[clap(hide = true)]
     ResponsesApiProxy(ResponsesApiProxyArgs),
-
-    /// Internal: relay stdio to a Unix domain socket.
-    #[clap(hide = true, name = "stdio-to-uds")]
-    StdioToUds(StdioToUdsCommand),
 
     /// [EXPERIMENTAL] Run the standalone exec-server service.
     ExecServer(ExecServerCommand),
@@ -324,7 +321,7 @@ struct DebugModelsCommand {
 
 #[derive(Debug, Parser)]
 struct ReviewCommand {
-    /// Error out when config.toml contains fields that are not recognized by this version of Mikodex.
+    /// Error out when config.toml contains fields that are not recognized by this version of Codex.
     #[arg(long = "strict-config", default_value_t = false)]
     strict_config: bool,
 
@@ -409,7 +406,7 @@ struct SessionArchiveConfigOverrides {
     #[clap(flatten)]
     shared: SharedCliOptions,
 
-    /// Error out when config.toml contains fields that are not recognized by this version of Mikodex.
+    /// Error out when config.toml contains fields that are not recognized by this version of Codex.
     #[arg(long = "strict-config", default_value_t = false)]
     strict_config: bool,
 
@@ -492,7 +489,7 @@ enum SandboxSubcommand {
 #[cfg(target_os = "macos")]
 type HostSandboxArgs = codex_cli::SeatbeltCommand;
 #[cfg(target_os = "linux")]
-type HostSandboxArgs = codex_cli::LandlockCommand;
+type HostSandboxArgs = codex_cli::LinuxSandboxCommand;
 #[cfg(target_os = "windows")]
 type HostSandboxArgs = codex_cli::WindowsCommand;
 
@@ -502,7 +499,7 @@ type HostSandboxArgs = UnsupportedSandboxArgs;
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 #[derive(Debug, Parser)]
 struct UnsupportedSandboxArgs {
-    /// Layer $MIKODEX_HOME/<name>.config.toml on top of the base user config.
+    /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
     #[arg(long = "profile", short = 'p')]
     pub config_profile: Option<ProfileV2Name>,
 
@@ -534,13 +531,13 @@ struct LoginCommand {
 
     #[arg(
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | mikodex login --with-api-key`)"
+        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`)"
     )]
     with_api_key: bool,
 
     #[arg(
         long = "with-access-token",
-        help = "Read the access token from stdin (e.g. `printenv CODEX_ACCESS_TOKEN | mikodex login --with-access-token`)"
+        help = "Read the access token from stdin (e.g. `printenv CODEX_ACCESS_TOKEN | codex login --with-access-token`)"
     )]
     with_access_token: bool,
 
@@ -597,7 +594,7 @@ struct AppServerCommand {
     #[command(flatten)]
     code_mode_host: codex_app_server::AppServerCodeModeHostArgs,
 
-    /// Error out when config.toml contains fields that are not recognized by this version of Mikodex.
+    /// Error out when config.toml contains fields that are not recognized by this version of Codex.
     #[arg(long = "strict-config", default_value_t = false)]
     strict_config: bool,
 
@@ -621,6 +618,9 @@ struct AppServerCommand {
     /// Save loaded threads during managed daemon shutdown.
     #[arg(long, hide = true)]
     managed_daemon: bool,
+
+    #[command(flatten)]
+    plugin_mcp_launch: codex_app_server::PluginMcpLaunchArgs,
 
     /// Controls whether analytics are enabled by default.
     ///
@@ -659,7 +659,7 @@ enum AppServerSubcommand {
     /// [experimental] Generate JSON Schema for the app server protocol.
     GenerateJsonSchema(GenerateJsonSchemaCommand),
 
-    /// [internal] Generate internal JSON Schema artifacts for Mikodex tooling.
+    /// [internal] Generate internal JSON Schema artifacts for Codex tooling.
     #[clap(hide = true)]
     GenerateInternalJsonSchema(GenerateInternalJsonSchemaCommand),
 }
@@ -762,13 +762,6 @@ struct GenerateInternalJsonSchemaCommand {
     out_dir: PathBuf,
 }
 
-#[derive(Debug, Parser)]
-struct StdioToUdsCommand {
-    /// Path to the Unix domain socket to connect to.
-    #[arg(value_name = "SOCKET_PATH", value_parser = parse_socket_path)]
-    socket_path: AbsolutePathBuf,
-}
-
 fn parse_socket_path(raw: &str) -> Result<AbsolutePathBuf, String> {
     AbsolutePathBuf::relative_to_current_dir(raw)
         .map_err(|err| format!("failed to resolve socket path `{raw}`: {err}"))
@@ -788,7 +781,11 @@ async fn handle_app_exit(
     };
 
     let update_action = exit_info.update_action;
-    if !matches!(update_action, Some(UpdateAction::Daemon(_))) {
+    if matches!(update_action, Some(UpdateAction::Daemon(_))) {
+        for warning in exit_info.archive_warnings {
+            eprintln!("{warning}");
+        }
+    } else {
         let color_enabled = supports_color::on(Stream::Stdout).is_some();
         for line in exit_info.format_exit_messages(color_enabled) {
             println!("{line}");
@@ -823,7 +820,7 @@ fn run_update_action(
 ) -> anyhow::Result<()> {
     if let UpdateAction::Daemon(source) = action {
         let executable = cli_executable
-            .ok_or_else(|| anyhow::anyhow!("Cannot locate the launching Mikodex CLI"))?;
+            .ok_or_else(|| anyhow::anyhow!("Cannot locate the launching Codex CLI"))?;
         println!("Updating the local background server...");
         let status = std::process::Command::new(executable)
             .args(source.command_args())
@@ -833,12 +830,12 @@ fn run_update_action(
             status.success(),
             "Daemon update failed with status {status}"
         );
-        println!("Relaunch Mikodex to reconnect.");
+        println!("Relaunch Codex to reconnect.");
         return Ok(());
     }
     println!();
     let cmd_str = action.command_str();
-    println!("Updating Mikodex via `{cmd_str}`...");
+    println!("Updating Codex via `{cmd_str}`...");
     let status = {
         #[cfg(windows)]
         {
@@ -882,7 +879,7 @@ fn run_update_action(
     if !status.success() {
         anyhow::bail!("`{cmd_str}` failed with status {status}");
     }
-    println!("\n🎉 Update ran successfully! Please restart Mikodex.");
+    println!("\n🎉 Update ran successfully! Please restart Codex.");
     Ok(())
 }
 
@@ -907,7 +904,7 @@ async fn run_update_command() -> anyhow::Result<()> {
     #[cfg(debug_assertions)]
     {
         anyhow::bail!(
-            "`mikodex update` is not available in debug builds. Install a release build of Mikodex to use this command."
+            "`codex update` is not available in debug builds. Install a release build of Codex to use this command."
         );
     }
 
@@ -920,7 +917,7 @@ async fn run_update_command() -> anyhow::Result<()> {
 
         let Some(action) = codex_tui::get_update_action() else {
             anyhow::bail!(
-                "Could not detect the Mikodex installation method. Please update manually: https://developers.openai.com/codex/cli/"
+                "Could not detect the Codex installation method. Please update manually: https://developers.openai.com/codex/cli/"
             );
         };
         run_update_action(action, /*cli_executable*/ None)
@@ -1105,12 +1102,18 @@ async fn dispatch_cli(
         Some(Subcommand::Agents(options)) => Some(options),
         _ => None,
     };
-    if let Some(options) = agents_options
+    let session_remote = match &subcommand {
+        Some(Subcommand::Agents(options)) => Some(("agents", &options.remote)),
+        Some(Subcommand::Resume(options)) => Some(("resume", &options.remote)),
+        Some(Subcommand::Fork(options)) => Some(("fork", &options.remote)),
+        _ => None,
+    };
+    if let Some((command, options)) = session_remote
         && let Some(root_endpoint) = &remote.remote
-        && let Some(agents_endpoint) = &options.remote.remote
-        && root_endpoint != agents_endpoint
+        && let Some(command_endpoint) = &options.remote
+        && root_endpoint != command_endpoint
     {
-        anyhow::bail!("`mikodex agents` received conflicting remote server endpoints");
+        anyhow::bail!("`codex {command}` received conflicting remote server endpoints");
     }
     let root_remote = agents_options
         .and_then(|options| options.remote.remote.clone())
@@ -1146,7 +1149,7 @@ async fn dispatch_cli(
             );
             if open_agents_overview {
                 if interactive.prompt.is_some() || !interactive.images.is_empty() {
-                    anyhow::bail!("`mikodex agents` does not accept an initial prompt or images");
+                    anyhow::bail!("`codex agents` does not accept an initial prompt or images");
                 }
                 if root_remote.is_some()
                     && (interactive.oss
@@ -1164,7 +1167,7 @@ async fn dispatch_cli(
                             }))
                 {
                     anyhow::bail!(
-                        "`mikodex agents` cannot apply local provider or additional-directory overrides to a remote server"
+                        "`codex agents` cannot apply local provider or additional-directory overrides to a remote server"
                     );
                 }
                 interactive.agents_overview = true;
@@ -1176,8 +1179,8 @@ async fn dispatch_cli(
                 arg0_paths,
             )));
         }
-        Some(Subcommand::TcpTunnel(args)) if args.auth_token_stdin => {
-            codex_tcp_tunnel::run(args).await?;
+        Some(Subcommand::TcpTunnel(args)) if args.token_file.is_some() => {
+            codex_tcp_tunnel::run_ssh_proxy_from_file(args, tokio::io::stdout()).await?;
         }
         Some(Subcommand::TcpTunnel(args)) => {
             let config =
@@ -1210,11 +1213,16 @@ async fn dispatch_cli(
                 .await??;
         }
         Some(Subcommand::Exec(mut exec_cli)) => {
-            reject_remote_mode_for_subcommand(
-                root_remote.as_deref(),
-                root_remote_auth_token_env.as_deref(),
-                "exec",
-            )?;
+            if let Some(root_endpoint) = &root_remote
+                && let Some(exec_endpoint) = &exec_cli.remote
+                && root_endpoint != exec_endpoint
+            {
+                anyhow::bail!("`codex exec` received conflicting remote server endpoints");
+            }
+            exec_cli.remote = exec_cli.remote.or(root_remote);
+            exec_cli.remote_auth_token_env = exec_cli
+                .remote_auth_token_env
+                .or(root_remote_auth_token_env);
             exec_cli
                 .shared
                 .inherit_exec_root_options(&interactive.shared);
@@ -1236,7 +1244,7 @@ async fn dispatch_cli(
                 root_remote_auth_token_env.as_deref(),
                 "review",
             )?;
-            let mut exec_cli = ExecCli::try_parse_from(["mikodex", "exec"])?;
+            let mut exec_cli = ExecCli::try_parse_from(["codex", "exec"])?;
             exec_cli
                 .shared
                 .inherit_exec_root_options(&interactive.shared);
@@ -1308,6 +1316,7 @@ async fn dispatch_cli(
                 stdio,
                 remote_control,
                 managed_daemon,
+                plugin_mcp_launch,
                 analytics_default_enabled,
                 auth,
             } = app_server_cli;
@@ -1353,6 +1362,7 @@ async fn dispatch_cli(
                         cloud_skills_snapshot,
                         code_mode_host_transport: code_mode_host.into(),
                         managed_daemon,
+                        plugin_mcp_launch,
                         remote_control_startup_mode: match (remote_control, remote_control_disabled)
                         {
                             (true, _) => {
@@ -1535,7 +1545,7 @@ async fn dispatch_cli(
                             codex_app_server::app_server_control_socket_path(&codex_home)?
                         }
                     };
-                    codex_stdio_to_uds::run(socket_path.as_path()).await?;
+                    app_server_proxy::run(socket_path.as_path()).await?;
                 }
                 Some(AppServerSubcommand::GenerateTs(gen_cli)) => {
                     let options = codex_app_server_protocol::GenerateTsOptions {
@@ -1746,7 +1756,7 @@ async fn dispatch_cli(
                         .await;
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | mikodex login --with-api-key`."
+                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
                         );
                         std::process::exit(1);
                     } else if login_cli.with_api_key {
@@ -1860,7 +1870,7 @@ async fn dispatch_cli(
             )
             .await?;
             #[cfg(target_os = "linux")]
-            codex_cli::run_command_under_landlock(
+            codex_cli::run_command_under_linux_sandbox(
                 sandbox_cli,
                 arg0_paths.codex_linux_sandbox_exe.clone(),
                 loader_overrides,
@@ -1876,7 +1886,7 @@ async fn dispatch_cli(
             #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
             {
                 let _ = loader_overrides;
-                anyhow::bail!("`mikodex sandbox` is not supported on this operating system");
+                anyhow::bail!("`codex sandbox` is not supported on this operating system");
             }
         }
         Some(Subcommand::Debug(DebugCommand { subcommand })) => match subcommand {
@@ -1957,15 +1967,6 @@ async fn dispatch_cli(
             )?;
             tokio::task::spawn_blocking(move || codex_responses_api_proxy::run_main(args))
                 .await??;
-        }
-        Some(Subcommand::StdioToUds(cmd)) => {
-            reject_remote_mode_for_subcommand(
-                root_remote.as_deref(),
-                root_remote_auth_token_env.as_deref(),
-                "stdio-to-uds",
-            )?;
-            let socket_path = cmd.socket_path;
-            codex_stdio_to_uds::run(socket_path.as_path()).await?;
         }
         Some(Subcommand::ExecServer(mut cmd)) => {
             reject_remote_mode_for_subcommand(
@@ -2057,7 +2058,7 @@ fn profile_v2_for_subcommand<'a>(
             subcommand: DebugSubcommand::PromptInput(_),
         }) => Ok(Some(profile_v2)),
         _ => anyhow::bail!(
-            "--profile only applies to runtime commands, `mikodex mcp`, and `mikodex migrate-nfs-db`: `mikodex`, `mikodex exec`, `mikodex review`, `mikodex resume`, `mikodex queue`, `mikodex archive`, `mikodex delete`, `mikodex unarchive`, `mikodex fork`, `mikodex mcp`, `mikodex migrate-nfs-db`, `mikodex sandbox`, and `mikodex debug prompt-input`."
+            "--profile only applies to runtime commands, `codex mcp`, and `codex migrate-nfs-db`: `codex`, `codex exec`, `codex review`, `codex resume`, `codex queue`, `codex archive`, `codex delete`, `codex unarchive`, `codex fork`, `codex mcp`, `codex migrate-nfs-db`, `codex sandbox`, and `codex debug prompt-input`."
         ),
     }
 }
@@ -2344,12 +2345,12 @@ fn reject_remote_mode_for_subcommand(
 ) -> anyhow::Result<()> {
     if let Some(remote) = remote {
         anyhow::bail!(
-            "`--remote {remote}` is only supported for interactive TUI commands, not `mikodex {subcommand}`"
+            "`--remote {remote}` is only supported for interactive TUI commands, not `codex {subcommand}`"
         );
     }
     if remote_auth_token_env.is_some() {
         anyhow::bail!(
-            "`--remote-auth-token-env` is only supported for interactive TUI commands, not `mikodex {subcommand}`"
+            "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex {subcommand}`"
         );
     }
     Ok(())
@@ -2379,12 +2380,12 @@ fn reject_unsupported_worktree_for_subcommand(
         None => Ok(()),
         Some(Subcommand::Fork(command)) if command.session_id.is_some() && !command.last => Ok(()),
         Some(Subcommand::Fork(_)) => {
-            anyhow::bail!("`mikodex fork --worktree` requires an explicit session ID")
+            anyhow::bail!("`codex fork --worktree` requires an explicit session ID")
         }
         Some(Subcommand::Exec(command)) => match &command.command {
             None | Some(ExecCommand::Fork(_)) => Ok(()),
             Some(ExecCommand::Resume(_)) => anyhow::bail!(
-                "`--worktree` cannot resume an existing session; use `mikodex exec fork --worktree`"
+                "`--worktree` cannot resume an existing session; use `codex exec fork --worktree`"
             ),
             Some(ExecCommand::Review(_)) => {
                 anyhow::bail!("`--worktree` is not supported for code review")
@@ -2392,7 +2393,7 @@ fn reject_unsupported_worktree_for_subcommand(
         },
         _ => {
             anyhow::bail!(
-                "`--worktree` supports new interactive sessions, `mikodex fork`, `mikodex exec`, and `mikodex exec fork`"
+                "`--worktree` supports new interactive sessions, `codex fork`, `codex exec`, and `codex exec fork`"
             )
         }
     }
@@ -2418,7 +2419,7 @@ fn reject_root_strict_config_for_subcommand(
 /// flag should be rejected after parsing.
 ///
 /// `--strict-config` is parsed on the root interactive CLI so commands like
-/// `mikodex --strict-config` continue to work for the TUI and for wrappers that
+/// `codex --strict-config` continue to work for the TUI and for wrappers that
 /// forward root options into another command shape. Clap will still accept that
 /// root flag before the dispatcher knows which subcommand the user selected, so
 /// unsupported subcommands need an explicit post-parse reject path.
@@ -2464,7 +2465,6 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::Execpolicy(_)) => Some("execpolicy"),
         Some(Subcommand::Apply(_)) => Some("apply"),
         Some(Subcommand::ResponsesApiProxy(_)) => Some("responses-api-proxy"),
-        Some(Subcommand::StdioToUds(_)) => Some("stdio-to-uds"),
         Some(Subcommand::Features(_)) => Some("features"),
         Some(Subcommand::TcpTunnel(_)) => Some("tcp-tunnel"),
     }
@@ -2488,7 +2488,7 @@ fn reject_strict_config_for_unsupported_subcommand(
     subcommand: &str,
 ) -> anyhow::Result<()> {
     if strict_config {
-        anyhow::bail!("`--strict-config` is not supported for `mikodex {subcommand}`");
+        anyhow::bail!("`--strict-config` is not supported for `codex {subcommand}`");
     }
     Ok(())
 }
@@ -2551,26 +2551,6 @@ async fn print_app_server_remote_control_output(
     Ok(())
 }
 
-fn read_remote_auth_token_from_env_var_with<F>(
-    env_var_name: &str,
-    get_var: F,
-) -> anyhow::Result<String>
-where
-    F: FnOnce(&str) -> Result<String, std::env::VarError>,
-{
-    let auth_token = get_var(env_var_name)
-        .map_err(|_| anyhow::anyhow!("environment variable `{env_var_name}` is not set"))?;
-    let auth_token = auth_token.trim().to_string();
-    if auth_token.is_empty() {
-        anyhow::bail!("environment variable `{env_var_name}` is empty");
-    }
-    Ok(auth_token)
-}
-
-fn read_remote_auth_token_from_env_var(env_var_name: &str) -> anyhow::Result<String> {
-    read_remote_auth_token_from_env_var_with(env_var_name, |name| std::env::var(name))
-}
-
 async fn run_interactive_tui(
     mut interactive: TuiCli,
     remote: Option<String>,
@@ -2596,7 +2576,7 @@ async fn run_interactive_tui(
         }
 
         eprintln!(
-            "WARNING: TERM is set to \"dumb\". Mikodex's interactive TUI may not work in this terminal."
+            "WARNING: TERM is set to \"dumb\". Codex's interactive TUI may not work in this terminal."
         );
         if !confirm("Continue anyway? [y/N]: ")? {
             return Ok(AppExitInfo::fatal(
@@ -2677,46 +2657,11 @@ where
             Err(backup_err) => {
                 local_state_db::print_diagnostic_guidance(startup_error);
                 return Ok(AppExitInfo::fatal(format!(
-                    "failed to move damaged Mikodex local database files into a backup folder automatically: {backup_err}"
+                    "failed to move damaged Codex local database files into a backup folder automatically: {backup_err}"
                 )));
             }
         }
     }
-}
-
-fn resolve_remote_endpoint(
-    remote: Option<String>,
-    remote_auth_token_env: Option<String>,
-) -> std::io::Result<Option<codex_tui::RemoteAppServerEndpoint>> {
-    let mut remote_endpoint = remote
-        .as_deref()
-        .map(codex_tui::resolve_remote_addr)
-        .transpose()
-        .map_err(std::io::Error::other)?;
-    if let Some(remote_auth_token_env) = remote_auth_token_env {
-        let Some(endpoint) = remote_endpoint.as_mut() else {
-            return Err(std::io::Error::other(
-                "`--remote-auth-token-env` requires `--remote`.",
-            ));
-        };
-        if !codex_tui::remote_addr_supports_auth_token(endpoint) {
-            return Err(std::io::Error::other(
-                "`--remote-auth-token-env` requires a `wss://` or loopback `ws://` remote.",
-            ));
-        }
-        let auth_token = read_remote_auth_token_from_env_var(&remote_auth_token_env)
-            .map_err(std::io::Error::other)?;
-        let codex_tui::RemoteAppServerEndpoint::WebSocket {
-            auth_token: slot, ..
-        } = endpoint
-        else {
-            return Err(std::io::Error::other(
-                "`--remote-auth-token-env` requires a `wss://` or loopback `ws://` remote.",
-            ));
-        };
-        *slot = Some(auth_token);
-    }
-    Ok(remote_endpoint)
 }
 
 fn is_remote_auth_usage_error(err: &std::io::Error) -> bool {
@@ -2733,7 +2678,7 @@ fn confirm(prompt: &str) -> std::io::Result<bool> {
     Ok(answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes"))
 }
 
-/// Build the final `TuiCli` for a `mikodex resume` invocation.
+/// Build the final `TuiCli` for a `codex resume` invocation.
 fn finalize_resume_interactive(
     mut interactive: TuiCli,
     root_config_overrides: CliConfigOverrides,
@@ -2744,7 +2689,7 @@ fn finalize_resume_interactive(
     mut resume_cli: TuiCli,
 ) -> TuiCli {
     // Start with the parsed interactive CLI so resume shares the same
-    // configuration surface area as `mikodex` without additional flags.
+    // configuration surface area as `codex` without additional flags.
     // Clap assigns the first positional to `session_id`. With `--last`, reinterpret it as the
     // prompt when no second positional prompt was provided.
     let resume_session_id = if last && resume_cli.prompt.is_none() {
@@ -2768,7 +2713,7 @@ fn finalize_resume_interactive(
     interactive
 }
 
-/// Build the final `TuiCli` for a `mikodex fork` invocation.
+/// Build the final `TuiCli` for a `codex fork` invocation.
 fn finalize_fork_interactive(
     mut interactive: TuiCli,
     root_config_overrides: CliConfigOverrides,
@@ -2778,7 +2723,7 @@ fn finalize_fork_interactive(
     mut fork_cli: TuiCli,
 ) -> TuiCli {
     // Start with the parsed interactive CLI so fork shares the same
-    // configuration surface area as `mikodex` without additional flags.
+    // configuration surface area as `codex` without additional flags.
     // Clap assigns the first positional to `session_id`. With `--last`, reinterpret it as the
     // prompt when no second positional prompt was provided.
     let fork_session_id = if last && fork_cli.prompt.is_none() {
@@ -2871,7 +2816,7 @@ fn merge_interactive_cli_flags(interactive: &mut TuiCli, subcommand_cli: TuiCli)
 
 fn print_completion(cmd: CompletionCommand) {
     let mut app = MultitoolCli::command();
-    let name = "mikodex";
+    let name = "codex";
     generate(cmd.shell, &mut app, name, &mut std::io::stdout());
 }
 
@@ -2886,7 +2831,7 @@ mod tests {
     #[test]
     fn interactive_tui_future_stays_bounded() {
         let future = run_interactive_tui(
-            TuiCli::parse_from(["mikodex"]),
+            TuiCli::parse_from(["codex"]),
             /*remote*/ None,
             /*remote_auth_token_env*/ None,
             Arg0DispatchPaths::default(),
@@ -2944,7 +2889,7 @@ mod tests {
 
     #[tokio::test]
     async fn updater_http_client_factory_honors_respect_system_proxy() {
-        let codex_home = tempfile::tempdir().expect("temporary Mikodex home");
+        let codex_home = tempfile::tempdir().expect("temporary Codex home");
         let config = ConfigBuilder::default()
             .codex_home(codex_home.path().to_path_buf())
             .cli_overrides(vec![(
@@ -2975,7 +2920,7 @@ mod tests {
 
     #[tokio::test]
     async fn updater_http_client_factory_enforces_application_requirements() {
-        let home = tempfile::tempdir().expect("temporary Mikodex home");
+        let home = tempfile::tempdir().expect("temporary Codex home");
         let requirements = home.path().join("requirements.toml");
         std::fs::write(
             &requirements,
@@ -3156,31 +3101,31 @@ enabled = true
 
     #[test]
     fn profile_v2_is_rejected_for_config_management_subcommands() {
-        assert!(profile_v2_for_args(&["mikodex", "--profile", "work", "features", "list"]).is_err());
+        assert!(profile_v2_for_args(&["codex", "--profile", "work", "features", "list"]).is_err());
     }
 
     #[test]
     fn profile_v2_is_allowed_for_runtime_subcommands() {
         assert_eq!(
-            profile_v2_for_args(&["mikodex", "--profile", "work", "resume"])
+            profile_v2_for_args(&["codex", "--profile", "work", "resume"])
                 .expect("resume supports profile-v2")
                 .as_deref(),
             Some("work")
         );
         assert_eq!(
-            profile_v2_for_args(&["mikodex", "--profile", "work", "debug", "prompt-input"])
+            profile_v2_for_args(&["codex", "--profile", "work", "debug", "prompt-input"])
                 .expect("debug prompt-input supports profile-v2")
                 .as_deref(),
             Some("work")
         );
         assert_eq!(
-            profile_v2_for_args(&["mikodex", "--profile", "work", "mcp", "list"])
+            profile_v2_for_args(&["codex", "--profile", "work", "mcp", "list"])
                 .expect("mcp supports profile-v2")
                 .as_deref(),
             Some("work")
         );
         assert_eq!(
-            profile_v2_for_args(&["mikodex", "--profile", "work", "sandbox"])
+            profile_v2_for_args(&["codex", "--profile", "work", "sandbox"])
                 .expect("sandbox supports config profile")
                 .as_deref(),
             Some("work")
@@ -3189,7 +3134,7 @@ enabled = true
 
     #[test]
     fn import_remains_an_interactive_prompt() {
-        let cli = MultitoolCli::try_parse_from(["mikodex", "import"]).expect("parse");
+        let cli = MultitoolCli::try_parse_from(["codex", "import"]).expect("parse");
 
         assert!(cli.subcommand.is_none());
         assert_eq!(cli.interactive.prompt.as_deref(), Some("import"));
@@ -3198,25 +3143,25 @@ enabled = true
     #[test]
     fn profile_v2_rejects_non_plain_names_at_parse_time() {
         assert!(
-            MultitoolCli::try_parse_from(["mikodex", "--profile", "nested/work", "resume"]).is_err()
+            MultitoolCli::try_parse_from(["codex", "--profile", "nested/work", "resume"]).is_err()
         );
     }
 
     #[test]
     fn worktree_flag_supports_interactive_exec_and_explicit_fork_positions() {
         let arguments = [
-            vec!["mikodex", "--worktree"],
-            vec!["mikodex", "--worktree", "hello"],
-            vec!["mikodex", "--worktree", "exec", "hello"],
-            vec!["mikodex", "exec", "--worktree", "hello"],
+            vec!["codex", "--worktree"],
+            vec!["codex", "--worktree", "hello"],
+            vec!["codex", "--worktree", "exec", "hello"],
+            vec!["codex", "exec", "--worktree", "hello"],
             vec![
-                "mikodex",
+                "codex",
                 "fork",
                 "--worktree",
                 "019f1234-5678-7000-8000-000000000001",
             ],
             vec![
-                "mikodex",
+                "codex",
                 "exec",
                 "fork",
                 "--worktree",
@@ -3240,15 +3185,15 @@ enabled = true
     #[test]
     fn worktree_flag_rejects_unsupported_session_and_management_commands() {
         let arguments = [
-            vec!["mikodex", "--worktree", "login"],
-            vec!["mikodex", "fork", "--worktree"],
-            vec!["mikodex", "fork", "--worktree", "--last"],
-            vec!["mikodex", "exec", "resume", "--worktree", "session"],
-            vec!["mikodex", "exec", "review", "--worktree"],
-            vec!["mikodex", "resume", "--worktree", "session"],
-            vec!["mikodex", "archive", "session", "--worktree"],
+            vec!["codex", "--worktree", "login"],
+            vec!["codex", "fork", "--worktree"],
+            vec!["codex", "fork", "--worktree", "--last"],
+            vec!["codex", "exec", "resume", "--worktree", "session"],
+            vec!["codex", "exec", "review", "--worktree"],
+            vec!["codex", "resume", "--worktree", "session"],
+            vec!["codex", "archive", "session", "--worktree"],
             vec![
-                "mikodex",
+                "codex",
                 "queue",
                 "--thread",
                 "session",
@@ -3274,7 +3219,7 @@ enabled = true
     #[test]
     fn exec_resume_last_accepts_prompt_positional() {
         let cli =
-            MultitoolCli::try_parse_from(["mikodex", "exec", "--json", "resume", "--last", "2+2"])
+            MultitoolCli::try_parse_from(["codex", "exec", "--json", "resume", "--last", "2+2"])
                 .expect("parse should succeed");
 
         let Some(Subcommand::Exec(exec)) = cli.subcommand else {
@@ -3292,7 +3237,7 @@ enabled = true
     #[test]
     fn exec_resume_accepts_output_flags_after_subcommand() {
         let cli = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "exec",
             "resume",
             "session-123",
@@ -3326,7 +3271,7 @@ enabled = true
     #[test]
     fn dangerous_bypass_conflicts_with_approval_policy() {
         let err = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "--dangerously-bypass-approvals-and-sandbox",
             "--ask-for-approval",
             "on-request",
@@ -3339,7 +3284,7 @@ enabled = true
     #[test]
     fn approve_for_me_configures_interactive_mode() {
         for flag in ["--approve-for-me", "--not-so-yolo"] {
-            let mut cli = MultitoolCli::try_parse_from(["mikodex", flag]).expect("parse flag");
+            let mut cli = MultitoolCli::try_parse_from(["codex", flag]).expect("parse flag");
 
             assert!(cli.interactive.auto_review);
             cli.interactive
@@ -3359,7 +3304,7 @@ enabled = true
 
     #[test]
     fn not_so_yolo_alias_is_hidden_from_help() {
-        for args in [&["mikodex", "--help"][..], &["mikodex", "exec", "--help"][..]] {
+        for args in [&["codex", "--help"][..], &["codex", "exec", "--help"][..]] {
             let help = help_from_args(args);
 
             assert!(!help.contains("--not-so-yolo"), "{help}");
@@ -3368,7 +3313,7 @@ enabled = true
 
     #[test]
     fn approve_for_me_defaults_propagate_from_root_to_exec() {
-        let exec = finalize_exec_from_args(&["mikodex", "--approve-for-me", "exec", "summarize"]);
+        let exec = finalize_exec_from_args(&["codex", "--approve-for-me", "exec", "summarize"]);
 
         assert_eq!(
             exec.config_overrides.raw_overrides,
@@ -3384,7 +3329,7 @@ enabled = true
     #[test]
     fn later_exec_sandbox_partially_overrides_approve_for_me() {
         let exec = finalize_exec_from_args(&[
-            "mikodex",
+            "codex",
             "--approve-for-me",
             "exec",
             "--sandbox",
@@ -3408,7 +3353,7 @@ enabled = true
     #[test]
     fn later_approve_for_me_overrides_root_exec_sandbox() {
         let exec = finalize_exec_from_args(&[
-            "mikodex",
+            "codex",
             "--sandbox",
             "read-only",
             "exec",
@@ -3429,7 +3374,7 @@ enabled = true
     #[test]
     fn later_resume_approval_policy_partially_overrides_approve_for_me() {
         let interactive = finalize_resume_from_args(&[
-            "mikodex",
+            "codex",
             "--approve-for-me",
             "resume",
             "--ask-for-approval",
@@ -3453,7 +3398,7 @@ enabled = true
     #[test]
     fn later_approve_for_me_overrides_root_tui_approval_policy() {
         let interactive = finalize_resume_from_args(&[
-            "mikodex",
+            "codex",
             "--ask-for-approval",
             "never",
             "resume",
@@ -3478,7 +3423,7 @@ enabled = true
             vec!["--ask-for-approval", "on-request"],
             vec!["--dangerously-bypass-approvals-and-sandbox"],
         ] {
-            let mut args = vec!["mikodex", "--approve-for-me"];
+            let mut args = vec!["codex", "--approve-for-me"];
             args.extend(conflicting_args);
 
             let error =
@@ -3496,7 +3441,7 @@ enabled = true
     }
 
     fn default_app_server_socket_path() -> AbsolutePathBuf {
-        let codex_home = find_codex_home().expect("mikodex home");
+        let codex_home = find_codex_home().expect("codex home");
         codex_app_server::app_server_control_socket_path(&codex_home)
             .expect("default app-server socket path")
     }
@@ -3504,7 +3449,7 @@ enabled = true
     #[test]
     fn debug_prompt_input_parses_prompt_and_images() {
         let cli = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "debug",
             "prompt-input",
             "hello",
@@ -3530,7 +3475,7 @@ enabled = true
     #[test]
     fn debug_models_parses_bundled_flag() {
         let cli =
-            MultitoolCli::try_parse_from(["mikodex", "debug", "models", "--bundled"]).expect("parse");
+            MultitoolCli::try_parse_from(["codex", "debug", "models", "--bundled"]).expect("parse");
 
         let Some(Subcommand::Debug(DebugCommand {
             subcommand: DebugSubcommand::Models(cmd),
@@ -3560,7 +3505,7 @@ enabled = true
 
     #[test]
     fn queue_help_lists_supported_options() {
-        let help = help_from_args(&["mikodex", "queue", "--help"]);
+        let help = help_from_args(&["codex", "queue", "--help"]);
         let (general, local) = help
             .split_once("Local server options (without --remote):")
             .unwrap();
@@ -3576,50 +3521,36 @@ enabled = true
     }
 
     #[test]
-    fn tcp_tunnel_is_hidden_and_accepts_its_control_input_contract() {
-        let root_help = help_from_args(&["mikodex", "--help"]);
+    fn tcp_tunnel_is_hidden_and_accepts_an_ssh_proxy_route() {
+        let root_help = help_from_args(&["codex", "--help"]);
         assert!(!root_help.contains("tcp-tunnel"), "{root_help}");
-        let help = help_from_args(&["mikodex", "tcp-tunnel", "--help"]);
-        for option in [
-            "--target",
-            "--auth-token-stdin",
-            "--auth-token-updates-stdin",
-            "--connect-headers-stdin",
-        ] {
-            assert!(help.contains(option), "{help}");
-        }
         let cli = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "tcp-tunnel",
-            "--proxy-url",
-            "https://proxy.example.org",
-            "--proxy-origins-file",
-            "/tmp/approved-origins",
-            "--target",
-            "[::1]:22",
-            "--auth-token-stdin",
-            "--auth-token-updates-stdin",
-            "--connect-headers-stdin",
+            "--environment-id",
+            "ccarenv_test",
+            "--token-file",
+            "/private/token",
         ])
-        .expect("generic tunnel should parse");
+        .expect("SSH proxy route should parse");
         assert!(matches!(cli.subcommand, Some(Subcommand::TcpTunnel(_))));
     }
 
     #[test]
     fn plugin_marketplace_help_uses_plugin_namespace() {
-        let help = help_from_args(&["mikodex", "plugin", "marketplace", "--help"]);
+        let help = help_from_args(&["codex", "plugin", "marketplace", "--help"]);
         assert!(
-            help.contains("Usage: mikodex plugin marketplace [OPTIONS] <COMMAND>"),
+            help.contains("Usage: codex plugin marketplace [OPTIONS] <COMMAND>"),
             "{help}"
         );
 
         for (subcommand, usage) in [
-            ("add", "Usage: mikodex plugin marketplace add"),
-            ("list", "Usage: mikodex plugin marketplace list"),
-            ("upgrade", "Usage: mikodex plugin marketplace upgrade"),
-            ("remove", "Usage: mikodex plugin marketplace remove"),
+            ("add", "Usage: codex plugin marketplace add"),
+            ("list", "Usage: codex plugin marketplace list"),
+            ("upgrade", "Usage: codex plugin marketplace upgrade"),
+            ("remove", "Usage: codex plugin marketplace remove"),
         ] {
-            let help = help_from_args(&["mikodex", "plugin", "marketplace", subcommand, "--help"]);
+            let help = help_from_args(&["codex", "plugin", "marketplace", subcommand, "--help"]);
             assert!(help.contains(usage), "{help}");
         }
     }
@@ -3627,7 +3558,7 @@ enabled = true
     #[test]
     fn plugin_marketplace_add_parses_under_plugin() {
         let cli =
-            MultitoolCli::try_parse_from(["mikodex", "plugin", "marketplace", "add", "owner/repo"])
+            MultitoolCli::try_parse_from(["codex", "plugin", "marketplace", "add", "owner/repo"])
                 .expect("parse");
 
         assert!(matches!(cli.subcommand, Some(Subcommand::Plugin(_))));
@@ -3636,7 +3567,7 @@ enabled = true
     #[test]
     fn plugin_marketplace_upgrade_parses_under_plugin() {
         let cli =
-            MultitoolCli::try_parse_from(["mikodex", "plugin", "marketplace", "upgrade", "debug"])
+            MultitoolCli::try_parse_from(["codex", "plugin", "marketplace", "upgrade", "debug"])
                 .expect("parse");
 
         assert!(matches!(cli.subcommand, Some(Subcommand::Plugin(_))));
@@ -3645,7 +3576,7 @@ enabled = true
     #[test]
     fn plugin_add_parses_under_plugin() {
         let cli = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "plugin",
             "add",
             "sample",
@@ -3660,7 +3591,7 @@ enabled = true
     #[test]
     fn plugin_list_parses_under_plugin() {
         let cli =
-            MultitoolCli::try_parse_from(["mikodex", "plugin", "list", "--marketplace", "debug"])
+            MultitoolCli::try_parse_from(["codex", "plugin", "list", "--marketplace", "debug"])
                 .expect("parse");
 
         assert!(matches!(cli.subcommand, Some(Subcommand::Plugin(_))));
@@ -3669,7 +3600,7 @@ enabled = true
     #[test]
     fn plugin_remove_parses_under_plugin() {
         let cli = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "plugin",
             "remove",
             "sample",
@@ -3683,7 +3614,7 @@ enabled = true
 
     #[test]
     fn update_parses_as_update_subcommand() {
-        let cli = MultitoolCli::try_parse_from(["mikodex", "update"]).expect("parse");
+        let cli = MultitoolCli::try_parse_from(["codex", "update"]).expect("parse");
         assert!(matches!(cli.subcommand, Some(Subcommand::Update)));
     }
 
@@ -3691,7 +3622,7 @@ enabled = true
     fn archive_merges_scoped_tui_flags() {
         let (target, interactive, remote) = finalize_archive_from_args(
             [
-                "mikodex",
+                "codex",
                 "-C",
                 "/root",
                 "archive",
@@ -3736,7 +3667,7 @@ enabled = true
 
     #[test]
     fn sandbox_uninstall_respects_command_separator() {
-        let cli = MultitoolCli::try_parse_from(["mikodex", "sandbox", "uninstall"]).expect("parse");
+        let cli = MultitoolCli::try_parse_from(["codex", "sandbox", "uninstall"]).expect("parse");
         assert!(matches!(
             cli.subcommand,
             Some(Subcommand::Sandbox(SandboxCommand {
@@ -3746,9 +3677,9 @@ enabled = true
         ));
 
         for args in [
-            vec!["mikodex", "sandbox", "--", "uninstall", "--help"],
+            vec!["codex", "sandbox", "--", "uninstall", "--help"],
             vec![
-                "mikodex",
+                "codex",
                 "sandbox",
                 "--profile",
                 "uninstall",
@@ -3770,7 +3701,7 @@ enabled = true
     #[test]
     fn sandbox_parses_permission_profile() {
         let cli = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "sandbox",
             "--permission-profile",
             ":workspace",
@@ -3791,7 +3722,7 @@ enabled = true
     #[test]
     fn sandbox_parses_legacy_permissions_profile_alias() {
         let cli = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "sandbox",
             "--permissions-profile",
             ":workspace",
@@ -3811,7 +3742,7 @@ enabled = true
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     #[test]
     fn sandbox_help_only_shows_singular_permission_profile() {
-        let help = help_from_args(&["mikodex", "sandbox", "--help"]);
+        let help = help_from_args(&["codex", "sandbox", "--help"]);
         assert!(help.contains("--permission-profile"), "{help}");
         assert!(!help.contains("--permissions-profile"), "{help}");
     }
@@ -3820,7 +3751,7 @@ enabled = true
     #[test]
     fn sandbox_parses_permissions_profile_short_alias() {
         let cli =
-            MultitoolCli::try_parse_from(["mikodex", "sandbox", "-P", ":workspace", "--", "echo"])
+            MultitoolCli::try_parse_from(["codex", "sandbox", "-P", ":workspace", "--", "echo"])
                 .expect("parse");
 
         let Some(Subcommand::Sandbox(SandboxCommand { host: command, .. })) = cli.subcommand else {
@@ -3835,7 +3766,7 @@ enabled = true
     #[test]
     fn sandbox_parses_config_profile() {
         let cli =
-            MultitoolCli::try_parse_from(["mikodex", "sandbox", "--profile", "work", "--", "echo"])
+            MultitoolCli::try_parse_from(["codex", "sandbox", "--profile", "work", "--", "echo"])
                 .expect("parse");
 
         let Some(Subcommand::Sandbox(SandboxCommand { host: command, .. })) = cli.subcommand else {
@@ -3849,7 +3780,7 @@ enabled = true
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     #[test]
     fn sandbox_rejects_explicit_profile_controls_without_profile() {
-        let err = MultitoolCli::try_parse_from(["mikodex", "sandbox", "-C", "/tmp"])
+        let err = MultitoolCli::try_parse_from(["codex", "sandbox", "-C", "/tmp"])
             .expect_err("parse should fail");
 
         assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
@@ -3858,7 +3789,7 @@ enabled = true
     #[test]
     fn plugin_marketplace_remove_parses_under_plugin() {
         let cli =
-            MultitoolCli::try_parse_from(["mikodex", "plugin", "marketplace", "remove", "debug"])
+            MultitoolCli::try_parse_from(["codex", "plugin", "marketplace", "remove", "debug"])
                 .expect("parse");
 
         assert!(matches!(cli.subcommand, Some(Subcommand::Plugin(_))));
@@ -3867,15 +3798,15 @@ enabled = true
     #[test]
     fn marketplace_no_longer_parses_at_top_level() {
         let add_result =
-            MultitoolCli::try_parse_from(["mikodex", "marketplace", "add", "owner/repo"]);
+            MultitoolCli::try_parse_from(["codex", "marketplace", "add", "owner/repo"]);
         assert!(add_result.is_err());
 
         let upgrade_result =
-            MultitoolCli::try_parse_from(["mikodex", "marketplace", "upgrade", "debug"]);
+            MultitoolCli::try_parse_from(["codex", "marketplace", "upgrade", "debug"]);
         assert!(upgrade_result.is_err());
 
         let remove_result =
-            MultitoolCli::try_parse_from(["mikodex", "marketplace", "remove", "debug"]);
+            MultitoolCli::try_parse_from(["codex", "marketplace", "remove", "debug"]);
         assert!(remove_result.is_err());
     }
 
@@ -3895,6 +3826,7 @@ enabled = true
                 thread_id,
                 thread_name: thread_name.map(str::to_string),
             }),
+            archive_warnings: Vec::new(),
             disconnect_info: None,
             update_action: None,
             exit_reason: ExitReason::UserRequested,
@@ -3907,6 +3839,7 @@ enabled = true
             token_usage: TokenUsage::default(),
             thread_id: None,
             resume_hint: None,
+            archive_warnings: Vec::new(),
             disconnect_info: None,
             update_action: None,
             exit_reason: ExitReason::UserRequested,
@@ -3925,7 +3858,7 @@ enabled = true
                 );
                 exit_info.disconnect_info = Some(codex_tui::DisconnectInfo {
                     command: vec![
-                        "mikodex".to_string(),
+                        "codex".to_string(),
                         "--remote".to_string(),
                         "wss://example.com:443/".to_string(),
                     ],
@@ -3942,8 +3875,8 @@ enabled = true
             vec![
                 "Disconnected from this task. Any running work continues.",
                 "To reconnect, run:",
-                "  mikodex --remote wss://example.com:443/ --remote-auth-token-env CODEX_REMOTE_TOKEN resume 123e4567-e89b-12d3-a456-426614174000",
-                "Stop the current turn: run mikodex --remote wss://example.com:443/ --remote-auth-token-env CODEX_REMOTE_TOKEN agents, select this task, and press ctrl + x.",
+                "  codex --remote wss://example.com:443/ --remote-auth-token-env CODEX_REMOTE_TOKEN resume 123e4567-e89b-12d3-a456-426614174000",
+                "Stop the current turn: run codex --remote wss://example.com:443/ --remote-auth-token-env CODEX_REMOTE_TOKEN agents, select this task, and press ctrl + x.",
                 "Token usage so far: total=2 input=0 output=2",
             ]
         );
@@ -3967,6 +3900,7 @@ enabled = true
             token_usage: TokenUsage::default(),
             thread_id: Some(ThreadId::from_string("123e4567-e89b-12d3-a456-426614174000").unwrap()),
             resume_hint: None,
+            archive_warnings: Vec::new(),
             disconnect_info: None,
             update_action: None,
             exit_reason: ExitReason::Fatal("boom".to_string()),
@@ -3991,7 +3925,7 @@ enabled = true
             vec![
                 "Token usage: total=2 input=0 output=2".to_string(),
                 "To continue this session, run:".to_string(),
-                "  mikodex resume 123e4567-e89b-12d3-a456-426614174000".to_string(),
+                "  codex resume 123e4567-e89b-12d3-a456-426614174000".to_string(),
             ]
         );
     }
@@ -4006,7 +3940,7 @@ enabled = true
                 insta::assert_snapshot!(lines.join("\n"), @"
                 Token usage: total=2 input=0 output=2
                 To continue this session, run:
-                  mikodex resume 123e4567-e89b-12d3-a456-426614174000
+                  codex resume 123e4567-e89b-12d3-a456-426614174000
                 ");
             }
         }
@@ -4024,7 +3958,7 @@ enabled = true
             vec![
                 "Token usage: total=2 input=0 output=2",
                 "To continue this session, run:",
-                "  \u{1b}[36mmikodex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
+                "  \u{1b}[36mcodex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
             ]
         );
     }
@@ -4039,8 +3973,8 @@ enabled = true
         insta::assert_snapshot!(lines.join("\n"), @"
         Token usage: total=2 input=0 output=2
         To continue this session, run:
-          mikodex resume 123e4567-e89b-12d3-a456-426614174000
-        Or run mikodex resume and select my-thread.
+          codex resume 123e4567-e89b-12d3-a456-426614174000
+        Or run codex resume and select my-thread.
         ");
     }
 
@@ -4056,8 +3990,8 @@ enabled = true
             vec![
                 "Token usage: total=2 input=0 output=2",
                 "To continue this session, run:",
-                "  \u{1b}[36mmikodex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
-                "Or run \u{1b}[36mmikodex resume\u{1b}[39m and select \u{1b}[36mmy-thread\u{1b}[39m.",
+                "  \u{1b}[36mcodex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
+                "Or run \u{1b}[36mcodex resume\u{1b}[39m and select \u{1b}[36mmy-thread\u{1b}[39m.",
             ]
         );
     }
@@ -4065,7 +3999,7 @@ enabled = true
     #[test]
     fn resume_model_flag_applies_when_no_root_flags() {
         let interactive =
-            finalize_resume_from_args(["mikodex", "resume", "-m", "gpt-5.1-test"].as_ref());
+            finalize_resume_from_args(["codex", "resume", "-m", "gpt-5.1-test"].as_ref());
 
         assert_eq!(interactive.model.as_deref(), Some("gpt-5.1-test"));
         assert!(interactive.resume_picker);
@@ -4080,8 +4014,8 @@ enabled = true
             ("fork", finalize_fork_from_args as fn(&[&str]) -> TuiCli),
         ] {
             for args in [
-                ["mikodex", "--no-daemon", command, "--last"],
-                ["mikodex", command, "--last", "--no-daemon"],
+                ["codex", "--no-daemon", command, "--last"],
+                ["codex", command, "--last", "--no-daemon"],
             ] {
                 assert!(finalize(&args).no_daemon);
             }
@@ -4094,15 +4028,15 @@ enabled = true
             ("resume", finalize_resume_from_args as fn(&[&str]) -> TuiCli),
             ("fork", finalize_fork_from_args as fn(&[&str]) -> TuiCli),
         ] {
-            assert!(finalize(&["mikodex", command, "--no-alt-screen"]).no_alt_screen);
-            assert!(finalize(&["mikodex", "--no-alt-screen", command]).no_alt_screen);
-            assert!(!finalize(&["mikodex", command]).no_alt_screen);
+            assert!(finalize(&["codex", command, "--no-alt-screen"]).no_alt_screen);
+            assert!(finalize(&["codex", "--no-alt-screen", command]).no_alt_screen);
+            assert!(!finalize(&["codex", command]).no_alt_screen);
         }
     }
 
     #[test]
     fn resume_picker_logic_none_and_not_last() {
-        let interactive = finalize_resume_from_args(["mikodex", "resume"].as_ref());
+        let interactive = finalize_resume_from_args(["codex", "resume"].as_ref());
         assert!(interactive.resume_picker);
         assert!(!interactive.resume_last);
         assert_eq!(interactive.resume_session_id, None);
@@ -4111,7 +4045,7 @@ enabled = true
 
     #[test]
     fn resume_picker_logic_last() {
-        let interactive = finalize_resume_from_args(["mikodex", "resume", "--last"].as_ref());
+        let interactive = finalize_resume_from_args(["codex", "resume", "--last"].as_ref());
         assert!(!interactive.resume_picker);
         assert!(interactive.resume_last);
         assert_eq!(interactive.resume_session_id, None);
@@ -4121,7 +4055,7 @@ enabled = true
     #[test]
     fn resume_last_accepts_prompt_positional() {
         let interactive = finalize_resume_from_args(
-            ["mikodex", "resume", "--last", "/compact focus on auth"].as_ref(),
+            ["codex", "resume", "--last", "/compact focus on auth"].as_ref(),
         );
 
         assert!(!interactive.resume_picker);
@@ -4136,7 +4070,7 @@ enabled = true
     #[test]
     fn resume_last_rejects_explicit_session_and_prompt() {
         let err =
-            MultitoolCli::try_parse_from(["mikodex", "resume", "--last", "1234", "continue here"])
+            MultitoolCli::try_parse_from(["codex", "resume", "--last", "1234", "continue here"])
                 .expect_err("--last with an explicit session and prompt should be rejected");
 
         assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
@@ -4144,7 +4078,7 @@ enabled = true
 
     #[test]
     fn resume_picker_logic_with_session_id() {
-        let interactive = finalize_resume_from_args(["mikodex", "resume", "1234"].as_ref());
+        let interactive = finalize_resume_from_args(["codex", "resume", "1234"].as_ref());
         assert!(!interactive.resume_picker);
         assert!(!interactive.resume_last);
         assert_eq!(interactive.resume_session_id.as_deref(), Some("1234"));
@@ -4154,7 +4088,7 @@ enabled = true
     #[test]
     fn resume_with_session_id_accepts_prompt_positional() {
         let interactive =
-            finalize_resume_from_args(["mikodex", "resume", "1234", "continue here"].as_ref());
+            finalize_resume_from_args(["codex", "resume", "1234", "continue here"].as_ref());
 
         assert!(!interactive.resume_picker);
         assert!(!interactive.resume_last);
@@ -4164,7 +4098,7 @@ enabled = true
 
     #[test]
     fn resume_all_flag_sets_show_all() {
-        let interactive = finalize_resume_from_args(["mikodex", "resume", "--all"].as_ref());
+        let interactive = finalize_resume_from_args(["codex", "resume", "--all"].as_ref());
         assert!(interactive.resume_picker);
         assert!(interactive.resume_show_all);
     }
@@ -4172,7 +4106,7 @@ enabled = true
     #[test]
     fn resume_include_non_interactive_flag_sets_source_filter_override() {
         let interactive =
-            finalize_resume_from_args(["mikodex", "resume", "--include-non-interactive"].as_ref());
+            finalize_resume_from_args(["codex", "resume", "--include-non-interactive"].as_ref());
 
         assert!(interactive.resume_picker);
         assert!(interactive.resume_include_non_interactive);
@@ -4182,7 +4116,7 @@ enabled = true
     fn resume_merges_option_flags() {
         let interactive = finalize_resume_from_args(
             [
-                "mikodex",
+                "codex",
                 "resume",
                 "sid",
                 "--oss",
@@ -4239,7 +4173,7 @@ enabled = true
     fn resume_merges_dangerously_bypass_flag() {
         let interactive = finalize_resume_from_args(
             [
-                "mikodex",
+                "codex",
                 "resume",
                 "--dangerously-bypass-approvals-and-sandbox",
             ]
@@ -4254,7 +4188,7 @@ enabled = true
     #[test]
     fn resume_merges_bypass_hook_trust_flag() {
         let interactive = finalize_resume_from_args(
-            ["mikodex", "resume", "--dangerously-bypass-hook-trust"].as_ref(),
+            ["codex", "resume", "--dangerously-bypass-hook-trust"].as_ref(),
         );
 
         assert!(interactive.bypass_hook_trust);
@@ -4265,7 +4199,7 @@ enabled = true
 
     #[test]
     fn fork_picker_logic_none_and_not_last() {
-        let interactive = finalize_fork_from_args(["mikodex", "fork"].as_ref());
+        let interactive = finalize_fork_from_args(["codex", "fork"].as_ref());
         assert!(interactive.fork_picker);
         assert!(!interactive.fork_last);
         assert_eq!(interactive.fork_session_id, None);
@@ -4274,7 +4208,7 @@ enabled = true
 
     #[test]
     fn fork_picker_logic_last() {
-        let interactive = finalize_fork_from_args(["mikodex", "fork", "--last"].as_ref());
+        let interactive = finalize_fork_from_args(["codex", "fork", "--last"].as_ref());
         assert!(!interactive.fork_picker);
         assert!(interactive.fork_last);
         assert_eq!(interactive.fork_session_id, None);
@@ -4284,7 +4218,7 @@ enabled = true
     #[test]
     fn fork_last_accepts_prompt_positional() {
         let interactive =
-            finalize_fork_from_args(["mikodex", "fork", "--last", "/compact focus on auth"].as_ref());
+            finalize_fork_from_args(["codex", "fork", "--last", "/compact focus on auth"].as_ref());
 
         assert!(!interactive.fork_picker);
         assert!(interactive.fork_last);
@@ -4298,7 +4232,7 @@ enabled = true
     #[test]
     fn fork_last_rejects_explicit_session_and_prompt() {
         let err =
-            MultitoolCli::try_parse_from(["mikodex", "fork", "--last", "1234", "continue here"])
+            MultitoolCli::try_parse_from(["codex", "fork", "--last", "1234", "continue here"])
                 .expect_err("--last with an explicit session and prompt should be rejected");
 
         assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
@@ -4306,7 +4240,7 @@ enabled = true
 
     #[test]
     fn fork_picker_logic_with_session_id() {
-        let interactive = finalize_fork_from_args(["mikodex", "fork", "1234"].as_ref());
+        let interactive = finalize_fork_from_args(["codex", "fork", "1234"].as_ref());
         assert!(!interactive.fork_picker);
         assert!(!interactive.fork_last);
         assert_eq!(interactive.fork_session_id.as_deref(), Some("1234"));
@@ -4316,7 +4250,7 @@ enabled = true
     #[test]
     fn fork_with_session_id_accepts_prompt_positional() {
         let interactive =
-            finalize_fork_from_args(["mikodex", "fork", "1234", "continue here"].as_ref());
+            finalize_fork_from_args(["codex", "fork", "1234", "continue here"].as_ref());
 
         assert!(!interactive.fork_picker);
         assert!(!interactive.fork_last);
@@ -4326,14 +4260,14 @@ enabled = true
 
     #[test]
     fn fork_all_flag_sets_show_all() {
-        let interactive = finalize_fork_from_args(["mikodex", "fork", "--all"].as_ref());
+        let interactive = finalize_fork_from_args(["codex", "fork", "--all"].as_ref());
         assert!(interactive.fork_picker);
         assert!(interactive.fork_show_all);
     }
 
     #[test]
     fn app_server_analytics_default_disabled_without_flag() {
-        let app_server = app_server_from_args(["mikodex", "app-server"].as_ref());
+        let app_server = app_server_from_args(["codex", "app-server"].as_ref());
         assert!(!app_server.analytics_default_enabled);
         assert!(!app_server.remote_control);
         assert_eq!(
@@ -4344,24 +4278,24 @@ enabled = true
 
     #[test]
     fn app_server_remote_control_startup_flag_enables_remote_control() {
-        let enabled = app_server_from_args(["mikodex", "app-server", "--remote-control"].as_ref());
+        let enabled = app_server_from_args(["codex", "app-server", "--remote-control"].as_ref());
         assert!(enabled.remote_control);
     }
 
     #[test]
     fn app_server_analytics_default_enabled_with_flag() {
         let app_server =
-            app_server_from_args(["mikodex", "app-server", "--analytics-default-enabled"].as_ref());
+            app_server_from_args(["codex", "app-server", "--analytics-default-enabled"].as_ref());
         assert!(app_server.analytics_default_enabled);
     }
 
     #[test]
     fn strict_config_parses_for_supported_commands() {
-        let cli = MultitoolCli::try_parse_from(["mikodex", "--strict-config"]).expect("parse");
+        let cli = MultitoolCli::try_parse_from(["codex", "--strict-config"]).expect("parse");
         assert!(cli.interactive.strict_config);
 
         let cli = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "review",
             "--strict-config",
             "--trust",
@@ -4377,7 +4311,7 @@ enabled = true
             }))
         );
 
-        let cli = MultitoolCli::try_parse_from(["mikodex", "exec-server", "--strict-config"])
+        let cli = MultitoolCli::try_parse_from(["codex", "exec-server", "--strict-config"])
             .expect("parse");
         assert_matches!(
             cli.subcommand,
@@ -4391,7 +4325,7 @@ enabled = true
     #[test]
     fn exec_server_forward_parses_shared_remote_options() {
         let cli = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "exec-server",
             "forward",
             "--connect",
@@ -4437,7 +4371,7 @@ enabled = true
             ],
         ] {
             assert!(
-                MultitoolCli::try_parse_from(["mikodex", "exec-server"].into_iter().chain(args))
+                MultitoolCli::try_parse_from(["codex", "exec-server"].into_iter().chain(args))
                     .is_err()
             );
         }
@@ -4445,7 +4379,7 @@ enabled = true
 
     #[test]
     fn root_strict_config_is_supported_for_exec_server() {
-        let cli = MultitoolCli::try_parse_from(["mikodex", "--strict-config", "exec-server"])
+        let cli = MultitoolCli::try_parse_from(["codex", "--strict-config", "exec-server"])
             .expect("parse");
 
         reject_root_strict_config_for_subcommand(cli.interactive.strict_config, &cli.subcommand)
@@ -4454,7 +4388,7 @@ enabled = true
 
     #[test]
     fn root_strict_config_is_rejected_for_unsupported_subcommands() {
-        let cli = MultitoolCli::try_parse_from(["mikodex", "--strict-config", "mcp", "list"])
+        let cli = MultitoolCli::try_parse_from(["codex", "--strict-config", "mcp", "list"])
             .expect("parse");
         let err = reject_root_strict_config_for_subcommand(
             cli.interactive.strict_config,
@@ -4464,10 +4398,10 @@ enabled = true
 
         assert_eq!(
             err.to_string(),
-            "`--strict-config` is not supported for `mikodex mcp`"
+            "`--strict-config` is not supported for `codex mcp`"
         );
 
-        let cli = MultitoolCli::try_parse_from(["mikodex", "--strict-config", "remote-control"])
+        let cli = MultitoolCli::try_parse_from(["codex", "--strict-config", "remote-control"])
             .expect("parse");
         let err = reject_root_strict_config_for_subcommand(
             cli.interactive.strict_config,
@@ -4477,14 +4411,14 @@ enabled = true
 
         assert_eq!(
             err.to_string(),
-            "`--strict-config` is not supported for `mikodex remote-control`"
+            "`--strict-config` is not supported for `codex remote-control`"
         );
     }
 
     #[test]
     fn app_server_subcommands_reject_strict_config() {
         let app_server =
-            app_server_from_args(["mikodex", "app-server", "--strict-config", "proxy"].as_ref());
+            app_server_from_args(["codex", "app-server", "--strict-config", "proxy"].as_ref());
         let err = reject_strict_config_for_app_server_subcommand(
             app_server.strict_config,
             app_server.subcommand.as_ref(),
@@ -4493,13 +4427,13 @@ enabled = true
 
         assert_eq!(
             err.to_string(),
-            "`--strict-config` is not supported for `mikodex app-server proxy`"
+            "`--strict-config` is not supported for `codex app-server proxy`"
         );
     }
 
     #[test]
     fn reject_remote_flag_for_remote_control() {
-        let cli = MultitoolCli::try_parse_from(["mikodex", "--remote", "unix://", "remote-control"])
+        let cli = MultitoolCli::try_parse_from(["codex", "--remote", "unix://", "remote-control"])
             .expect("parse");
         let Some(Subcommand::RemoteControl(remote_control)) = &cli.subcommand else {
             panic!("expected remote-control subcommand");
@@ -4518,7 +4452,7 @@ enabled = true
 
     #[test]
     fn remote_control_pair_parses() {
-        let cli = MultitoolCli::try_parse_from(["mikodex", "remote-control", "pair"]).expect("parse");
+        let cli = MultitoolCli::try_parse_from(["codex", "remote-control", "pair"]).expect("parse");
         let Some(Subcommand::RemoteControl(remote_control)) = &cli.subcommand else {
             panic!("expected remote-control subcommand");
         };
@@ -4527,7 +4461,7 @@ enabled = true
 
     #[test]
     fn remote_flag_parses_for_interactive_root() {
-        let cli = MultitoolCli::try_parse_from(["mikodex", "--remote", "unix://codex.sock"])
+        let cli = MultitoolCli::try_parse_from(["codex", "--remote", "unix://codex.sock"])
             .expect("parse");
         assert_eq!(cli.remote.remote.as_deref(), Some("unix://codex.sock"));
     }
@@ -4535,7 +4469,7 @@ enabled = true
     #[test]
     fn remote_auth_token_env_flag_parses_for_interactive_root() {
         let cli = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "--remote-auth-token-env",
             "CODEX_REMOTE_AUTH_TOKEN",
             "--remote",
@@ -4551,7 +4485,7 @@ enabled = true
     #[test]
     fn remote_flag_parses_for_resume_subcommand() {
         let cli =
-            MultitoolCli::try_parse_from(["mikodex", "resume", "--remote", "unix://codex.sock"])
+            MultitoolCli::try_parse_from(["codex", "resume", "--remote", "unix://codex.sock"])
                 .expect("parse");
         let Subcommand::Resume(ResumeCommand { remote, .. }) =
             cli.subcommand.expect("resume present")
@@ -4564,7 +4498,7 @@ enabled = true
     #[test]
     fn agents_subcommand_accepts_remote_session_options() {
         let cli = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "agents",
             "--remote",
             "ws://127.0.0.1:4500",
@@ -4638,38 +4572,10 @@ enabled = true
     }
 
     #[test]
-    fn read_remote_auth_token_from_env_var_reports_missing_values() {
-        let err = read_remote_auth_token_from_env_var_with("CODEX_REMOTE_AUTH_TOKEN", |_| {
-            Err(std::env::VarError::NotPresent)
-        })
-        .expect_err("missing env vars should be rejected");
-        assert!(err.to_string().contains("is not set"));
-    }
-
-    #[test]
-    fn read_remote_auth_token_from_env_var_trims_values() {
-        let auth_token =
-            read_remote_auth_token_from_env_var_with("CODEX_REMOTE_AUTH_TOKEN", |_| {
-                Ok("  bearer-token  ".to_string())
-            })
-            .expect("env var should parse");
-        assert_eq!(auth_token, "bearer-token");
-    }
-
-    #[test]
-    fn read_remote_auth_token_from_env_var_rejects_empty_values() {
-        let err = read_remote_auth_token_from_env_var_with("CODEX_REMOTE_AUTH_TOKEN", |_| {
-            Ok(" \n\t ".to_string())
-        })
-        .expect_err("empty env vars should be rejected");
-        assert!(err.to_string().contains("is empty"));
-    }
-
-    #[test]
     fn app_server_grpc_code_mode_host_url_parses_independently_of_listen_transport() {
         let app_server = app_server_from_args(
             [
-                "mikodex",
+                "codex",
                 "app-server",
                 "--code-mode-host",
                 "https://example.test",
@@ -4703,7 +4609,7 @@ enabled = true
             "http://example.test/?token=secret",
         ] {
             let error =
-                MultitoolCli::try_parse_from(["mikodex", "app-server", "--code-mode-host", endpoint])
+                MultitoolCli::try_parse_from(["codex", "app-server", "--code-mode-host", endpoint])
                     .expect_err("invalid code-mode host endpoint should fail argument parsing");
 
             assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
@@ -4716,7 +4622,7 @@ enabled = true
     #[test]
     fn app_server_listen_websocket_url_parses() {
         let app_server = app_server_from_args(
-            ["mikodex", "app-server", "--listen", "ws://127.0.0.1:4500"].as_ref(),
+            ["codex", "app-server", "--listen", "ws://127.0.0.1:4500"].as_ref(),
         );
         assert_eq!(
             app_server.listen,
@@ -4729,7 +4635,7 @@ enabled = true
     #[test]
     fn app_server_listen_stdio_url_parses() {
         let app_server =
-            app_server_from_args(["mikodex", "app-server", "--listen", "stdio://"].as_ref());
+            app_server_from_args(["codex", "app-server", "--listen", "stdio://"].as_ref());
         assert_eq!(
             app_server.listen,
             codex_app_server::AppServerTransport::Stdio
@@ -4738,14 +4644,14 @@ enabled = true
 
     #[test]
     fn app_server_stdio_flag_parses() {
-        let app_server = app_server_from_args(["mikodex", "app-server", "--stdio"].as_ref());
+        let app_server = app_server_from_args(["codex", "app-server", "--stdio"].as_ref());
         assert!(app_server.stdio);
     }
 
     #[test]
     fn app_server_stdio_flag_conflicts_with_listen() {
         let err = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "app-server",
             "--stdio",
             "--listen",
@@ -4758,7 +4664,7 @@ enabled = true
     #[test]
     fn app_server_listen_unix_socket_url_parses() {
         let app_server =
-            app_server_from_args(["mikodex", "app-server", "--listen", "unix://"].as_ref());
+            app_server_from_args(["codex", "app-server", "--listen", "unix://"].as_ref());
         assert_eq!(
             app_server.listen,
             codex_app_server::AppServerTransport::UnixSocket {
@@ -4770,7 +4676,7 @@ enabled = true
     #[test]
     fn app_server_listen_unix_socket_path_parses() {
         let app_server = app_server_from_args(
-            ["mikodex", "app-server", "--listen", "unix:///tmp/codex.sock"].as_ref(),
+            ["codex", "app-server", "--listen", "unix:///tmp/codex.sock"].as_ref(),
         );
         assert_eq!(
             app_server.listen,
@@ -4783,20 +4689,20 @@ enabled = true
 
     #[test]
     fn app_server_listen_off_parses() {
-        let app_server = app_server_from_args(["mikodex", "app-server", "--listen", "off"].as_ref());
+        let app_server = app_server_from_args(["codex", "app-server", "--listen", "off"].as_ref());
         assert_eq!(app_server.listen, codex_app_server::AppServerTransport::Off);
     }
 
     #[test]
     fn app_server_listen_invalid_url_fails_to_parse() {
         let parse_result =
-            MultitoolCli::try_parse_from(["mikodex", "app-server", "--listen", "http://foo"]);
+            MultitoolCli::try_parse_from(["codex", "app-server", "--listen", "http://foo"]);
         assert!(parse_result.is_err());
     }
 
     #[test]
     fn app_server_proxy_subcommand_parses() {
-        let app_server = app_server_from_args(["mikodex", "app-server", "proxy"].as_ref());
+        let app_server = app_server_from_args(["codex", "app-server", "proxy"].as_ref());
         assert!(matches!(
             app_server.subcommand,
             Some(AppServerSubcommand::Proxy(AppServerProxyCommand {
@@ -4810,7 +4716,7 @@ enabled = true
         assert!(matches!(
             app_server_from_args(
                 [
-                    "mikodex",
+                    "codex",
                     "app-server",
                     "daemon",
                     "bootstrap",
@@ -4826,20 +4732,20 @@ enabled = true
             }))
         ));
         assert!(matches!(
-            app_server_from_args(["mikodex", "app-server", "daemon", "start"].as_ref()).subcommand,
+            app_server_from_args(["codex", "app-server", "daemon", "start"].as_ref()).subcommand,
             Some(AppServerSubcommand::Daemon(AppServerDaemonCommand {
                 subcommand: AppServerDaemonSubcommand::Start
             }))
         ));
         assert!(matches!(
-            app_server_from_args(["mikodex", "app-server", "daemon", "restart"].as_ref()).subcommand,
+            app_server_from_args(["codex", "app-server", "daemon", "restart"].as_ref()).subcommand,
             Some(AppServerSubcommand::Daemon(AppServerDaemonCommand {
                 subcommand: AppServerDaemonSubcommand::Restart
             }))
         ));
         assert!(matches!(
             app_server_from_args(
-                ["mikodex", "app-server", "daemon", "enable-remote-control"].as_ref()
+                ["codex", "app-server", "daemon", "enable-remote-control"].as_ref()
             )
             .subcommand,
             Some(AppServerSubcommand::Daemon(AppServerDaemonCommand {
@@ -4848,7 +4754,7 @@ enabled = true
         ));
         assert!(matches!(
             app_server_from_args(
-                ["mikodex", "app-server", "daemon", "disable-remote-control"].as_ref()
+                ["codex", "app-server", "daemon", "disable-remote-control"].as_ref()
             )
             .subcommand,
             Some(AppServerSubcommand::Daemon(AppServerDaemonCommand {
@@ -4856,13 +4762,13 @@ enabled = true
             }))
         ));
         assert!(matches!(
-            app_server_from_args(["mikodex", "app-server", "daemon", "stop"].as_ref()).subcommand,
+            app_server_from_args(["codex", "app-server", "daemon", "stop"].as_ref()).subcommand,
             Some(AppServerSubcommand::Daemon(AppServerDaemonCommand {
                 subcommand: AppServerDaemonSubcommand::Stop
             }))
         ));
         assert!(matches!(
-            app_server_from_args(["mikodex", "app-server", "daemon", "version"].as_ref()).subcommand,
+            app_server_from_args(["codex", "app-server", "daemon", "version"].as_ref()).subcommand,
             Some(AppServerSubcommand::Daemon(AppServerDaemonCommand {
                 subcommand: AppServerDaemonSubcommand::Version
             }))
@@ -4872,7 +4778,7 @@ enabled = true
     #[test]
     fn app_server_proxy_sock_path_parses() {
         let app_server =
-            app_server_from_args(["mikodex", "app-server", "proxy", "--sock", "codex.sock"].as_ref());
+            app_server_from_args(["codex", "app-server", "proxy", "--sock", "codex.sock"].as_ref());
         let Some(AppServerSubcommand::Proxy(proxy)) = app_server.subcommand else {
             panic!("expected proxy subcommand");
         };
@@ -4915,7 +4821,7 @@ enabled = true
     fn app_server_capability_token_flags_parse() {
         let app_server = app_server_from_args(
             [
-                "mikodex",
+                "codex",
                 "app-server",
                 "--ws-auth",
                 "capability-token",
@@ -4938,7 +4844,7 @@ enabled = true
     fn app_server_signed_bearer_flags_parse() {
         let app_server = app_server_from_args(
             [
-                "mikodex",
+                "codex",
                 "app-server",
                 "--ws-auth",
                 "signed-bearer-token",
@@ -4969,7 +4875,7 @@ enabled = true
     #[test]
     fn app_server_rejects_removed_insecure_non_loopback_flag() {
         let parse_result = MultitoolCli::try_parse_from([
-            "mikodex",
+            "codex",
             "app-server",
             "--allow-unauthenticated-non-loopback-ws",
         ]);
@@ -4978,7 +4884,7 @@ enabled = true
 
     #[test]
     fn features_enable_parses_feature_name() {
-        let cli = MultitoolCli::try_parse_from(["mikodex", "features", "enable", "unified_exec"])
+        let cli = MultitoolCli::try_parse_from(["codex", "features", "enable", "unified_exec"])
             .expect("parse should succeed");
         let Some(Subcommand::Features(FeaturesCli { sub })) = cli.subcommand else {
             panic!("expected features subcommand");
@@ -4991,7 +4897,7 @@ enabled = true
 
     #[test]
     fn features_disable_parses_feature_name() {
-        let cli = MultitoolCli::try_parse_from(["mikodex", "features", "disable", "shell_tool"])
+        let cli = MultitoolCli::try_parse_from(["codex", "features", "disable", "shell_tool"])
             .expect("parse should succeed");
         let Some(Subcommand::Features(FeaturesCli { sub })) = cli.subcommand else {
             panic!("expected features subcommand");
@@ -5100,7 +5006,7 @@ enabled = true
     }
 
     fn strict_config_feature_toggle_error(args: &[&str]) -> anyhow::Error {
-        let cli_args = std::iter::once("mikodex")
+        let cli_args = std::iter::once("codex")
             .chain(std::iter::once("--strict-config"))
             .chain(args.iter().copied());
         let cli = MultitoolCli::try_parse_from(cli_args).expect("parse should succeed");
