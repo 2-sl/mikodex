@@ -25,8 +25,8 @@ state with an installed Codex.
   side chat, and command reference. The right reference scrolls with Up and
   Down when focused. Enter in the Agent Command Center still opens the selected
   session; arrows keep editing a nonempty draft while chat has focus.
-- **Resizable sidebars.** Drag either dock divider with the mouse, or use the
-  keyboard controls below. Mikodex saves each width in your user config.
+- **Resizable sidebars and Agent Command Center details pane.** Drag dock dividers with the mouse, or use the
+  keyboard controls below. The Agent Command Center details pane also has a mouse-draggable divider. Mikodex saves each width in your user config.
 - **Korean keyboard input for slash commands.** Slash commands work when typed
   with a Korean 2-set keyboard layout active. For example, `/벼ㅑㅅ` and `/ㄷ턋`
   are accepted as `/quit` and `/exit`; the same conversion works for other
@@ -85,8 +85,8 @@ The updater compares the published package SHA-256, so it notices when a new
 ZIP replaces the rolling release asset even if its version number is unchanged.
 It verifies the release checksum and the complete package before installing.
 Windows keeps a running executable locked, so a helper finishes the package swap
-after the update command exits and shows a confirmation dialog when it is done.
-Start Mikodex again after that confirmation. This updater currently supports the
+after the update command exits, without showing a completion dialog.
+Start Mikodex again after the update command exits. This updater currently supports the
 canonical Windows x64 package layout.
 
 ## Resizing the sidebars

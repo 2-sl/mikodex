@@ -171,7 +171,7 @@ pub struct RolloutTraceToml {
     pub max_bytes: Option<u64>,
 }
 
-/// Base config deserialized from ~/.codex/config.toml.
+/// Base config deserialized from the active Codex or Mikodex home config.toml.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigToml {
@@ -385,7 +385,7 @@ pub struct ConfigToml {
     pub rollout_trace: Option<RolloutTraceToml>,
 
     /// Directory where Codex stores the SQLite state DB.
-    /// Defaults to `$CODEX_SQLITE_HOME` when set. Otherwise uses `$CODEX_HOME`.
+    /// Defaults to the app-specific SQLite home override when set. Otherwise uses the active Codex or Mikodex home directory.
     pub sqlite_home: Option<AbsolutePathBuf>,
 
     /// Directory for log files. Setting this value explicitly also routes the

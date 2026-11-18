@@ -667,7 +667,7 @@ impl App {
                         command_scroll,
                         self.agents_overview.command_reference_focused,
                     );
-            }
+                }
             }
             self.paint_centered_dialog(frame);
         })?;
