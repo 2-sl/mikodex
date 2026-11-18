@@ -1269,6 +1269,7 @@ impl App {
                     });
                 }
             }
+        }
         if let TuiEvent::Mouse(mouse) = &event
             && mouse.kind == MouseEventKind::Down(MouseButton::Left)
             && let Some(dock) = agents_overview_dock::layout(self, tui.terminal.viewport_area)
