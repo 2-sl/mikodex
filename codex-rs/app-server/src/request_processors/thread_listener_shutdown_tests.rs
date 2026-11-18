@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-//! Checks runtime release and notification delivery around listener shutdown.
+//! Checks runtime release and notification delivery across listener shutdown and reconnect.
 
 use super::super::thread_goal_processor::ThreadGoalRequestProcessor;
 use super::super::thread_processor::ThreadRequestProcessor;
@@ -23,36 +23,32 @@ use codex_app_server_protocol::ThreadUnsubscribeParams;
 use codex_app_server_protocol::ThreadUnsubscribeResponse;
 use codex_app_server_protocol::ThreadUnsubscribeStatus;
 use codex_arg0::Arg0DispatchPaths;
+use codex_core::context::ContextualUserFragment;
+use codex_core::context::InternalContextSource;
+use codex_core::context::InternalModelContextFragment;
 use codex_goal_extension::GoalService;
 use codex_login::AuthManager;
+use codex_protocol::user_input::UserInput;
 use codex_thread_store::PersistContext;
+use core_test_support::responses;
+use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
+use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use std::collections::HashSet;
 use test_case::test_case;
 use tokio::sync::mpsc;
 
-#[test_case(true; "listener attached before shutdown")]
-#[test_case(false; "listener attached after shutdown")]
-#[tokio::test]
-async fn listener_shutdown_releases_runtime_and_preserves_other_subscribers(
-    attach_before_shutdown: bool,
-) -> Result<()> {
-    let server = wiremock::MockServer::start().await;
-    let test = test_codex().build_with_auto_env(&server).await?;
-    let thread_id = test.session_configured.thread_id;
-    test.thread_store
-        .persist_thread(thread_id, PersistContext::Standard)
-        .await?;
-    let thread = test.codex;
-    let runtime = Arc::downgrade(&thread);
+async fn test_processor(
+    test: &TestCodex,
+) -> Result<(ThreadRequestProcessor, mpsc::Receiver<OutgoingEnvelope>)> {
     let config = Arc::new(test.config.clone());
     let auth =
         AuthManager::shared_from_config(config.as_ref(), /*enable_codex_api_key_env*/ false)
             .await?;
     let config_manager =
         ConfigManager::without_managed_config_for_tests(config.codex_home.to_path_buf());
-    let (outgoing_tx, mut outgoing_rx) = mpsc::channel(/*buffer*/ 16);
+    let (outgoing_tx, outgoing_rx) = mpsc::channel(/*buffer*/ 16);
     let outgoing = Arc::new(OutgoingMessageSender::new(
         outgoing_tx,
         AnalyticsEventsClient::disabled(),
@@ -88,7 +84,7 @@ async fn listener_shutdown_releases_runtime_and_preserves_other_subscribers(
         thread_goal_processor,
         /*state_db*/ None,
         /*log_db*/ None,
-        skills_watcher.clone(),
+        skills_watcher,
         /*turn_cost_worker*/ None,
         Vec::new(),
         Arc::new(SampleResponseRegistry::default()),
@@ -461,7 +457,7 @@ async fn listener_shutdown_releases_runtime_and_preserves_other_subscribers(
     })
     .await;
     thread_state_manager.clear_all_listeners().await;
-    skills_watcher.shutdown();
+    processor.skills_watcher.shutdown();
 
     let resume = shutdown_result.context("terminal listener did not release or relay")?;
     assert_eq!(

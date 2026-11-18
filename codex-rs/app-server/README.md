@@ -56,17 +56,21 @@ targets only the existing nonstreaming method. A JavaScript client can connect a
 
 # Thread list ID filters
 
-`thread/list` accepts `excludedThreadIds`, an optional array of up to 100
-thread ID strings. Omitted, null, or empty lists do not exclude anything.
-Invalid IDs or more than 100 entries return JSON-RPC error `-32602`;
-duplicates count toward that bound and no entries are silently truncated.
+`thread/list` accepts `includedThreadIds` to list specific saved threads and
+`excludedThreadIds` to omit them. Each accepts up to 100 thread ID strings.
+Omitting an array or sending null leaves that filter unrestricted. An empty
+inclusion matches nothing. An empty exclusion removes nothing. Invalid IDs
+or more than 100 entries in either array return JSON-RPC error `-32602`.
+Duplicates count toward each bound.
 
-Exclusions apply before the returned result limit, along with the existing
-source, provider, archive, project, section and cwd filters. Pages refill to
-the requested limit (at most 100) unless history is exhausted. Send the same
-exclusions and filters with each returned cursor. Clients that display a saved
-manual order can load those summaries separately, then exclude the entire saved
-ID set when listing the remainder. This field does not save or sort that order.
+Both ID filters apply alongside the other list filters, including `currentAccountOnly`,
+before pagination. Pages fill to the requested limit (up to 100) or exhaust the matches.
+Exclusions win when an ID appears in both arrays. Send the same filters with
+each cursor. The regular list sort determines the order of matches.
+The local store uses indexed metadata when an inclusion array is present, even
+when `useStateDbOnly` is false. IDs absent from its index produce no match.
+Older App Servers ignore `includedThreadIds`. Clients that reconcile saved IDs
+must establish server support before treating missing matches as removals.
 
 DB-only requests (`useStateDbOnly: true`) return JSON-RPC error `-32603`
 when the local state DB cannot serve the query, even for an empty cwd filter.
@@ -142,15 +146,17 @@ denial limit, and interrupted status; neither emits a separate `Error` event.
 
 # Model catalog provider requirements
 
-`model/list` accepts an optional `modelProvider` to list models for a configured provider
-other than the startup default. For example, `{"modelProvider": "my_gateway"}` returns that
-provider's models after the user's default changes. Omit it to retain the startup provider
-and caching behavior. Explicit selections use the provider definitions loaded at startup. Restart the server
-to pick up edits to those definitions. An unknown selector returns JSON-RPC error
+`modelProvider/default/set` selects a configured provider for new threads and unscoped model lists.
+Send `{"providerId": "my_gateway"}`. The response uses the same `ConfigWriteResponse` as other config writes.
+An effective selection refreshes the catalog on its next read. Editing the active provider through
+`modelProvider/config/write` also refreshes that snapshot.
+
+`model/list` uses the current default when `modelProvider` is omitted. Pass a provider ID to list
+models for a chat that retained its provider after a default change. An unknown selector returns JSON-RPC error
 `-32600` with `data.type = "modelProviderNotConfigured"` and the requested `modelProvider`.
 
 `model/list` checks its selected provider, and periodic model catalog refreshes check the
-startup provider, against current managed provider requirements. If that provider no longer
+current default provider, against current managed provider requirements. If that provider no longer
 complies, `model/list` returns JSON-RPC error `-32600` asking the client to restart Codex,
 and background refreshes skip the old endpoint. Requirement load failures also block these
 operations. Checks apply even when the catalog is cached.
@@ -217,6 +223,10 @@ prompt to close. The original RPC completes independently, with
 cannot roll back completed effects. It remains effective while a proof waits for
 outbound queue capacity, but cannot retract a response already enqueued.
 
+`biometricType` reports the native method used for that successful signature when known.
+It is `"fingerprint"` for a successful Touch ID protected signing operation and `null`
+when unknown. Older servers omit it. It is context, not an additional signed proof field.
+
 Canceling or resolving an elicitation does not itself stop a separate
 `userVerification/verify` RPC. Clients must cancel that RPC separately and discard
 late proofs after the approval is canceled or resolved. Only one native worker
@@ -244,7 +254,7 @@ App-server does not persist this selection.
 # Project trust
 
 `thread/start` does not persist project trust for a directory where configuration
-discovery finds no project-root marker, Git checkout, or project-local `.mikodex`
+discovery finds no project-root marker, Git checkout, or project-local `.codex`
 directory. Starting a task there does not preapprove project configuration added
 later. Existing trust decisions and permission checks for projects are unchanged.
 
@@ -304,7 +314,7 @@ ChatGPT account identity.
 | `userVerification/status` | `{}`                              | `{credentialId, unavailableReason, unavailableMessage}` |
 | `userVerification/enroll` | `{}`                              | `{credentialId, algorithm?, publicKey?}`                |
 | `userVerification/delete` | `{}`                              | `{}`                                                    |
-| `userVerification/verify` | `{challenge, title, description}` | `{proof: {credentialId, signature}}`                    |
+| `userVerification/verify` | `{challenge, title, description}` | `{proof: {credentialId, signature}, biometricType}`     |
 | `userVerification/cancel` | `{requestId}`                     | `{}`                                                    |
 
 Status reads local readiness without prompting or contacting a backend. A null
@@ -396,10 +406,11 @@ alongside `[permissions.filesystem]`:
 enabled = true
 ```
 
-`[network_proxy]` and its compatibility alias `[experimental_network]` still work.
-Do not mix either with `[permissions.network]`, even across requirements layers. A single
-layer cannot use both top-level names; across layers the top-level names merge with normal
-precedence. `configRequirements/read` returns the result in `requirements.network`.
+Codex reads `[network_proxy]` and its alias `[experimental_network]` as
+`[permissions.network]` within each source before merging managed requirements.
+Across sources, use the same surface (legacy or nested). Use at most one top-level spelling per layer.
+If a layer also sets `[permissions.network]`, both tables must describe the same policy.
+`configRequirements/read` returns the result in `requirements.network`.
 
 In `config.toml`, `[features.network_proxy]` configures the proxy, while
 `[permissions.<profile>.network]` configures a profile's network settings. Managed requirements
@@ -943,9 +954,11 @@ If the active profile inherits `model_providers.gcp.credential_file` from the ba
 Setup returns an error without saving changes. To use ADC, remove the inherited
 setting from the file named in the error and retry.
 
-Setup rejects a GCP `base_url` override or higher-priority settings that conflict
-with the request. It fetches an access token before saving the settings and
-selecting GCP, then returns `{}`. The next `model/list` reloads the catalog.
+Setup uses the requested project and location to determine the Vertex AI endpoint.
+If another configuration layer would still supply `model_providers.gcp.base_url`
+or otherwise conflict with the request, setup fails. Once it obtains an access
+token, setup clears the active user configuration’s `base_url` override, saves
+the settings, and selects GCP. It returns `{}`. The next `model/list` reloads the catalog.
 `account/read` reports `{ "account": { "type": "gcp" }, "requiresOpenaiAuth": false }`.
 Use a model request to verify Vertex model access.
 

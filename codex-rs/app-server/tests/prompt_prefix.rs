@@ -111,7 +111,7 @@ async fn prompt_prefix_matches_release() -> Result<()> {
         for (value, replacement) in [
             (environment.cwd.as_str(), "<ENVIRONMENT_CWD>"),
             (thread.cwd.to_string_lossy().as_ref(), "<CWD>"),
-            (home.path().to_string_lossy().as_ref(), "<MIKODEX_HOME>"),
+            (home.path().to_string_lossy().as_ref(), "<CODEX_HOME>"),
             (thread.id.as_str(), "<THREAD_ID>"),
             (thread.session_id.as_str(), "<SESSION_ID>"),
         ] {
@@ -234,12 +234,28 @@ fn accept_default_tool_description_rollouts(released: &mut Value, current: &Valu
   // Data URL for the loaded image.
   image_url: string;
 }>; };"#;
-    if old.matches(OLD_IMAGE).count() != 1 || old.matches(OLD_VIEW_IMAGE).count() != 1 {
-        return;
+    const OLD_LOGIN: &str = "  // True runs the shell with -l/-i semantics; false disables them. Defaults to true.\n  login?: boolean;";
+    const UNIX_LOGIN: &str =
+        "  // Request login-shell startup. Omit to inherit.\n  login?: boolean;";
+    const POWERSHELL_LOGIN: &str = "  // Login-shell startup. In PowerShell, false skips profiles. Keep them enabled for profile-defined commands, even unattended. Omit to inherit.\n  login?: boolean;";
+    let current_description = current
+        .pointer(TOOL)
+        .and_then(|tool| tool["description"].as_str())
+        .unwrap_or_default();
+    let new_login = if current_description.contains(POWERSHELL_LOGIN) {
+        POWERSHELL_LOGIN
+    } else {
+        UNIX_LOGIN
+    };
+    let mut updated = old.to_owned();
+    if old.matches(OLD_IMAGE).count() == 1 && old.matches(OLD_VIEW_IMAGE).count() == 1 {
+        updated = updated
+            .replace(OLD_IMAGE, NEW_IMAGE)
+            .replace(OLD_VIEW_IMAGE, NEW_VIEW_IMAGE);
     }
-    let updated = old
-        .replace(OLD_IMAGE, NEW_IMAGE)
-        .replace(OLD_VIEW_IMAGE, NEW_VIEW_IMAGE);
+    if old.matches(OLD_LOGIN).count() == 1 {
+        updated = updated.replace(OLD_LOGIN, new_login);
+    }
     if current
         .pointer(TOOL)
         .and_then(|tool| tool["description"].as_str())

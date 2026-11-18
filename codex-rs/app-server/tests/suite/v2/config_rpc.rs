@@ -864,6 +864,33 @@ metrics_exporter = { otlp-http = { endpoint = "http://127.0.0.1:1/v1/metrics", p
     Ok(())
 }
 
+#[tokio::test]
+async fn config_read_with_relative_cwd_picks_up_external_edits() -> Result<()> {
+    let home = TempDir::new()?;
+    write_config(&home, r#"model = "before""#)?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .without_auto_env()
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+
+    let mut models = Vec::new();
+    for model in ["before", "after"] {
+        write_config(&home, &format!(r#"model = "{model}""#))?;
+        let id = server
+            .send_config_read_request(ConfigReadParams {
+                include_layers: false,
+                cwd: Some(".".into()),
+            })
+            .await?;
+        let response: ConfigReadResponse =
+            timeout(DEFAULT_READ_TIMEOUT, server.read_response(id)).await??;
+        models.push(response.config.model);
+    }
+    assert_eq!(models, [Some("before".into()), Some("after".into())]);
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn config_read_returns_effective_and_layers() -> Result<()> {
     let codex_home = TempDir::new()?;
@@ -1036,7 +1063,7 @@ default_app_access = "allow"
     )?;
 
     let workspace = TempDir::new()?;
-    let project_config_dir = workspace.path().join(".mikodex");
+    let project_config_dir = workspace.path().join(".codex");
     std::fs::create_dir_all(&project_config_dir)?;
     std::fs::write(
         project_config_dir.join("config.toml"),
@@ -1636,7 +1663,7 @@ async fn config_read_includes_project_layers_for_cwd() -> Result<()> {
     write_config(&codex_home, r#"model = "gpt-user""#)?;
 
     let workspace = TempDir::new()?;
-    let project_config_dir = workspace.path().join(".mikodex");
+    let project_config_dir = workspace.path().join(".codex");
     std::fs::create_dir_all(&project_config_dir)?;
     std::fs::write(
         project_config_dir.join("config.toml"),
@@ -1679,9 +1706,9 @@ async fn config_read_respects_managed_project_root_markers() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_config(&codex_home, "model_context_window = 16384\n")?;
     let workspace = TempDir::new()?;
-    let ancestor_config = workspace.path().join(".mikodex");
+    let ancestor_config = workspace.path().join(".codex");
     let child = workspace.path().join("child");
-    let child_config = child.join(".mikodex");
+    let child_config = child.join(".codex");
     for dir in [
         workspace.path().join(".git"),
         ancestor_config.clone(),

@@ -428,7 +428,7 @@ async fn assert_thread_resume_rejects_writer_owned_by_another_process(
     let mut secondary = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .with_env_overrides(&[(
-            "MIKODEX_SQLITE_HOME",
+            "CODEX_SQLITE_HOME",
             Some(secondary_sqlite_home_path.as_ref()),
         )])
         .build_initialized()
@@ -2634,7 +2634,7 @@ async fn goal_first_live_thread_appears_in_state_db_thread_list() -> Result<()> 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(&codex_home_path)
         .without_managed_config()
-        .with_env_overrides(&[("MIKODEX_SQLITE_HOME", Some(sqlite_home))])
+        .with_env_overrides(&[("CODEX_SQLITE_HOME", Some(sqlite_home))])
         .build_initialized()
         .await?;
 
@@ -3149,6 +3149,7 @@ fn append_resume_redaction_history(
             call_id: "mcp-1".to_string(),
             invocation: McpInvocation {
                 server: "docs".to_string(),
+                environment_id: None,
                 tool: "lookup".to_string(),
                 arguments: Some(json!({"secret":"argument"})),
             },
