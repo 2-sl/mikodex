@@ -1,12 +1,5 @@
 use super::*;
-use codex_protocol::permissions::FileSystemAccessMode;
-use codex_protocol::permissions::FileSystemPath;
-use codex_protocol::permissions::FileSystemSandboxEntry;
-use codex_protocol::permissions::FileSystemSandboxPolicy;
-use codex_protocol::permissions::FileSystemSpecialPath;
-use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::sandbox::SandboxOverride;
-use codex_sandboxing::SandboxType;
 use core_test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
@@ -15,7 +8,6 @@ use test_case::test_case;
 #[derive(Clone, Copy)]
 enum SnapshotFailure {
     Exit,
-    WorkspaceRootDenial,
     Timeout,
     NetworkDenial,
     CallerDrop,
@@ -23,7 +15,6 @@ enum SnapshotFailure {
 }
 
 #[test_case(SnapshotFailure::Exit; "startup_exit")]
-#[test_case(SnapshotFailure::WorkspaceRootDenial; "denied_read_in_second_workspace_root")]
 #[test_case(SnapshotFailure::Timeout; "timeout")]
 #[test_case(SnapshotFailure::NetworkDenial; "network_denial")]
 #[test_case(SnapshotFailure::CallerDrop; "caller_drop")]
@@ -36,60 +27,24 @@ async fn snapshot_failure_omits_credentials_and_stops_descendants(
         SnapshotFailure::NetworkDenial | SnapshotFailure::CallerDropWithNetworkToken => {
             Some(CancellationToken::new())
         }
-        SnapshotFailure::Exit
-        | SnapshotFailure::WorkspaceRootDenial
-        | SnapshotFailure::Timeout
-        | SnapshotFailure::CallerDrop => None,
+        SnapshotFailure::Exit | SnapshotFailure::Timeout | SnapshotFailure::CallerDrop => None,
     };
     let dir = tempdir()?;
-    let cwd = dir.path().join("first").abs();
-    std::fs::create_dir(&cwd)?;
+    let cwd = dir.path().abs();
     let cwd_uri = PathUri::from_abs_path(&cwd);
-    let mut workspace_roots = vec![cwd_uri.clone()];
-    let workspace_denial = matches!(failure, SnapshotFailure::WorkspaceRootDenial);
-    let (permissions, local_selection, sandbox_exe) = if workspace_denial {
-        core_test_support::skip_if_sandbox!(Ok(()));
-        let second = dir.path().join("second").abs();
-        std::fs::create_dir(&second)?;
-        for root in [&cwd, &second] {
-            std::fs::write(root.join("allowed"), "visible")?;
-            std::fs::write(root.join("private"), "private contents")?;
-        }
-        workspace_roots.push(PathUri::from_abs_path(&second));
-        let mut policy = FileSystemSandboxPolicy::read_only();
-        policy.entries.push(FileSystemSandboxEntry::new(
-            FileSystemPath::Special {
-                value: FileSystemSpecialPath::project_roots(Some("private".into())),
-            },
-            FileSystemAccessMode::Deny,
-        ));
-        (
-            PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted),
-            SandboxSelection::Platform {
-                preference: SandboxablePreference::Auto,
-                windows_sandbox: SandboxType::None,
-            },
-            core_test_support::codex_linux_sandbox_exe_or_skip!(Ok(())),
-        )
-    } else {
-        (
-            PermissionProfile::Disabled,
-            SandboxSelection::Explicit(SandboxType::None),
-            None,
-        )
-    };
+    let permissions = PermissionProfile::Disabled;
     let manager = SandboxManager::new();
     let attempt = SandboxAttempt {
         sandbox_override: SandboxOverride::NoOverride,
-        local_selection,
-        sandbox_requested: workspace_denial,
+        sandbox: SandboxType::None,
+        sandbox_requested: false,
         permissions: &permissions,
         exec_server_permissions: &permissions,
         enforce_managed_network: false,
         manager: &manager,
         sandbox_cwd: &cwd_uri,
-        workspace_roots: &workspace_roots,
-        sandbox_exe: sandbox_exe.as_ref(),
+        workspace_roots: std::slice::from_ref(&cwd_uri),
+        sandbox_exe: None,
         use_legacy_landlock: false,
         windows_sandbox_type: SandboxType::None,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
@@ -101,7 +56,6 @@ async fn snapshot_failure_omits_credentials_and_stops_descendants(
     );
     let snapshot_timeout = match failure {
         SnapshotFailure::Exit
-        | SnapshotFailure::WorkspaceRootDenial
         | SnapshotFailure::NetworkDenial
         | SnapshotFailure::CallerDrop
         | SnapshotFailure::CallerDropWithNetworkToken => Duration::from_secs(30),
@@ -109,14 +63,6 @@ async fn snapshot_failure_omits_credentials_and_stops_descendants(
     };
     let script = match failure {
         SnapshotFailure::Exit => "exit 23",
-        SnapshotFailure::WorkspaceRootDenial => {
-            r#"for root in . ../second; do
-                [ "$(/bin/cat "$root/allowed")" = visible ] || exit 41
-            done
-            if /bin/cat private >/dev/null 2>&1; then exit 42; fi
-            if /bin/cat ../second/private >/dev/null 2>&1; then exit 43; fi
-            exit 23"#
-        }
         SnapshotFailure::Timeout
         | SnapshotFailure::NetworkDenial
         | SnapshotFailure::CallerDrop
@@ -137,12 +83,9 @@ async fn snapshot_failure_omits_credentials_and_stops_descendants(
         /*snapshot_read_path*/ None,
     );
     let cancel_after_startup = async {
-        if !matches!(
-            failure,
-            SnapshotFailure::Exit | SnapshotFailure::WorkspaceRootDenial
-        ) {
+        if !matches!(failure, SnapshotFailure::Exit) {
             tokio::time::timeout(Duration::from_secs(5), async {
-                while !cwd.join("started").exists() {
+                while !dir.path().join("started").exists() {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             })
@@ -185,9 +128,7 @@ async fn snapshot_failure_omits_credentials_and_stops_descendants(
     if let Some(result) = result {
         let error = result.err().context("failed snapshot must not be used")?;
         let expected = match failure {
-            SnapshotFailure::Exit | SnapshotFailure::WorkspaceRootDenial => {
-                "Snapshot command exited with status 23"
-            }
+            SnapshotFailure::Exit => "Snapshot command exited with status 23",
             SnapshotFailure::Timeout => "Snapshot command timed out",
             SnapshotFailure::NetworkDenial => "Snapshot command exited with status 1",
             SnapshotFailure::CallerDrop | SnapshotFailure::CallerDropWithNetworkToken => {
@@ -198,7 +139,7 @@ async fn snapshot_failure_omits_credentials_and_stops_descendants(
     }
     tokio::time::sleep(Duration::from_millis(1_100)).await;
     assert!(
-        !cwd.join("late_write").exists(),
+        !dir.path().join("late_write").exists(),
         "startup descendant survived snapshot expiration"
     );
     Ok(())

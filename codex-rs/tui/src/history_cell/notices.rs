@@ -178,7 +178,7 @@ pub(crate) fn new_cyber_policy_error_event(
                 ("Learn more", SAFETY_ACCESS_BLOCK_LEARN_MORE_URL),
                 (
                     "Apply for Daybreak",
-                    "https://chatgpt.com/admin/status-and-access",
+                    "https://openai.com/form/enterprise-trusted-access-for-cyber/",
                 ),
             ],
         ),
@@ -188,10 +188,7 @@ pub(crate) fn new_cyber_policy_error_event(
         ),
         Notice::Astra => (
             "Daybreak isn’t available for Astra. Some cybersecurity requests may still be limited.",
-            &[(
-                "Learn more",
-                "https://help.openai.com/en/articles/20001258-openai-daybreak-trusted-access-for-cyber-overview#reduced-refusals-behavior-by-model",
-            )],
+            &[("Learn more", SAFETY_ACCESS_BLOCK_LEARN_MORE_URL)],
         ),
         Notice::Enabled => (
             "Some cybersecurity requests are still limited, even when Daybreak is on.",
@@ -344,20 +341,11 @@ pub(crate) fn new_info_event(message: String, hint: Option<String>) -> PlainHist
     PlainHistoryCell { lines }
 }
 
-#[derive(Debug)]
-pub(crate) struct InterruptionNotice(pub(crate) Option<String>);
-
-impl HistoryCell for InterruptionNotice {
-    fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
-        vec![
-            Line::from("■ Conversation interrupted - use /feedback if something went wrong")
-                .style(crate::style::secondary_text_style()),
-        ]
-    }
-
-    fn raw_lines(&self) -> Vec<Line<'static>> {
-        plain_lines(self.display_lines(/*width*/ u16::MAX))
-    }
+pub(crate) fn new_interruption_notice() -> PlainHistoryCell {
+    PlainHistoryCell::new(vec![
+        Line::from("■ Conversation interrupted - use /feedback if something went wrong")
+            .style(crate::style::secondary_text_style()),
+    ])
 }
 
 pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {

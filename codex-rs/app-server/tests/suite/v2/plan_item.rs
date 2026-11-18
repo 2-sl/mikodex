@@ -56,24 +56,18 @@ async fn plan_mode_uses_proposed_plan_block_for_plan_item() -> Result<()> {
         .await?;
 
     let turn = start_plan_mode_turn(&mut mcp).await?;
-    let (started_items, completed_items, plan_deltas, turn_completed) =
+    let (_, completed_items, plan_deltas, turn_completed) =
         collect_turn_notifications(&mut mcp).await?;
     wait_for_responses_request_count(&server, /*expected_count*/ 1).await?;
 
     assert_eq!(turn_completed.turn.id, turn.id);
     assert_eq!(turn_completed.turn.status, TurnStatus::Completed);
 
-    let expected_plan_id = started_items
-        .iter()
-        .find_map(|item| match item {
-            ThreadItemPayload::Plan { id, .. } => Some(id),
-            _ => None,
-        })
-        .ok_or_else(|| anyhow!("plan start notification missing"))?;
     let expected_plan = ThreadItemPayload::Plan {
-        id: expected_plan_id.clone(),
+        id: format!("{}-plan", turn.id),
         text: "# Final plan\n- first\n- second\n".to_string(),
     };
+    let expected_plan_id = format!("{}-plan", turn.id);
     let streamed_plan = plan_deltas
         .iter()
         .map(|delta| delta.delta.as_str())
@@ -82,7 +76,7 @@ async fn plan_mode_uses_proposed_plan_block_for_plan_item() -> Result<()> {
     assert!(
         plan_deltas
             .iter()
-            .all(|delta| &delta.item_id == expected_plan_id)
+            .all(|delta| delta.item_id == expected_plan_id)
     );
     let plan_items = completed_items
         .iter()

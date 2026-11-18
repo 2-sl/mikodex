@@ -16,6 +16,7 @@ use crate::bottom_pane::slash_commands::SlashCommandItem;
 use crate::bottom_pane::slash_commands::find_slash_command;
 use crate::goal_display::GOAL_USAGE;
 use crate::goal_files::GoalDraft;
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SlashCommandDispatchSource {
@@ -42,19 +43,21 @@ const USAGE_CHATGPT_LOGIN_REQUIRED: &str = "Sign in with ChatGPT to use /usage."
 
 fn background_image_source_path(argument: &str) -> Result<PathBuf, String> {
     let argument = argument.trim();
-    let quoted = (argument.starts_with('"') && argument.ends_with('"'))
-        || (argument.starts_with(char::from(39)) && argument.ends_with(char::from(39)));
-    let argument = if argument.len() >= 2 && quoted {
+    let argument = if argument.len() >= 2
+        && ((argument.starts_with('"') && argument.ends_with('"'))
+            || (argument.starts_with('\'') && argument.ends_with('\'')))
+    {
         &argument[1..argument.len() - 1]
     } else {
         argument
     };
     if argument.is_empty() {
         return Err(
-            r#"Usage: /background "<image path>" | /background on|off|clear (alias: /bga)"#
+            "Usage: /background \"<image path>\" | /background on|off|clear (alias: /bga)"
                 .to_string(),
         );
     }
+
     let mut expanded = String::with_capacity(argument.len());
     let mut remaining = argument;
     while let Some(start) = remaining.find('%') {
@@ -72,6 +75,7 @@ fn background_image_source_path(argument: &str) -> Result<PathBuf, String> {
         remaining = &after_start[end + 1..];
     }
     expanded.push_str(remaining);
+
     if let Some(relative) = expanded
         .strip_prefix("~/")
         .or_else(|| expanded.strip_prefix("~\\"))
@@ -582,9 +586,6 @@ impl ChatWidget {
                 self.add_hooks_output();
             }
             SlashCommand::Daemon => self.app_event_tx.send(AppEvent::OpenDaemonMenu),
-            SlashCommand::Rc => self.app_event_tx.send(AppEvent::RemoteControl(
-                crate::app::remote_control::Action::Menu,
-            )),
             SlashCommand::Warnings => self.app_event_tx.send(AppEvent::OpenWarnings),
             SlashCommand::Status => {
                 if self.should_prefetch_rate_limits() {
@@ -634,19 +635,23 @@ impl ChatWidget {
                 self.open_theme_picker();
             }
             SlashCommand::Background => {
-                let (enabled, image) = {
+                let (status, image) = {
                     let animation = self.empty_state_animation.borrow();
-                    (
-                        animation.is_background_enabled(),
-                        animation
-                            .background_image_path()
-                            .map(|path| path.display().to_string()),
-                    )
+                    let status = if animation.is_background_enabled() {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    };
+                    let image = animation
+                        .background_image_path()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| "built-in logo".to_string());
+                    (status, image)
                 };
-                let status = if enabled { "enabled" } else { "disabled" };
-                let image = image.unwrap_or_else(|| "default animation".to_string());
                 self.add_info_message(
-                    format!(r#"Animated chat background: {status}; image: {image}. Use /background on|off|clear or /background "<image path>" (/bga is an alias)."#),
+                    format!(
+                        "Animated chat background: {status}; image: {image}. Use /background on|off|clear or /background \"<image path>\" (/bga is an alias)."
+                    ),
                     /*hint*/ None,
                 );
             }
@@ -867,9 +872,6 @@ impl ChatWidget {
             return;
         }
         match cmd {
-            SlashCommand::Rc => self.add_error_message(
-                "Open /rc and choose Disable to turn off remote control.".into(),
-            ),
             SlashCommand::Model if !trimmed.is_empty() => {
                 self.handle_model_command_args(trimmed);
                 self.app_event_tx.send(AppEvent::SettingsSelectionClosed);
@@ -940,38 +942,8 @@ impl ChatWidget {
                     && !name.trim().is_empty()
                 {
                     if let Some(thread_id) = self.thread_id {
-                        // Keep the old name-only syntax intact, including spaces and quotes.
-                        let (name, environment_id) = if name.split_whitespace().any(|word| {
-                            word == "--environment" || word.starts_with("--environment=")
-                        }) {
-                            let args = match super::slash_command_args::parse(
-                                name,
-                                &["--environment"],
-                                &[],
-                                &[],
-                            ) {
-                                Ok(args) => args,
-                                Err(error) => {
-                                    self.add_error_message(error);
-                                    return;
-                                }
-                            };
-                            if args.positionals.is_empty() {
-                                self.add_error_message(
-                                    "Usage: /mcp login <name> [--environment <id>]".to_string(),
-                                );
-                                return;
-                            }
-                            (
-                                args.positionals.join(" "),
-                                args.value("--environment").map(str::to_owned),
-                            )
-                        } else {
-                            (name.trim().to_string(), None)
-                        };
                         self.app_event_tx.send(AppEvent::StartMcpLogin {
-                            name,
-                            environment_id,
+                            name: name.trim().to_string(),
                             thread_id,
                         });
                     } else {
@@ -980,9 +952,7 @@ impl ChatWidget {
                         );
                     }
                 } else {
-                    self.add_error_message(
-                        "Usage: /mcp [verbose | login <name> [--environment <id>]]".to_string(),
-                    );
+                    self.add_error_message("Usage: /mcp [verbose | login <name>]".to_string());
                 }
             }
             SlashCommand::Keymap => match trimmed.to_ascii_lowercase().as_str() {
@@ -1233,12 +1203,11 @@ impl ChatWidget {
             }
             SlashCommand::Background => {
                 let action = trimmed.to_ascii_lowercase();
-                let home = self.config.codex_home.as_path().to_path_buf();
                 if matches!(action.as_str(), "off" | "disable" | "disabled") {
                     let result = self
                         .empty_state_animation
                         .borrow_mut()
-                        .set_background_enabled(false, home.as_path());
+                        .set_background_enabled(false, self.config.codex_home.as_path());
                     match result {
                         Ok(()) => self.add_info_message(
                             "Animated chat background disabled. Use /background on to show it again."
@@ -1251,7 +1220,7 @@ impl ChatWidget {
                     let result = self
                         .empty_state_animation
                         .borrow_mut()
-                        .set_background_enabled(true, home.as_path());
+                        .set_background_enabled(true, self.config.codex_home.as_path());
                     match result {
                         Ok(()) => self.add_info_message(
                             "Animated chat background enabled.".to_string(),
@@ -1263,7 +1232,7 @@ impl ChatWidget {
                     let result = self
                         .empty_state_animation
                         .borrow_mut()
-                        .clear_background_image(home.as_path());
+                        .clear_background_image(self.config.codex_home.as_path());
                     match result {
                         Ok(()) => self.add_info_message(
                             "Saved chat background image cleared.".to_string(),
@@ -1277,7 +1246,7 @@ impl ChatWidget {
                             let result = self
                                 .empty_state_animation
                                 .borrow_mut()
-                                .set_background_image(&path, home.as_path());
+                                .set_background_image(&path, self.config.codex_home.as_path());
                             match result {
                                 Ok(destination) => self.add_info_message(
                                     format!(
@@ -1453,7 +1422,6 @@ impl ChatWidget {
             SlashCommand::Ide
             | SlashCommand::Status
             | SlashCommand::Daemon
-            | SlashCommand::Rc
             | SlashCommand::Pwd
             | SlashCommand::Usage
             | SlashCommand::DebugConfig
@@ -1523,9 +1491,9 @@ impl ChatWidget {
             | SlashCommand::Statusline
             | SlashCommand::Config
             | SlashCommand::Theme
+            | SlashCommand::Background
             | SlashCommand::Tui
-            | SlashCommand::Pets
-            | SlashCommand::Background => QueueDrain::Stop,
+            | SlashCommand::Pets => QueueDrain::Stop,
         }
     }
 

@@ -19,17 +19,14 @@
 //! Inline banners sit above the composer. Number shortcuts apply only to an empty, idle composer;
 //! drafts, paste bursts, and active dialogs keep their normal input routing.
 //! Owned transcripts separate activity from the transcript and reserve their shared hint row
-//! below activity and previews, above the composer. Disabling composer input dismisses transient
-//! searches and restores the draft they temporarily replaced.
+//! below activity and previews, above the composer.
 pub(crate) use chat_composer::CommandPopupPlacement;
 pub(crate) use chat_composer::ComposerRenderOptions;
 pub(crate) use chat_composer::TranscriptFooter;
-pub(crate) use chat_composer::composer_layout::FooterLayout;
 pub(crate) use composer_gap::ComposerGap;
 pub(crate) use footer::footer_hint_items_line;
 pub(crate) use footer::inset_footer_hint_area;
-pub(crate) use status_line::StatusLine;
-pub(crate) use status_line::StatusLineFocus;
+pub(crate) use footer::render_unfocused_status;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
@@ -96,7 +93,6 @@ pub(crate) use multi_select_picker::MultiSelectPicker;
 mod question_tests;
 mod questions;
 mod request_user_input;
-mod status_line;
 mod status_line_setup;
 mod status_line_style;
 mod status_surface_preview;
@@ -123,6 +119,7 @@ pub(crate) use approval_overlay::format_requested_permissions_rule;
 pub(crate) use async_questions::AsyncQuestions;
 pub(crate) use async_questions::QuestionState;
 pub(crate) use async_questions::QuestionSubmission;
+pub(crate) use footer::footer_content;
 pub(crate) use mcp_server_elicitation::McpServerElicitationFormRequest;
 pub(crate) use mcp_server_elicitation::McpServerElicitationOverlay;
 pub(crate) use request_user_input::RequestUserInputOverlay;
@@ -209,13 +206,12 @@ pub(crate) use skills_toggle_view::SkillsToggleItem;
 pub(crate) use skills_toggle_view::SkillsToggleView;
 pub(crate) use status_line_setup::StatusLineItem;
 pub(crate) use status_line_setup::StatusLineSetupView;
-pub(crate) use status_line_setup::StatuslineProviderActions;
 pub(crate) use status_surface_preview::StatusSurfacePreviewData;
 pub(crate) use status_surface_preview::StatusSurfacePreviewItem;
 pub(crate) use title_setup::TerminalTitleItem;
+pub(crate) use title_setup::TerminalTitleSetupView;
 #[cfg(test)]
 pub(crate) use title_setup::preview_line_for_title_items;
-pub(crate) use title_setup::terminal_title_setup;
 mod paste_burst;
 mod pending_input_preview;
 mod pending_thread_approvals;
@@ -224,6 +220,7 @@ pub(crate) use picker_option::picker_option_list;
 pub(crate) use picker_option::picker_option_row;
 pub(crate) mod popup_consts;
 mod scroll_state;
+pub(crate) use scroll_state::ScrollState;
 mod selection_popup_common;
 pub(crate) use selection_popup_common::menu_surface_padding_height;
 pub(crate) use selection_popup_common::render_menu_surface;
@@ -289,7 +286,6 @@ pub(crate) use list_selection_view::SELECTION_TOGGLE_BLOCKED_PREFIX;
 pub(crate) use list_selection_view::SELECTION_TOGGLE_UNAVAILABLE_PREFIX;
 pub(crate) use list_selection_view::SelectionAction;
 pub(crate) use list_selection_view::SelectionItem;
-pub(crate) use list_selection_view::SelectionKeyAction;
 pub(crate) use list_selection_view::SelectionSecondaryAction;
 
 struct DelayedApprovalRequest {
@@ -367,6 +363,7 @@ impl BottomPane {
     pub(crate) fn command_reference_items(&self) -> Vec<(String, String)> {
         self.composer.command_reference_items()
     }
+
     pub(crate) fn set_mention_usage_home(
         &mut self,
         codex_home: &std::path::Path,
@@ -857,13 +854,7 @@ impl BottomPane {
         self.push_view(Box::new(modal));
     }
 
-    fn is_composer_activity_key(&self, key: KeyEvent) -> bool {
-        if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-            && (self.keymap.composer.undo.is_pressed(key)
-                || self.keymap.composer.redo.is_pressed(key))
-        {
-            return true;
-        }
+    fn is_composer_activity_key(key: KeyEvent) -> bool {
         matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
             && !key_hint::has_ctrl_or_alt(key.modifiers)
             && matches!(
@@ -884,7 +875,7 @@ impl BottomPane {
     ) -> InputResult {
         if mode == RestrictedInputMode::DraftHandoff {
             let result = self.composer.handle_restricted_key(key, mode);
-            if self.is_composer_activity_key(key) {
+            if Self::is_composer_activity_key(key) {
                 self.record_composer_activity_at(Instant::now());
             }
             self.request_redraw();
@@ -928,7 +919,7 @@ impl BottomPane {
                 view.observe_key_event_while_covered(key_event, routed_key);
             }
         }
-        let records_composer_activity = self.is_composer_activity_key(key_event);
+        let records_composer_activity = Self::is_composer_activity_key(key_event);
         if self.warnings_active() {
             if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                 self.record_composer_activity_at(Instant::now());
@@ -1235,10 +1226,6 @@ impl BottomPane {
         enabled: bool,
         placeholder: Option<String>,
     ) {
-        if !enabled {
-            self.composer.cancel_vim_search();
-            self.composer.cancel_history_search();
-        }
         self.composer.set_input_enabled(enabled, placeholder);
         self.request_redraw();
     }
@@ -1413,7 +1400,7 @@ impl BottomPane {
         self.status_widget().is_some()
     }
 
-    pub(crate) fn status_line_content(&self) -> Option<&StatusLine> {
+    pub(crate) fn status_line_content(&self) -> Option<&footer_content::FooterContent> {
         self.composer.status_line_content()
     }
 
@@ -1518,8 +1505,8 @@ impl BottomPane {
         self.request_redraw();
     }
 
-    pub(crate) fn set_context_window_hidden(&mut self, hidden: bool) {
-        self.composer.set_context_window_hidden(hidden);
+    pub(crate) fn set_context_window_pending(&mut self, pending: bool) {
+        self.composer.set_context_window_pending(pending);
         self.request_redraw();
     }
 
@@ -1956,14 +1943,6 @@ impl BottomPane {
         self.no_modal_or_popup_active() && self.composer.shortcut_overlay_visible()
     }
 
-    pub(crate) fn handle_shortcut_view_key(&mut self, key: KeyEvent) -> bool {
-        let handled = self.composer.handle_shortcut_view_key(key);
-        if handled {
-            self.request_redraw();
-        }
-        handled
-    }
-
     /// Return true when no popups or modal views are active, regardless of task state.
     pub(crate) fn can_launch_external_editor(&self) -> bool {
         self.completion_can_yield_focus() && !self.composer.popup_active()
@@ -2071,13 +2050,8 @@ impl BottomPane {
         activated_at: Instant,
         suppression: ActivationKeySuppression,
     ) {
-        let reported_repeats_only = match suppression {
-            ActivationKeySuppression::ViewTransition => self.enhanced_keys_supported,
-            ActivationKeySuppression::ReportedRepeats => true,
-            ActivationKeySuppression::PressOnlyFallback => {
-                self.enhanced_keys_supported && crate::tui::reports_key_releases()
-            }
-        };
+        let reported_repeats_only = self.enhanced_keys_supported
+            || matches!(suppression, ActivationKeySuppression::ReportedRepeats);
         self.view_transition_key_guard = Some(ActivationKeyGuard::new_at(
             key,
             activated_at,
@@ -2369,9 +2343,6 @@ impl BottomPane {
     /// Commit accepted typing before snapshotting the target of an asynchronous paste.
     pub(crate) fn prepare_composer_clipboard_paste(&mut self) {
         self.composer.flush_pending_paste_burst();
-        if !self.composer.is_vim_enabled() {
-            self.composer.finish_edit();
-        }
     }
 
     pub(crate) fn is_in_paste_burst(&self) -> bool {
@@ -2657,7 +2628,7 @@ impl BottomPane {
         self.request_redraw();
     }
 
-    pub(crate) fn set_status_line(&mut self, status_line: Option<StatusLine>) {
+    pub(crate) fn set_status_line(&mut self, status_line: Option<footer_content::FooterContent>) {
         if self.composer.set_status_line(status_line) {
             self.request_redraw();
         }
@@ -2706,7 +2677,7 @@ impl Renderable for ChatComposerPresentation<'_> {
     fn desired_height(&self, width: u16) -> u16 {
         self.composer
             .desired_height_with_options(width, self.options)
-            .min(self.composer.height_budget(width, self.options))
+            .min(self.options.max_height.unwrap_or(u16::MAX))
     }
 
     fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
@@ -2793,18 +2764,6 @@ mod tests {
         test_pane_with_disable_paste_burst(app_event_tx, /*disable_paste_burst*/ false)
     }
 
-    #[test]
-    fn clipboard_image_undo_preserves_buffered_typing() {
-        let (tx, _) = unbounded_channel();
-        let mut pane = test_pane(AppEventSender::new(tx));
-        pane.composer.handle_key_event(KeyCode::Char('a').into());
-        pane.prepare_composer_clipboard_paste();
-        pane.attach_image(std::path::PathBuf::from("example.png"));
-        pane.composer.handle_key_event(KeyCode::F(7).into());
-        assert_eq!(pane.composer.current_text(), "a");
-        assert!(pane.composer.local_image_paths().is_empty());
-    }
-
     fn test_pane_with_disable_paste_burst(
         app_event_tx: AppEventSender,
         disable_paste_burst: bool,
@@ -2814,7 +2773,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst,
             animations_enabled: true,
             effects: Default::default(),
@@ -3042,7 +3001,7 @@ mod tests {
     fn view_transition_key_guard_survives_an_intervening_modal() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let mut pane = test_pane(AppEventSender::new(tx_raw));
-        let activation_key = crate::key_hint::plain(KeyCode::F(11));
+        let activation_key = crate::key_hint::plain(KeyCode::Enter);
         pane.suppress_current_view_key_until_release(
             activation_key,
             Instant::now(),
@@ -3050,19 +3009,8 @@ mod tests {
         );
         pane.push_view(Box::new(DismissibleView::default()));
 
-        // Press-only terminals report repeats as presses.
-        assert!(pane.consume_view_transition_key(activation_key, KeyEventKind::Press));
         assert!(pane.consume_view_transition_key(activation_key, KeyEventKind::Repeat));
         assert!(pane.consume_view_transition_key(activation_key, KeyEventKind::Release));
-        assert!(!pane.consume_view_transition_key(activation_key, KeyEventKind::Press));
-
-        // Enhanced picker transitions allow another intentional press without a release.
-        pane.enhanced_keys_supported = true;
-        pane.suppress_current_view_key_until_release(
-            activation_key,
-            Instant::now(),
-            ActivationKeySuppression::ViewTransition,
-        );
         assert!(!pane.consume_view_transition_key(activation_key, KeyEventKind::Press));
     }
 
@@ -3162,7 +3110,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: true,
             animations_enabled: true,
             effects: Default::default(),
@@ -3188,7 +3136,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: true,
             animations_enabled: true,
             effects: Default::default(),
@@ -3222,7 +3170,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -3565,7 +3513,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -3613,7 +3561,7 @@ mod tests {
             for x in 0..area.width {
                 row.push(buf[(x, y)].symbol().chars().next().unwrap_or(' '));
             }
-            if row.contains("Ask Codex") {
+            if row.contains("Ask Mikodex") {
                 found_composer = true;
                 break;
             }
@@ -3633,7 +3581,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -3708,7 +3656,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -3740,7 +3688,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -3764,7 +3712,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -3794,7 +3742,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -3832,7 +3780,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -3865,7 +3813,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -3897,7 +3845,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -3927,7 +3875,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -3951,7 +3899,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -4000,7 +3948,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -4069,7 +4017,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -4106,7 +4054,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -4155,7 +4103,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -4281,7 +4229,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -4330,7 +4278,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),
@@ -4409,7 +4357,7 @@ mod tests {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
             effects: Default::default(),

@@ -32,12 +32,6 @@ pub(super) enum SlashValidation {
     Deferred,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum SlashPopupInputMode {
-    Normal,
-    UnavailableThread,
-}
-
 pub(super) enum SubmissionValidation {
     Valid,
     UnknownCommand(String),
@@ -174,10 +168,6 @@ impl<'a> SlashInput<'a> {
         has_slash_command_prefix(name, self.command_flags, self.service_tier_commands)
     }
 
-    pub(super) fn command_reference_items(&self) -> Vec<(String, String)> {
-        self.command_popup("/").command_reference_items()
-    }
-
     pub(super) fn command_popup(&self, filter_text: &str) -> CommandPopup {
         let mut command_popup = CommandPopup::new(
             CommandPopupFlags {
@@ -248,7 +238,6 @@ impl ChatComposer {
     pub(super) fn handle_key_event_with_slash_popup(
         &mut self,
         key_event: KeyEvent,
-        mode: SlashPopupInputMode,
     ) -> (InputResult, bool) {
         if self.handle_empty_prompt_shortcut(&key_event) {
             return (InputResult::None, true);
@@ -389,7 +378,7 @@ impl ChatComposer {
                 ..
             } => {
                 if let Some(sel) = popup.selected_item() {
-                    if self.blocks_direct_input && mode == SlashPopupInputMode::Normal {
+                    if self.blocks_direct_input {
                         let command_is_allowed = match &sel {
                             CommandItem::Builtin(cmd) => {
                                 parse_slash_name(self.draft.textarea.text()).is_some_and(
@@ -636,7 +625,7 @@ mod tests {
             /*has_input_focus*/ true,
             AppEventSender::new(tx),
             /*enhanced_keys_supported*/ false,
-            "Ask Codex to do anything".to_string(),
+            "Ask Mikodex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         )
     }

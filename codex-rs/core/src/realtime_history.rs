@@ -4,19 +4,16 @@
 
 mod presentation;
 
-use crate::observation_clock::ObservationClock;
 use codex_protocol::items::TurnItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::RealtimeEvent;
 use codex_protocol::protocol::RealtimeTranscriptDelta;
 use codex_protocol::protocol::RealtimeTranscriptDone;
 use codex_protocol::realtime::BemItemPresentation;
-use codex_protocol::realtime::RealtimeFrameChannels;
 use codex_protocol::realtime::RealtimeItem;
 use codex_protocol::realtime::RealtimeItemContent;
 use codex_protocol::realtime::RealtimeSessionOutcome;
 use codex_protocol::realtime::RealtimeTranscriptRole;
-use codex_protocol::realtime::RealtimeVoiceTranscript;
 use codex_protocol::user_input::UserInput;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -29,7 +26,6 @@ struct ActiveSegment {
     id: String,
     role: RealtimeTranscriptRole,
     text: String,
-    observed_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Default)]
@@ -75,7 +71,6 @@ pub(crate) struct RealtimeTranscriptStream {
 
 #[derive(Debug, Default)]
 pub(crate) struct RealtimeEventEffects {
-    pub(crate) seal_frames: bool,
     pub(crate) order: RealtimeEventOrder,
     pub(crate) items: Vec<RealtimeItem>,
     pub(crate) transcript_stream: Option<RealtimeTranscriptStream>,
@@ -97,9 +92,6 @@ enum Continuation {
 /// Retains only live session state; durable history is served by the rollout index.
 #[derive(Default)]
 pub(crate) struct RealtimeHistoryState {
-    pub(crate) observation_clock: ObservationClock,
-    /// Resolved once at the first call. Unresolved and unenrolled threads write legacy history.
-    pub(crate) frame_enrollment: Option<bool>,
     active_session_id: Option<String>,
     active_segments: ActiveTranscriptSegments,
     streaming_agent_message: Option<StreamingAgentMessage>,
@@ -111,10 +103,6 @@ pub(crate) struct RealtimeHistoryState {
 }
 
 impl RealtimeHistoryState {
-    pub(crate) fn frames_enabled(&self) -> bool {
-        self.frame_enrollment == Some(true)
-    }
-
     fn should_seal_user_input(&self, input: &[UserInput]) -> bool {
         self.active_session_id.is_some()
             && [&self.active_segments.user, &self.active_segments.assistant]
@@ -200,16 +188,8 @@ impl RealtimeHistoryState {
                     self.active_session_id = Some(session_id.clone());
                     self.failed = false;
                     items.push(RealtimeItem {
-                        // The call ID lets a reader seek directly to its opening position.
-                        id: if self.frames_enabled() {
-                            format!("realtime-session-start:{session_id}")
-                        } else {
-                            Uuid::now_v7().to_string()
-                        },
+                        id: Uuid::now_v7().to_string(),
                         realtime_session_id: session_id.clone(),
-                        observed_at_ms: self
-                            .frames_enabled()
-                            .then(|| self.observation_clock.now_ms()),
                         content: RealtimeItemContent::RealtimeSessionStarted,
                     });
                 }
@@ -304,9 +284,6 @@ impl RealtimeHistoryState {
                     items.push(RealtimeItem {
                         id: Uuid::now_v7().to_string(),
                         realtime_session_id: session_id,
-                        observed_at_ms: self
-                            .frames_enabled()
-                            .then(|| self.observation_clock.now_ms()),
                         content: RealtimeItemContent::RealtimeSessionClosed {
                             outcome: if self.failed {
                                 RealtimeSessionOutcome::Failed
@@ -321,7 +298,6 @@ impl RealtimeHistoryState {
             _ => {}
         }
         RealtimeEventEffects {
-            seal_frames: self.frames_enabled(),
             order,
             items,
             transcript_stream,
@@ -353,9 +329,6 @@ impl RealtimeHistoryState {
         items.push(RealtimeItem {
             id: Uuid::now_v7().to_string(),
             realtime_session_id,
-            observed_at_ms: self
-                .frames_enabled()
-                .then(|| self.observation_clock.now_ms()),
             content: RealtimeItemContent::BemItemPromoted {
                 turn_id: turn_id.to_string(),
                 item_id: item_id.to_string(),
@@ -371,7 +344,6 @@ impl RealtimeHistoryState {
     ) -> Option<RealtimeTranscriptStream> {
         let session_id = self.active_session_id.clone()?;
         self.active_segments.first_active_role.get_or_insert(role);
-        let frames_enabled = self.frames_enabled();
         let segment = self
             .active_segments
             .slot_mut(role)
@@ -380,18 +352,14 @@ impl RealtimeHistoryState {
                 id: Uuid::now_v7().to_string(),
                 role,
                 text: String::new(),
-                observed_at_ms: None,
             });
-        let observed_at_ms = frames_enabled.then(|| {
-            *segment
-                .observed_at_ms
-                .get_or_insert_with(|| self.observation_clock.now_ms())
-        });
         let started_item = segment.text.is_empty().then(|| RealtimeItem {
             id: segment.id.clone(),
             realtime_session_id: segment.session_id.clone(),
-            observed_at_ms,
-            content: speech(frames_enabled, segment.role, String::new()),
+            content: RealtimeItemContent::TranscriptSegment {
+                role: segment.role,
+                text: String::new(),
+            },
         });
         segment.text.push_str(&delta.delta);
         Some(RealtimeTranscriptStream {
@@ -457,8 +425,10 @@ impl RealtimeHistoryState {
             items.push(RealtimeItem {
                 id: segment.id,
                 realtime_session_id: segment.session_id.clone(),
-                observed_at_ms: segment.observed_at_ms,
-                content: speech(self.frames_enabled(), segment.role, segment.text),
+                content: RealtimeItemContent::TranscriptSegment {
+                    role: segment.role,
+                    text: segment.text,
+                },
             });
         }
         if matches!(continuation, Continuation::Continue) {
@@ -470,21 +440,8 @@ impl RealtimeHistoryState {
                 id: Uuid::now_v7().to_string(),
                 role: segment.role,
                 text: String::new(),
-                observed_at_ms: None,
             });
         }
-    }
-}
-
-fn speech(frames_enabled: bool, role: RealtimeTranscriptRole, text: String) -> RealtimeItemContent {
-    if frames_enabled {
-        RealtimeItemContent::Frame {
-            channels: RealtimeFrameChannels {
-                voice_transcript: RealtimeVoiceTranscript { role, text },
-            },
-        }
-    } else {
-        RealtimeItemContent::TranscriptSegment { role, text }
     }
 }
 

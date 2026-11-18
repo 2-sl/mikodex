@@ -12,7 +12,6 @@ fn verification_request() -> ServerRequest {
     ServerRequest::McpServerElicitationRequest {
         request_id: RequestId::Integer(7),
         params: McpServerElicitationRequestParams {
-            environment_id: None,
             thread_id: ThreadId::new().to_string(),
             turn_id: None,
             server_name: "deployments".to_string(),
@@ -195,7 +194,7 @@ async fn run_verification_rpc_scenario(scenario: RpcScenario) -> color_eyre::Res
                 }
             }
         }
-        color_eyre::eyre::bail!("connection closed before the elicitation response");
+        color_eyre::eyre::bail!("connection closed before the elicitation response")
     });
     let client = crate::connect_remote_app_server(endpoint).await?;
     let mode = if scenario == RpcScenario::RemoteWorkspace {
@@ -316,7 +315,7 @@ async fn run_verification_rpc_scenario(scenario: RpcScenario) -> color_eyre::Res
         let message = if scenario == RpcScenario::RemoteWorkspace {
             "User verification is unavailable for remote workspaces."
         } else {
-            "The local Codex binary could not complete user verification."
+            "The local Mikodex binary could not complete user verification."
         };
         let ServerNotification::Warning(warning) = notification.as_ref() else {
             panic!("expected warning notification");

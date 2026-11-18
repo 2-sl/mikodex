@@ -2,7 +2,7 @@
 //!
 //! Local copying uses the native clipboard, or the Windows clipboard directly on WSL.
 //! WSL sessions over SSH with a forwarded X11 display use the native clipboard instead.
-//! In tmux and Herdr, also forward to the attached terminal so clients attached after Codex
+//! In tmux and Herdr, also forward to the attached terminal so clients attached after Mikodex
 //! started receive the copy. Over SSH, wrap OSC 52 for GNU screen when detected.
 //!
 //! Terminal writes have no delivery acknowledgement: a successful send must not
@@ -234,7 +234,7 @@ fn copy_to_clipboard_with(
     };
     // Copy natively first: an X11 SelectionClear from a terminal write can otherwise
     // race with arboard reusing its ownership window and clear the new native data.
-    // Persistent multiplexer sessions may gain remote clients after Codex starts, so still
+    // Persistent multiplexer sessions may gain remote clients after Mikodex starts, so still
     // forward even when no SSH variables were inherited or native copying succeeded.
     let terminal_result =
         (environment.tmux_session || environment.herdr_session || environment.ssh_session)

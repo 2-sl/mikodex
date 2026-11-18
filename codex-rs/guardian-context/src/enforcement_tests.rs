@@ -54,7 +54,6 @@ fn native_agent_admission_uses_current_history_and_preserves_identity() {
         })
         .collect(),
         truncations: Vec::new(),
-        enclosing_call: None,
     };
     let mut delivered = original.clone();
     delivered.set_turn_id_if_missing("reviewer-turn");
@@ -113,7 +112,6 @@ fn native_agent_admission_uses_current_history_and_preserves_identity() {
                 },
             ],
             truncations: Vec::new(),
-            enclosing_call: None,
         };
         let exact_budget = section_tokens(&pending.sections[1]);
         let mut expected = pending.clone();
@@ -136,7 +134,7 @@ fn native_agent_admission_uses_current_history_and_preserves_identity() {
         let admitted = pending
             .prepare_elastic_entries(&config)
             .unwrap()
-            .prepare_delivery(&[])
+            .prepare_sync_delivery(&[])
             .unwrap()
             .enforce_budget(
                 RequestBudget {
@@ -224,7 +222,6 @@ fn recovery_shortens_older_history_only_after_optional_evidence() {
                 ]),
             }],
             truncations: Vec::new(),
-            enclosing_call: None,
         };
         let mut reductions = vec![0, 4_000];
         if format == crate::TranscriptFormat::Line {
@@ -446,7 +443,6 @@ fn budget_reserves_existing_context_and_preserves_required_messages() {
             },
         ],
         truncations: Vec::new(),
-        enclosing_call: None,
     };
     let notice = SectionOutput {
         id: "budget_omission",
@@ -528,7 +524,6 @@ fn image_accounting_preserves_later_eviction_policy() {
             ]),
         }],
         truncations: Vec::new(),
-        enclosing_call: None,
     };
     let without_oversized_image = context
         .clone()
@@ -562,9 +557,6 @@ fn image_accounting_preserves_later_eviction_policy() {
         })),
         ImageReference::File { .. } => Some(Cow::Borrowed(image)),
     });
-    let mut rejected = context.clone();
-    rejected.retain_new_images(&[], |_, _| None);
-    assert_eq!(rejected.truncations.len(), 1);
     let mut continued = context.clone();
     let completed = context.clone().into_messages();
     continued.retain_new_images(&completed, |image, _| Some(Cow::Borrowed(image)));
@@ -659,7 +651,6 @@ fn image_accounting_preserves_later_eviction_policy() {
         let context = ComposedContext {
             sections,
             truncations: Vec::new(),
-            enclosing_call: None,
         }
         .enforce_budget(
             RequestBudget {

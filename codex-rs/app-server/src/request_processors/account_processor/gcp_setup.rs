@@ -50,7 +50,6 @@ pub(crate) async fn handle_gcp_setup(
             &layers,
             GCP_PROVIDER_ID,
             [
-                ("base_url", None),
                 ("project_id", Some(params.project_id.trim())),
                 (
                     "location",
@@ -60,6 +59,11 @@ pub(crate) async fn handle_gcp_setup(
             ],
         )
         .map_err(map_config_error)?;
+    if provider.base_url.is_some() {
+        return Err(invalid_request(
+            "Google Cloud has a custom `base_url`. Clear `model_providers.gcp.base_url` before configuring a project and location.",
+        ));
+    }
     // Even checking a Windows UNC credential path can contact the remote host.
     let permit = network_policy
         .acquire_for_unsupported_sdk()

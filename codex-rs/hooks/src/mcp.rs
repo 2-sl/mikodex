@@ -7,10 +7,6 @@ use serde_json::Value;
 /// One MCP tool call requested by a configured hook handler.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HookMcpCall {
-    /// A bundled REPL cleanup may skip a private local transport whose startup was never requested.
-    pub skip_dormant_repl_cleanup: bool,
-    /// Exact bundled App identity; executors must enforce live connector and approval policy.
-    pub expected_app_connector_id: Option<&'static str>,
     pub server: String,
     pub tool: String,
     pub environment_id: Option<String>,
@@ -19,14 +15,13 @@ pub struct HookMcpCall {
     pub timeout: Duration,
 }
 
-/// The MCP hook's text, structured result, and originating callable namespace.
+/// Text returned by an MCP hook and the callable namespace that supplied it.
 pub struct HookMcpOutput {
     pub text: String,
-    pub structured_content: Option<serde_json::Value>,
     pub source_tool_namespace: Option<String>,
 }
 
-/// Executes MCP tools on behalf of hooks without coupling this crate to core.
+/// Executes already-connected MCP tools on behalf of hooks without coupling this crate to core.
 ///
 /// Implementations own server readiness, policy enforcement, timeout handling, and elicitation.
 pub trait HookMcpExecutor: Send + Sync {

@@ -51,8 +51,7 @@ async fn first_request_item_types_roles_and_content_annotations() -> Result<()> 
             });
             config.rollout_budget = Some(RolloutBudgetConfig {
                 enforce_limit: true,
-                limit_budget: 100.0,
-                reminder_at_context_start: true,
+                limit_tokens: 100,
                 reminder_at_remaining_tokens: Vec::new(),
                 sampling_token_weight: 1.0,
                 prefill_token_weight: 1.0,

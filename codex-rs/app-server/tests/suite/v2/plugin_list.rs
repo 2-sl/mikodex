@@ -291,12 +291,6 @@ async fn plugin_installed_prefers_remote_curated_conflicts_when_remote_plugin_en
     write_openai_curated_marketplace(codex_home.path(), &["linear", "calendar"])?;
     write_installed_plugin(&codex_home, "openai-curated", "linear")?;
     write_installed_plugin(&codex_home, "openai-curated", "calendar")?;
-    write_installed_plugin_with_version(&codex_home, "openai-curated-remote", "linear", "1.2.2")?;
-    codex_core_plugins::store::PluginStore::new(codex_home.path().to_path_buf())
-        .write_remote_plugin_id(
-            &codex_plugin::PluginId::new("linear".into(), "openai-curated-remote".into())?,
-            "plugins~Plugin_00000000000000000000000000000000",
-        )?;
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(
@@ -384,8 +378,6 @@ enabled = true
             .map(|plugin| {
                 (
                     plugin.id.clone(),
-                    plugin.version.clone(),
-                    plugin.local_version.clone(),
                     plugin.enabled,
                     plugin.install_policy_source,
                     plugin.must_show_installation_interstitial,
@@ -395,16 +387,12 @@ enabled = true
         vec![
             (
                 "linear@openai-curated-remote".to_string(),
-                Some("1.2.3".to_string()),
-                Some("1.2.2".to_string()),
                 expected_remote_enabled,
                 Some(PluginInstallPolicySource::WorkspaceSetting),
                 Some(false),
             ),
             (
                 "remote-only@openai-curated-remote".to_string(),
-                Some("1.2.3".to_string()),
-                None,
                 expected_remote_enabled,
                 Some(PluginInstallPolicySource::WorkspaceSetting),
                 Some(false),
@@ -861,7 +849,7 @@ async fn plugin_list_omitted_cwds_excludes_server_project_config() -> Result<()>
     let project_marketplace = TempDir::new()?;
     std::fs::create_dir_all(codex_home.path().join(".agents/plugins"))?;
     std::fs::create_dir_all(codex_home.path().join(".git"))?;
-    std::fs::create_dir_all(codex_home.path().join(".codex"))?;
+    std::fs::create_dir_all(codex_home.path().join(".mikodex"))?;
     std::fs::create_dir_all(project_marketplace.path().join(".agents/plugins"))?;
     write_installed_plugin(&codex_home, "home-marketplace", "home-plugin")?;
     std::fs::write(
@@ -1173,7 +1161,7 @@ async fn plugin_list_refreshes_plugins_from_each_cwd(
     };
     let versions = ["1.1.0", "2.0.0"];
     for ((repo, name), version) in repos.iter().zip(names).zip(versions) {
-        for directory in [".git", ".codex", ".agents/plugins", "sample/.codex-plugin"] {
+        for directory in [".git", ".mikodex", ".agents/plugins", "sample/.codex-plugin"] {
             std::fs::create_dir_all(repo.join(directory))?;
         }
         std::fs::write(
@@ -1268,7 +1256,7 @@ async fn plugin_catalogs_skip_invalid_project_config_and_report_cwd_error() -> R
     let invalid_repo = workspace.path().join("invalid");
     let valid_repo = workspace.path().join("valid");
     for repo in [&invalid_repo, &valid_repo] {
-        for directory in [".git", ".codex", ".agents/plugins"] {
+        for directory in [".git", ".mikodex", ".agents/plugins"] {
             std::fs::create_dir_all(repo.join(directory))?;
         }
         set_project_trust_level(codex_home.path(), repo, TrustLevel::Trusted)?;
@@ -1562,7 +1550,7 @@ enabled = true
   ]
 }"#,
     )?;
-    std::fs::create_dir_all(workspace_enabled.path().join(".codex"))?;
+    std::fs::create_dir_all(workspace_enabled.path().join(".mikodex"))?;
     std::fs::write(
         workspace_enabled.path().join(".codex/config.toml"),
         r#"[plugins."shared-plugin@codex-curated"]
@@ -1898,7 +1886,7 @@ enabled = true
     let later_repo = TempDir::new()?;
     let mut cwds = vec![AbsolutePathBuf::try_from(repo_root.path())?];
     if configured_in_later_cwd {
-        for directory in [".git", ".codex", ".agents/plugins"] {
+        for directory in [".git", ".mikodex", ".agents/plugins"] {
             std::fs::create_dir_all(later_repo.path().join(directory))?;
         }
         std::fs::copy(
@@ -2195,16 +2183,11 @@ async fn plugin_list_includes_remote_marketplaces_when_remote_plugin_enabled(
             .chatgpt_account_id("account-123"),
         AuthCredentialsStoreMode::File,
     )?;
-    write_installed_plugin_with_version(&codex_home, "openai-curated-remote", "linear", "1.2.2")?;
-    codex_core_plugins::store::PluginStore::new(codex_home.path().to_path_buf())
-        .write_remote_plugin_id(
-            &codex_plugin::PluginId::new("linear".into(), "openai-curated-remote".into())?,
-            "plugins~Plugin_00000000000000000000000000000000",
-        )?;
+    write_installed_plugin_with_version(&codex_home, "openai-curated-remote", "linear", "1.2.3")?;
 
     let repo = TempDir::new()?;
     let cwds = if project_configuration != ProjectPluginConfiguration::None {
-        for directory in [".git", ".codex", ".agents/plugins"] {
+        for directory in [".git", ".mikodex", ".agents/plugins"] {
             std::fs::create_dir_all(repo.path().join(directory))?;
         }
         let config = if project_configuration == ProjectPluginConfiguration::Invalid {
@@ -2415,7 +2398,7 @@ async fn plugin_list_includes_remote_marketplaces_when_remote_plugin_enabled(
     );
     assert_eq!(
         remote_marketplace.plugins[0].local_version.as_deref(),
-        Some("1.2.2")
+        Some("1.2.3")
     );
     assert_eq!(remote_marketplace.plugins[0].installed, true);
     assert_eq!(
@@ -4617,7 +4600,7 @@ remote_plugin = true
     )?;
 
     let repo = TempDir::new()?;
-    for directory in [".git", ".codex", ".agents/plugins"] {
+    for directory in [".git", ".mikodex", ".agents/plugins"] {
         std::fs::create_dir_all(repo.path().join(directory))?;
     }
     std::fs::write(

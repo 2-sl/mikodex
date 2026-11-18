@@ -228,11 +228,17 @@ impl CommandExecManager {
             return Ok(());
         }
 
-        let env = &exec_request.env;
-        let arg0 = &exec_request.arg0;
+        let ExecRequest {
+            command,
+            cwd,
+            env,
+            expiration,
+            sandbox: _sandbox,
+            arg0,
+            ..
+        } = exec_request;
         // TODO(anp): Keep PathUri through the local command launch boundary.
-        let cwd = exec_request
-            .cwd
+        let cwd = cwd
             .to_abs_path()
             .map_err(|err| invalid_request(format!("invalid command cwd: {err}")))?;
 
@@ -245,8 +251,8 @@ impl CommandExecManager {
         };
 
         let sessions = Arc::clone(&self.sessions);
-        let (program, args) = exec_request
-            .program_and_args()
+        let (program, args) = command
+            .split_first()
             .ok_or_else(|| invalid_request("command must not be empty"))?;
         {
             let mut sessions = self.sessions.lock().await;
@@ -266,21 +272,22 @@ impl CommandExecManager {
                 program,
                 args,
                 cwd.as_path(),
-                env,
-                arg0,
+                &env,
+                &arg0,
                 size.unwrap_or_default(),
                 codex_utils_pty::ChildFds::Inherited(&[]),
             )
             .await
         } else if stream_stdin {
-            codex_utils_pty::spawn_pipe_process(program, args, cwd.as_path(), env, arg0, &[]).await
+            codex_utils_pty::spawn_pipe_process(program, args, cwd.as_path(), &env, &arg0, &[])
+                .await
         } else {
             codex_utils_pty::spawn_pipe_process_no_stdin(
                 program,
                 args,
                 cwd.as_path(),
-                env,
-                arg0,
+                &env,
+                &arg0,
                 &[],
             )
             .await
@@ -302,7 +309,7 @@ impl CommandExecManager {
                 control_rx,
                 stream_stdin,
                 stream_stdout_stderr,
-                expiration: exec_request.expiration,
+                expiration,
                 output_bytes_cap,
             })
             .await;

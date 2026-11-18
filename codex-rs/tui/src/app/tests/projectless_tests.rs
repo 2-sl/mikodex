@@ -3,7 +3,6 @@
 use super::session_lifecycle_requests::HistoryCapabilities;
 use super::session_lifecycle_requests::start_recording_app_server_with_history;
 use super::*;
-use crate::app::session_lifecycle::FreshSessionStart;
 use codex_context_fragments::side_conversation_boundary;
 use pretty_assertions::assert_eq;
 
@@ -53,7 +52,7 @@ sandbox = "unelevated"
     app.start_fresh_session(
         &mut tui,
         &mut server,
-        FreshSessionStart::PreserveCurrentView(None),
+        /*session_start_source*/ None,
         /*initial_user_message*/ None,
         /*new_thread_name*/ None,
     )
@@ -209,7 +208,7 @@ sandbox = "unelevated"
         )
     );
     // A new task in a marked project still gets implicit defaults when leaving it.
-    std::fs::create_dir(untrusted.path().join(".codex"))?;
+    std::fs::create_dir(untrusted.path().join(".mikodex"))?;
     std::fs::write(untrusted.path().join(".codex/config.toml"), "")?;
     crate::config_update::write_trusted_project(server.request_handle(), untrusted.path()).await?;
     app.new_agents_overview_session(&mut tui, &mut server, Some(untrusted.path().abs()))
@@ -317,7 +316,7 @@ async fn local_projectless_defaults_respect_trust_scope_and_explicit_settings() 
         if project_marker {
             // The server must notice a project layer added after client discovery.
             assert!(config.config_layer_stack.is_projectless());
-            std::fs::create_dir(config.cwd.join(".codex"))?;
+            std::fs::create_dir(config.cwd.join(".mikodex"))?;
             std::fs::write(
                 config.cwd.join(".codex/config.toml"),
                 "model = \"untrusted-model\"\n",

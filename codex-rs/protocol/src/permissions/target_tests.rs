@@ -135,7 +135,7 @@ fn managed_denials_preserve_native_metadata_read_rejections() {
             /*exclude_tmpdir_env_var*/ true,
             /*exclude_slash_tmp*/ true,
         );
-        for name in [".codex", ".git"] {
+        for name in [".mikodex", ".git"] {
             let denied_root = extra_root.join(name).unwrap();
             let child = denied_root.join("reopened").unwrap();
             for (path, expected_root_access) in [
@@ -437,6 +437,9 @@ fn materializing_legacy_home_relative_workspace_denials_removes_all_grants() {
                             &native_root,
                         )),
                 );
+                materialized.push(policy.with_materialized_project_roots_for_workspace_roots(
+                    std::slice::from_ref(&native_root),
+                ));
             }
             for policy in materialized {
                 assert_eq!(policy, FileSystemSandboxPolicy::restricted(Vec::new()));

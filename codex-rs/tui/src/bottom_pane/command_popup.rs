@@ -212,6 +212,11 @@ impl CommandPopup {
         out
     }
 
+    pub(crate) fn filtered_items(&self) -> Vec<CommandItem> {
+        self.filtered().into_iter().map(|(c, _)| c).collect()
+    }
+
+    /// Return the same available command names and descriptions shown by the slash popup.
     pub(crate) fn command_reference_items(&self) -> Vec<(String, String)> {
         self.commands
             .iter()
@@ -229,10 +234,6 @@ impl CommandPopup {
                 (item.command().to_owned(), description.to_owned())
             })
             .collect()
-    }
-
-    pub(crate) fn filtered_items(&self) -> Vec<CommandItem> {
-        self.filtered().into_iter().map(|(c, _)| c).collect()
     }
 
     fn rows_from_matches(

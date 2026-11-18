@@ -15,14 +15,11 @@ use codex_protocol::error::SandboxErr;
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::models::FileSystemPermissions;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::sandbox::SandboxOverride;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxManager;
-use codex_sandboxing::SandboxNetwork;
 use codex_sandboxing::SandboxSelection;
 use codex_sandboxing::SandboxTransformRequest;
 use codex_sandboxing::SandboxType;
-use codex_sandboxing::SandboxablePreference;
 use codex_sandboxing::policy_transforms::merge_permission_profiles;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
@@ -37,11 +34,8 @@ mod tests;
 
 #[derive(Clone)]
 pub(crate) struct ShellSnapshotSandbox {
-    selection: SandboxSelection,
+    sandbox: SandboxType,
     sandbox_requested: bool,
-    manager: SandboxManager,
-    // Launch observation only. Snapshot reuse depends on the effective policy below.
-    sandbox_override: SandboxOverride,
     permissions: PermissionProfile,
     enforce_managed_network: bool,
     sandbox_policy_cwd: PathUri,
@@ -84,18 +78,8 @@ impl ShellSnapshotSandbox {
         additional_permissions: Option<&AdditionalPermissionProfile>,
     ) -> Self {
         Self {
-            selection: match attempt.local_selection {
-                SandboxSelection::Platform {
-                    windows_sandbox, ..
-                } if attempt.sandbox_requested => SandboxSelection::Platform {
-                    preference: SandboxablePreference::Require,
-                    windows_sandbox,
-                },
-                selection => selection,
-            },
+            sandbox: attempt.sandbox,
             sandbox_requested: attempt.sandbox_requested,
-            manager: attempt.manager.clone(),
-            sandbox_override: attempt.sandbox_override,
             permissions: attempt.permissions.clone(),
             enforce_managed_network: attempt.enforce_managed_network,
             sandbox_policy_cwd: attempt.sandbox_cwd.clone(),
@@ -103,7 +87,7 @@ impl ShellSnapshotSandbox {
             sandbox_exe: attempt.sandbox_exe.cloned(),
             use_legacy_landlock: attempt.use_legacy_landlock,
             windows_sandbox_level: attempt.windows_sandbox_level,
-            network: network.cloned(),
+            network: attempt.network_proxy(network).cloned(),
             environment_id: environment_id.to_string(),
             additional_permissions: additional_permissions.cloned(),
             network_denial_cancellation_token: attempt.network_denial_cancellation_token.clone(),
@@ -112,7 +96,7 @@ impl ShellSnapshotSandbox {
 
     pub(crate) fn cache_key(&self) -> Result<String> {
         serde_json::to_string(&(
-            format!("{:?}", self.selection),
+            self.sandbox.as_metric_tag(),
             self.sandbox_requested,
             &self.permissions,
             self.enforce_managed_network,
@@ -139,12 +123,7 @@ impl ShellSnapshotSandbox {
         shell_name: &str,
         snapshot_read_path: Option<&AbsolutePathBuf>,
     ) -> Result<String> {
-        if self.sandbox_requested
-            && matches!(
-                self.selection,
-                SandboxSelection::Explicit(SandboxType::None)
-            )
-        {
+        if self.sandbox_requested && self.sandbox == SandboxType::None {
             bail!("shell snapshot sandbox cannot be enforced on this host");
         }
 
@@ -160,15 +139,6 @@ impl ShellSnapshotSandbox {
         let (program, args) = args
             .split_first()
             .ok_or_else(|| anyhow!("shell snapshot command is empty"))?;
-        let cancellation = self
-            .network_denial_cancellation_token
-            .as_ref()
-            .map_or_else(CancellationToken::new, CancellationToken::child_token);
-        let _cancel_on_drop = cancellation.clone().drop_guard();
-        let expiration = ExecExpiration::TimeoutOrCancellation {
-            timeout: snapshot_timeout,
-            cancellation,
-        };
         let snapshot_permissions = snapshot_read_path.and_then(|path| {
             snapshot_read_permissions(
                 path,
@@ -183,9 +153,9 @@ impl ShellSnapshotSandbox {
             self.additional_permissions.as_ref(),
             snapshot_permissions.as_ref(),
         );
-        let request = ExecRequest::prepare_local_sandbox(
-            &self.manager,
-            SandboxTransformRequest {
+        let manager = SandboxManager::new();
+        let request = manager
+            .transform(SandboxTransformRequest {
                 command: SandboxCommand {
                     program: program.clone().into(),
                     args: args.to_vec(),
@@ -195,27 +165,44 @@ impl ShellSnapshotSandbox {
                     additional_permissions,
                 },
                 permissions: &self.permissions,
-                workspace_roots: Some(&self.workspace_roots),
-                runtime_readable_paths: None,
-                selection: self.selection,
-                network: SandboxNetwork::new(
-                    self.enforce_managed_network,
-                    self.network.as_ref(),
-                    Some(&self.environment_id),
-                ),
+                workspace_roots: None,
+                runtime_readable_paths: &[],
+                selection: SandboxSelection::Explicit(self.sandbox),
+                enforce_managed_network: self.enforce_managed_network,
+                environment_id: Some(&self.environment_id),
+                network: self.network.as_ref(),
                 sandbox_policy_cwd: &self.sandbox_policy_cwd,
                 sandbox_exe: self.sandbox_exe.as_deref(),
                 use_legacy_landlock: self.use_legacy_landlock,
                 windows_sandbox_level: self.windows_sandbox_level,
-            },
+            })
+            .context("failed to prepare shell snapshot sandbox")?
+            .into_command_request();
+        let workspace_roots = self
+            .workspace_roots
+            .iter()
+            .map(PathUri::to_abs_path)
+            .collect::<std::io::Result<Vec<_>>>()
+            .context("failed to resolve shell snapshot workspace roots")?;
+        let cancellation = self
+            .network_denial_cancellation_token
+            .as_ref()
+            .map_or_else(CancellationToken::new, CancellationToken::child_token);
+        let _cancel_on_drop = cancellation.clone().drop_guard();
+        let expiration = ExecExpiration::TimeoutOrCancellation {
+            timeout: snapshot_timeout,
+            cancellation,
+        };
+        let request = ExecRequest::from_sandbox_exec_request(
+            request,
             ExecOptions {
                 expiration,
                 capture_policy: ExecCapturePolicy::SensitiveFullBuffer,
             },
-            self.sandbox_override,
+            workspace_roots,
         )
         .await
-        .context("failed to prepare shell snapshot sandbox")?;
+        .context("failed to prepare shell snapshot execution")?;
         // Caller cancellation must leave execution alive long enough to clean up its process group.
         let output = tokio::spawn(execute_env(request, /*stdout_stream*/ None))
             .await

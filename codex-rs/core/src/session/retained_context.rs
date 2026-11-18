@@ -156,6 +156,7 @@ impl Session {
     }
 
     pub(crate) async fn record_retained_context(&self, mut event: RetainedContextEvent) {
+        event.bound();
         // Share the checkpoint persistence lock so a fact cannot land on the wrong side
         // of the checkpoint/suffix boundary. Ephemeral threads use the same live state.
         let _guard = thread_settings::acquire_persistence_lock(self).await;
@@ -164,7 +165,7 @@ impl Session {
             .lock()
             .await
             .history
-            .record_retained_context_for_persistence(&mut event)
+            .record_retained_context(&event)
         {
             self.persist_rollout_items(&[RolloutItem::RetainedContext(event)])
                 .await;
@@ -210,12 +211,10 @@ impl Session {
             let mut state = session.state.lock().await;
             let mut event = RetainedContextEvent::DeliveredAssistantMessage {
                 message,
-                retained_source: None,
                 acceptance_order: state.history.reserve_input_order(),
             };
-            state
-                .history
-                .record_retained_context_for_persistence(&mut event);
+            event.bound();
+            state.history.record_retained_context(&event);
             let mut pending = session
                 .code_mode_message_tasks
                 .pending_persistence

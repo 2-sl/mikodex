@@ -43,9 +43,9 @@ impl ToolExecutor<ToolInvocation> for ListMcpResourceTemplatesHandler {
 }
 
 impl ListMcpResourceTemplatesHandler {
-    pub fn new(messages: Option<&ToolMessage>, include_environment_id: bool) -> Self {
+    pub fn new(messages: Option<&ToolMessage>) -> Self {
         Self {
-            spec: create_list_mcp_resource_templates_tool(messages, include_environment_id),
+            spec: create_list_mcp_resource_templates_tool(messages),
         }
     }
 
@@ -62,28 +62,20 @@ impl ListMcpResourceTemplatesHandler {
         } = invocation;
         let turn = std::sync::Arc::clone(&step_context.turn);
         let mcp = &step_context.mcp;
-        let exposure = mcp.config().mcp_server_catalog.exposure();
 
         let arguments = resource_arguments(&payload)?;
         let args = ListResourceArgs::parse(arguments.clone())?;
-        let target = args.target(&step_context);
 
         let invocation = McpInvocation {
             server: args.server.clone().unwrap_or_else(|| "codex".to_string()),
-            environment_id: target
-                .as_ref()
-                .ok()
-                .and_then(Option::as_ref)
-                .and_then(|(key, _)| key.scoped_environment_id())
-                .map(str::to_owned),
             tool: "list_mcp_resource_templates".to_string(),
             arguments: arguments.clone(),
         };
 
         run_resource_operation(&session, &step_context, &call_id, invocation, async {
-            if let Some((server_key, params)) = target? {
+            if let Some((server_name, params)) = args.target(turn.as_ref())? {
                 let result = mcp
-                    .list_resource_templates(server_key, params)
+                    .list_resource_templates(&server_name, params)
                     .await
                     .map_err(|err| {
                         FunctionCallError::RespondToModel(format!(
@@ -91,17 +83,16 @@ impl ListMcpResourceTemplatesHandler {
                         ))
                     })?;
                 Ok(ListResourceTemplatesPayload::from_single_server(
-                    server_key, result, exposure,
+                    server_name,
+                    result,
                 ))
             } else {
                 let templates = mcp
-                    .list_all_resource_templates(|server_key| {
-                        model_can_access_mcp_server(turn.as_ref(), server_key.name())
+                    .list_all_resource_templates(|server_name| {
+                        model_can_access_mcp_server(turn.as_ref(), server_name)
                     })
                     .await;
-                Ok(ListResourceTemplatesPayload::from_all_servers(
-                    templates, exposure,
-                ))
+                Ok(ListResourceTemplatesPayload::from_all_servers(templates))
             }
         })
         .await

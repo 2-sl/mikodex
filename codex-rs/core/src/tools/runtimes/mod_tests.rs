@@ -23,7 +23,6 @@ use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::sandbox::SandboxOverride;
 use codex_sandboxing::SandboxManager;
-use codex_sandboxing::SandboxSelection;
 use codex_sandboxing::SandboxType;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
@@ -122,7 +121,7 @@ async fn explicit_escalation_prepares_exec_without_managed_network() -> anyhow::
     let manager = SandboxManager::new();
     let attempt = SandboxAttempt {
         sandbox_override: SandboxOverride::NoOverride,
-        local_selection: SandboxSelection::Explicit(SandboxType::None),
+        sandbox: SandboxType::None,
         sandbox_requested: false,
         permissions: &permissions,
         exec_server_permissions: &permissions,

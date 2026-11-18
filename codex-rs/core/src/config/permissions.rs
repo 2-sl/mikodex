@@ -49,7 +49,7 @@ pub(crate) const BUILT_IN_DANGER_FULL_ACCESS_PROFILE: &str =
     BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
 
 /// Keep the active apply_patch aliases readable without granting access to other
-/// sessions or the rest of CODEX_HOME. Preserve the alias directory, not its target.
+/// sessions or the rest of MIKODEX_HOME. Preserve the alias directory, not its target.
 pub(super) fn active_arg0_helper_dir(
     codex_home: &Path,
     path_env: &OsStr,
@@ -163,7 +163,6 @@ pub(crate) fn apply_network_proxy_feature_config(
         enabled: feature_config.enabled,
         proxy_url: feature_config.proxy_url.clone(),
         enable_socks5: feature_config.enable_socks5,
-        transparent_tcp: feature_config.transparent_tcp,
         socks_url: feature_config.socks_url.clone(),
         enable_socks5_udp: feature_config.enable_socks5_udp,
         allow_upstream_proxy: feature_config.allow_upstream_proxy,

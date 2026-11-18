@@ -383,7 +383,6 @@ async fn workspace_switch_validates_and_preserves_managed_login(
             notification.params.expect("account/updated params")
         )?,
         AccountUpdatedNotification {
-            reason: None,
             auth_mode: Some(AuthMode::Chatgpt),
             plan_type: Some(AccountPlanType::Business),
         }

@@ -187,8 +187,8 @@ struct LiveWriterLocks {
 
 #[derive(Default)]
 struct ThreadCoordination {
-    // Serializes writes and holds the next item ordinal observed in this writer’s rollout.
-    writer: Arc<Mutex<u64>>,
+    // Serialize writes and capture consistent fork snapshots.
+    writer: Arc<Mutex<()>>,
     // Forks hold a shared lease until their child reference is durable; deletion, archive, and
     // unarchive require exclusive access. Keeping this separate from `writer` lets the source
     // accept writes during child initialization, including MCP startup that can take 30 seconds.
@@ -206,7 +206,7 @@ impl LiveWriterLocks {
             .clone()
     }
 
-    async fn lock(&self, thread_id: ThreadId) -> OwnedMutexGuard<u64> {
+    async fn lock(&self, thread_id: ThreadId) -> OwnedMutexGuard<()> {
         self.coordination(thread_id)
             .await
             .writer
@@ -498,14 +498,6 @@ impl LocalThreadStore {
         thread_history::list_items(self, params).await
     }
 
-    /// Reads the independent realtime projection without starting a runtime.
-    pub async fn list_realtime(
-        &self,
-        params: crate::ListRealtimeParams,
-    ) -> ThreadStoreResult<crate::RealtimePage> {
-        thread_history::list_realtime(self, params).await
-    }
-
     /// Lists bounded ordinary and realtime items from the rollout projection.
     pub async fn list_timeline(
         &self,
@@ -524,12 +516,6 @@ impl LocalThreadStore {
 }
 
 impl ThreadStore for LocalThreadStore {
-    fn model_ids(&self) -> Option<Arc<dyn codex_state::SessionModelIdStore>> {
-        self.state_db
-            .clone()
-            .map(|db| db as Arc<dyn codex_state::SessionModelIdStore>)
-    }
-
     fn default_history_mode(&self) -> ThreadHistoryMode {
         ThreadHistoryMode::Paginated
     }
@@ -806,10 +792,6 @@ impl ThreadStore for LocalThreadStore {
         Box::pin(async move { projects::delete_project(self, project_id).await })
     }
 
-    fn realtime_frames_enabled(&self, _thread_id: ThreadId) -> ThreadStoreFuture<'_, bool> {
-        Box::pin(async { Ok(self.state_db.is_some()) })
-    }
-
     fn supports_paginated_history_lists(&self) -> bool {
         self.state_db.is_some()
     }
@@ -826,28 +808,11 @@ impl ThreadStore for LocalThreadStore {
         Box::pin(LocalThreadStore::list_timeline(self, params))
     }
 
-    fn list_realtime(
-        &self,
-        params: crate::ListRealtimeParams,
-    ) -> ThreadStoreFuture<'_, crate::RealtimePage> {
-        Box::pin(LocalThreadStore::list_realtime(self, params))
-    }
-
     fn search_threads(
         &self,
         params: SearchThreadsParams,
     ) -> ThreadStoreFuture<'_, ThreadSearchPage> {
         Box::pin(async move { search_threads::search_threads(self, params).await })
-    }
-
-    fn search_threads_observed(
-        &self,
-        params: SearchThreadsParams,
-        observer: crate::ThreadSearchObserver,
-    ) -> ThreadStoreFuture<'_, ThreadSearchPage> {
-        Box::pin(search_threads::search_threads_observed(
-            self, params, observer,
-        ))
     }
 
     fn search_thread_occurrences(
@@ -952,7 +917,6 @@ mod tests {
     use codex_protocol::protocol::TurnStartedEvent;
     use codex_protocol::protocol::UserMessageEvent;
     use codex_rollout::RolloutItem;
-    use pretty_assertions::assert_eq;
     use tempfile::TempDir;
 
     use super::*;
@@ -1181,7 +1145,7 @@ mod tests {
         )
         .await
         .expect("state db should initialize");
-        let store = Arc::new(LocalThreadStore::new(config.clone(), Some(runtime.clone())));
+        let store = Arc::new(LocalThreadStore::new(config, Some(runtime.clone())));
         let thread_id = ThreadId::default();
         let mut params = create_thread_params(thread_id);
         params.history_mode = ThreadHistoryMode::Paginated;
@@ -1208,13 +1172,11 @@ mod tests {
             })
         };
 
-        let parent = turn_context("parent-model", AskForApproval::Never);
-        let child = turn_context("child-model", AskForApproval::OnRequest);
         let mut guard = crate::LiveThreadInitGuard::default();
         let live_thread = LiveThread::create_with_inherited_model_context(
             store,
             params,
-            &[user_message_item("legacy-only event"), parent.clone()],
+            &[turn_context("parent-model", AskForApproval::Never)],
             &mut guard,
         )
         .await
@@ -1232,7 +1194,7 @@ mod tests {
         assert_eq!(inherited_metadata.model, None);
 
         live_thread
-            .append_items(std::slice::from_ref(&child))
+            .append_items(&[turn_context("child-model", AskForApproval::OnRequest)])
             .await
             .expect("append child context");
         let child_metadata = runtime
@@ -1242,47 +1204,6 @@ mod tests {
             .expect("sqlite metadata");
         assert_eq!(child_metadata.model.as_deref(), Some("child-model"));
         assert_eq!(child_metadata.approval_mode, "on-request");
-
-        let path = live_thread.local_rollout_path().await.unwrap().unwrap();
-        live_thread.shutdown().await.expect("close child writer");
-        let raw = tokio::fs::read_to_string(&path).await.unwrap();
-        let mut lines = raw
-            .lines()
-            .map(|line| codex_rollout::parse_rollout_line(line).unwrap());
-        let header = lines.next().expect("session metadata");
-        let RolloutItem::SessionMeta(meta) = &header.item else {
-            panic!("expected session metadata");
-        };
-        // Just the persisted parent record precedes the first child record at ordinal 2.
-        assert_eq!(meta.meta.subagent_history_start_ordinal, Some(2));
-        let records: Vec<_> = lines
-            .map(|line| (line.ordinal, serde_json::json!(line.item)))
-            .collect();
-        assert_eq!(
-            records,
-            vec![
-                (Some(1), serde_json::json!(parent)),
-                (Some(2), serde_json::json!(child))
-            ]
-        );
-
-        let cold_store = LocalThreadStore::new(config, Some(runtime));
-        let replay = cold_store
-            .resume_thread(ResumeThreadParams {
-                thread_id,
-                rollout_path: Some(path),
-                history: None,
-                history_revision: None,
-                include_archived: false,
-                metadata: thread_metadata(),
-            })
-            .await
-            .expect("resume from disk");
-        assert_eq!(
-            serde_json::json!(*replay),
-            serde_json::json!([header.item, parent, child])
-        );
-        cold_store.shutdown_thread(thread_id).await.unwrap();
     }
 
     #[tokio::test]

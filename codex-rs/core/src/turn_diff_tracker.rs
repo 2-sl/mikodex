@@ -81,23 +81,12 @@ impl TurnDiffTracker {
         Self::default()
     }
 
-    /// Use each environment's first display root for the whole turn so a steer cannot
-    /// change what an already published relative path refers to.
-    pub(crate) fn update_environment_display_roots(
-        &mut self,
+    pub fn with_environment_display_roots(
         display_roots: impl IntoIterator<Item = (String, PathUri)>,
-    ) {
-        let previous_environment_count = self.display_roots_by_environment.len();
-        for (id, root) in display_roots {
-            self.display_roots_by_environment.entry(id).or_insert(root);
-        }
-        if self.display_roots_by_environment.len() != previous_environment_count
-            && !self.rendered_diffs.is_empty()
-        {
-            // Adding an environment can add an environment ID prefix to existing headers.
-            self.rendered_diffs.clear();
-            self.refresh_unified_diff();
-        }
+    ) -> Self {
+        let mut tracker = Self::new();
+        tracker.display_roots_by_environment = display_roots.into_iter().collect();
+        tracker
     }
 
     pub fn track_delta(&mut self, environment_id: &str, delta: &AppliedPatchDelta) {

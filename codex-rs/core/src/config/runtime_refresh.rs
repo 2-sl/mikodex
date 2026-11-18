@@ -89,7 +89,6 @@ impl Config {
         // Enterprise opt-in always comes from trusted layers instead.
         for feature in [
             Feature::McpConnectionSharing,
-            Feature::McpSharedReplCwd,
             Feature::McpLazyStdioStartup,
             Feature::SecretAuthStorage,
             Feature::McpOAuthRefreshCoordination,

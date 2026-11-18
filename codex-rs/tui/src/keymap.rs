@@ -105,7 +105,6 @@ pub(crate) struct RuntimeKeymap {
 pub(crate) struct AppKeymap {
     /// Change where a new conversation runs.
     pub(crate) change_host: Vec<KeyBinding>,
-    pub(crate) choose_cloud_environment: Vec<KeyBinding>,
     pub(crate) focus_main_composer: Vec<KeyBinding>,
     pub(crate) focus_sidebar_content: Vec<KeyBinding>,
     pub(crate) focus_sidebar_tabs: Vec<KeyBinding>,
@@ -208,8 +207,6 @@ pub(crate) struct ComposerKeymap {
     pub(crate) history_search_previous: Vec<KeyBinding>,
     /// Move to the next match in reverse history search.
     pub(crate) history_search_next: Vec<KeyBinding>,
-    pub(crate) undo: Vec<KeyBinding>,
-    pub(crate) redo: Vec<KeyBinding>,
 }
 
 /// Editor-specific keybindings used by the composer textarea.
@@ -343,7 +340,6 @@ pub(crate) struct PagerKeymap {
     pub(crate) close: Vec<KeyBinding>,
     pub(crate) close_transcript: Vec<KeyBinding>,
     pub(crate) find: Vec<KeyBinding>,
-    pub(crate) mark_markdown: Vec<KeyBinding>,
     chord_hints: Arc<RuntimeChordKeymap>,
 }
 
@@ -776,11 +772,6 @@ impl RuntimeKeymap {
                 &defaults.app.change_host,
                 "tui.keymap.global.change_host",
             )?,
-            choose_cloud_environment: resolve_bindings(
-                keymap.global.choose_cloud_environment.as_ref(),
-                &defaults.app.choose_cloud_environment,
-                "tui.keymap.global.choose_cloud_environment",
-            )?,
             focus_main_composer: resolve_bindings(
                 keymap.global.focus_main_composer.as_ref(),
                 &[],
@@ -1000,8 +991,6 @@ impl RuntimeKeymap {
                 history_search_previous
             ),
             history_search_next: resolve_local!(keymap, defaults, composer, history_search_next),
-            undo: resolve_local!(keymap, defaults, composer, undo),
-            redo: resolve_local!(keymap, defaults, composer, redo),
         };
 
         let editor = Arc::new(EditorKeymap {
@@ -1534,7 +1523,6 @@ impl RuntimeKeymap {
             close: resolve_local!(keymap, defaults, pager, close),
             close_transcript: resolve_local!(keymap, defaults, pager, close_transcript),
             find: resolve_local!(keymap, defaults, pager, find),
-            mark_markdown: resolve_local!(keymap, defaults, pager, mark_markdown),
             chord_hints: Arc::clone(&chords),
         };
 
@@ -1777,13 +1765,9 @@ impl RuntimeKeymap {
             approval,
         };
 
-        let vim_undo = KeymapActionId {
-            context: KeymapContext::VimNormal,
-            action: "undo",
-        };
         let configured: Vec<_> = runtime_action_bindings(&resolved)
             .filter(|action| {
-                action.id.overlaps(vim_undo)
+                action.id.context.overlaps(KeymapContext::VimNormal)
                     && bindings::configured_binding_for_action(keymap, action.id)
                         .is_some_and(Option::is_some)
             })
@@ -1809,36 +1793,8 @@ impl RuntimeKeymap {
                     let event = KeyEvent::new(code, modifiers);
                     !configured.is_pressed(event)
                         && !resolved.chords.bindings.iter().any(|chord| {
-                            chord.action.overlaps(vim_undo) && chord.chord.prefix.is_press(event)
-                        })
-                });
-            }
-        }
-        let undo_action = KeymapActionId {
-            context: KeymapContext::Composer,
-            action: "undo",
-        };
-        let configured: Vec<_> = runtime_action_bindings(&resolved)
-            .filter(|action| {
-                action.id.overlaps(undo_action)
-                    && bindings::configured_binding_for_action(keymap, action.id)
-                        .is_some_and(Option::is_some)
-            })
-            .flat_map(|action| action.bindings.iter().copied())
-            .collect();
-        for (setting, bindings) in [
-            (keymap.composer.undo.as_ref(), &mut resolved.composer.undo),
-            (keymap.composer.redo.as_ref(), &mut resolved.composer.redo),
-        ] {
-            if setting.is_none() {
-                bindings.retain(|binding| {
-                    let (code, modifiers) = binding.parts();
-                    let event = KeyEvent::new(code, modifiers);
-                    !configured.is_pressed(event)
-                        && !(keymap.global.leader.is_some()
-                            && resolved.chords.leader.is_pressed(event))
-                        && !resolved.chords.bindings.iter().any(|chord| {
-                            chord.action.overlaps(undo_action) && chord.chord.prefix.is_press(event)
+                            chord.action.context.overlaps(KeymapContext::VimNormal)
+                                && chord.chord.prefix.is_press(event)
                         })
                 });
             }
@@ -1868,27 +1824,9 @@ impl RuntimeKeymap {
     /// both `?` and `shift-?`) because terminals disagree on whether SHIFT is
     /// preserved for certain printable/control chords.
     fn built_in_defaults() -> Self {
-        let undo_modifier = if cfg!(windows) {
-            KeyModifiers::CONTROL
-        } else {
-            KeyModifiers::ALT
-        };
-        let mut undo = vec![KeyBinding::new(KeyCode::Char('z'), undo_modifier)];
-        if cfg!(target_os = "macos") {
-            undo.push(KeyBinding::new(KeyCode::Char('z'), KeyModifiers::SUPER));
-        }
-        undo.push(key_hint::plain(KeyCode::F(7)));
-        let redo = undo
-            .iter()
-            .map(|binding| {
-                let (code, modifiers) = binding.parts();
-                KeyBinding::new(code, modifiers | KeyModifiers::SHIFT)
-            })
-            .collect();
         Self {
             app: AppKeymap {
                 change_host: Vec::new(),
-                choose_cloud_environment: Vec::new(),
                 focus_main_composer: Vec::new(),
                 focus_sidebar_content: Vec::new(),
                 focus_sidebar_tabs: Vec::new(),
@@ -1949,8 +1887,6 @@ impl RuntimeKeymap {
                 ],
                 history_search_previous: default_bindings![ctrl(KeyCode::Char('r'))],
                 history_search_next: default_bindings![ctrl(KeyCode::Char('s'))],
-                undo,
-                redo,
             },
             editor: Arc::new(EditorKeymap {
                 insert_newline: default_bindings![
@@ -2162,7 +2098,6 @@ impl RuntimeKeymap {
                 close: default_bindings![plain(KeyCode::Char('q')), ctrl(KeyCode::Char('c'))],
                 close_transcript: default_bindings![ctrl(KeyCode::Char('t'))],
                 find: default_bindings![plain(KeyCode::F(3)), plain(KeyCode::Char('/'))],
-                mark_markdown: Vec::new(),
                 chord_hints: Arc::default(),
             },
             list: ListKeymap {
@@ -2235,14 +2170,8 @@ impl RuntimeKeymap {
     fn validate_conflicts(&self) -> Result<(), String> {
         for (action, bindings) in [
             ("global.change_host", &self.app.change_host),
-            (
-                "global.choose_cloud_environment",
-                &self.app.choose_cloud_environment,
-            ),
             ("chat.open_presets", &self.chat.open_presets),
             ("chat.toggle_voice", &self.chat.toggle_voice),
-            ("composer.undo", &self.composer.undo),
-            ("composer.redo", &self.composer.redo),
             (
                 "chat.previous_permission_mode",
                 &self.chat.previous_permission_mode,
@@ -2268,10 +2197,6 @@ impl RuntimeKeymap {
         #[cfg(unix)]
         for (action, bindings) in [
             ("global.change_host", &self.app.change_host),
-            (
-                "global.choose_cloud_environment",
-                &self.app.choose_cloud_environment,
-            ),
             ("global.open_agents", &self.app.open_agents),
             ("global.focus_main_composer", &self.app.focus_main_composer),
             (
@@ -2294,8 +2219,6 @@ impl RuntimeKeymap {
             ("global.sidebar_down", &self.app.sidebar_down),
             ("chat.open_presets", &self.chat.open_presets),
             ("chat.toggle_voice", &self.chat.toggle_voice),
-            ("composer.undo", &self.composer.undo),
-            ("composer.redo", &self.composer.redo),
         ] {
             if bindings.contains(&key_hint::ctrl(KeyCode::Char('z'))) {
                 return Err(format!(
@@ -2325,10 +2248,6 @@ impl RuntimeKeymap {
         let divider_right = self.app.move_divider_right.as_slice();
         let main_bindings = [
             ("change_host", self.app.change_host.as_slice()),
-            (
-                "choose_cloud_environment",
-                self.app.choose_cloud_environment.as_slice(),
-            ),
             (
                 "focus_main_composer",
                 self.app.focus_main_composer.as_slice(),
@@ -2413,8 +2332,6 @@ impl RuntimeKeymap {
                 "composer.history_search_next",
                 self.composer.history_search_next.as_slice(),
             ),
-            ("composer.undo", self.composer.undo.as_slice()),
-            ("composer.redo", self.composer.redo.as_slice()),
         ];
         validate_unique("app", main_bindings)?;
 
@@ -2584,8 +2501,6 @@ impl RuntimeKeymap {
                 ),
                 ("chat.skip_question", self.chat.skip_question.as_slice()),
                 ("composer.submit", self.composer.submit.as_slice()),
-                ("composer.undo", self.composer.undo.as_slice()),
-                ("composer.redo", self.composer.redo.as_slice()),
                 ("toggle_vim_mode", self.app.toggle_vim_mode.as_slice()),
                 ("toggle_fast_mode", self.app.toggle_fast_mode.as_slice()),
                 ("toggle_raw_output", self.app.toggle_raw_output.as_slice()),
@@ -2725,7 +2640,6 @@ impl RuntimeKeymap {
                     self.pager.close_transcript.as_slice(),
                 ),
                 ("pager.find", self.pager.find.as_slice()),
-                ("pager.mark_markdown", self.pager.mark_markdown.as_slice()),
             ],
         )?;
 
@@ -2838,8 +2752,8 @@ impl RuntimeKeymap {
                     }
                     return Err(format!(
                         "Ambiguous approval overlay keymap bindings: `{previous}` and `{action}` use the same key. \
-Set unique keys in `~/.codex/config.toml` and retry. \
-See the Codex keymap documentation for supported actions and examples."
+Set unique keys in `~/.mikodex/config.toml` and retry. \
+See the Mikodex keymap documentation for supported actions and examples."
                     ));
                 }
             }
@@ -2864,8 +2778,8 @@ fn validate_unique<'a>(
             if let Some(previous) = seen.insert(key, action) {
                 return Err(format!(
                     "Ambiguous `tui.keymap.{context}` bindings: `{previous}` and `{action}` use the same key. \
-Set unique keys in `~/.codex/config.toml` and retry. \
-See the Codex keymap documentation for supported actions and examples."
+Set unique keys in `~/.mikodex/config.toml` and retry. \
+See the Mikodex keymap documentation for supported actions and examples."
                 ));
             }
         }
@@ -2900,8 +2814,8 @@ fn validate_no_shadow_with_allowed_overlaps<const N: usize, const M: usize, cons
                 }
                 return Err(format!(
                     "Ambiguous `tui.keymap.{context}` bindings: `{previous}` shadows `{action}` with the same key. \
-Set unique keys in `~/.codex/config.toml` and retry. \
-See the Codex keymap documentation for supported actions and examples."
+Set unique keys in `~/.mikodex/config.toml` and retry. \
+See the Mikodex keymap documentation for supported actions and examples."
                 ));
             }
         }
@@ -2933,8 +2847,8 @@ fn validate_no_reserved<'a, const A: usize>(
                 }
                 return Err(format!(
                     "Ambiguous `tui.keymap.{context}` bindings: `{action}` uses a key reserved by `{reserved_action}`. \
-Set a different key in `~/.codex/config.toml` and retry. \
-See the Codex keymap documentation for supported actions and examples."
+Set a different key in `~/.mikodex/config.toml` and retry. \
+See the Mikodex keymap documentation for supported actions and examples."
                 ));
             }
         }
@@ -3121,7 +3035,7 @@ fn parse_bindings(spec: &KeybindingsSpec, path: &str) -> Result<Vec<KeyBinding>,
         let binding = parse_keybinding(raw.as_str()).ok_or_else(|| {
             format!(
                 "Invalid `{path}` = `{}`. Use values like `ctrl-a`, `shift-enter`, or `page-down`. \
-See the Codex keymap documentation for supported actions and examples.",
+See the Mikodex keymap documentation for supported actions and examples.",
                 raw.as_str()
             )
         })?;

@@ -123,7 +123,6 @@ pub(crate) enum SelectionRowDisplay {
 
 /// One selectable item in the generic selection list.
 pub(crate) type SelectionAction = Box<dyn Fn(&AppEventSender) + Send + Sync>;
-pub(crate) type SelectionKeyAction = Box<dyn Fn(&AppEventSender, KeyBinding) + Send + Sync>;
 
 /// A second way to accept the highlighted row, sharing its dismissal behavior.
 pub(crate) struct SelectionSecondaryAction {
@@ -186,8 +185,6 @@ pub(crate) struct SelectionItem {
     pub is_current: bool,
     pub is_disabled: bool,
     pub actions: Vec<SelectionAction>,
-    /// Primary action that also needs the physical key to guard a view transition.
-    pub on_accept_key: Option<SelectionKeyAction>,
     pub secondary_action: Option<SelectionSecondaryAction>,
     /// Footer hint shown while this row is selected.
     pub footer_hint: Option<Line<'static>>,
@@ -790,12 +787,8 @@ impl ListSelectionView {
                         format!("{prefix}    {label}. ")
                     } else {
                         enabled_row_number += 1;
-                        if enabled_row_number <= 9 {
-                            format!("{prefix} {enabled_row_number}. ")
-                        } else {
-                            let number_width = enabled_row_number.to_string().len();
-                            format!("{prefix} {}", " ".repeat(number_width + 2))
-                        }
+                        let n = enabled_row_number;
+                        format!("{prefix} {n}. ")
                     };
                     let wrap_prefix_width = UnicodeWidthStr::width(wrap_prefix.as_str());
                     let mut name_prefix_spans = Vec::new();
@@ -977,7 +970,7 @@ impl ListSelectionView {
         }
     }
 
-    fn accept(&mut self, kind: SelectionActionKind, key: KeyBinding) {
+    fn accept(&mut self, kind: SelectionActionKind) {
         let selected_actual_idx = self.selected_actual_idx();
         if matches!(kind, SelectionActionKind::Primary)
             && selected_actual_idx
@@ -996,9 +989,6 @@ impl ListSelectionView {
                 SelectionActionKind::Primary => {
                     for act in &item.actions {
                         act(&self.app_event_tx);
-                    }
-                    if let Some(action) = &item.on_accept_key {
-                        action(&self.app_event_tx, key);
                     }
                 }
                 SelectionActionKind::Secondary => {
@@ -1022,7 +1012,7 @@ impl ListSelectionView {
         }
     }
 
-    fn select_shortcut(&mut self, actual_idx: usize, key: KeyBinding) {
+    fn select_shortcut(&mut self, actual_idx: usize) {
         let previously_selected = self.selected_actual_idx();
         self.state.selected_idx = Some(actual_idx);
         if self
@@ -1034,7 +1024,7 @@ impl ListSelectionView {
                 self.fire_selection_changed();
             }
         } else {
-            self.accept(SelectionActionKind::Primary, key);
+            self.accept(SelectionActionKind::Primary);
         }
     }
 
@@ -1129,7 +1119,7 @@ impl ListSelectionView {
             None
         }
         .or_else(|| self.footer_note.clone());
-        let mut lines = note.map(wrap).unwrap_or_default();
+        let mut lines = note.map(&wrap).unwrap_or_default();
         if self.reserve_result_rows && show_selected_description {
             let height = self
                 .items
@@ -1297,15 +1287,6 @@ impl BottomPaneView for ListSelectionView {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        self.handle_key_event_with_activation_key(key_event, /*activation_key*/ None);
-    }
-
-    fn handle_key_event_with_activation_key(
-        &mut self,
-        key_event: KeyEvent,
-        activation_key: Option<KeyBinding>,
-    ) {
-        let key = activation_key.unwrap_or_else(|| KeyBinding::from_event(key_event));
         // An active search reserves printable keys for the query. On-demand search leaves the
         // configured list bindings untouched until its shortcut is pressed.
         let search_field_visible = self.search_field_visible();
@@ -1362,7 +1343,7 @@ impl BottomPaneView for ListSelectionView {
                 code: KeyCode::Enter,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } if self.on_demand_search_active() => self.accept(SelectionActionKind::Primary, key),
+            } if self.on_demand_search_active() => self.accept(SelectionActionKind::Primary),
             KeyEvent {
                 code: KeyCode::Backspace,
                 ..
@@ -1398,7 +1379,7 @@ impl BottomPaneView for ListSelectionView {
                 self.on_ctrl_c();
             }
             _ if allow_plain_char_actions && self.keymap.accept.is_pressed(key_event) => {
-                self.accept(SelectionActionKind::Primary, key)
+                self.accept(SelectionActionKind::Primary)
             }
             _ if allow_plain_char_navigation
                 && self
@@ -1407,7 +1388,7 @@ impl BottomPaneView for ListSelectionView {
                     .and_then(|item| item.secondary_action.as_ref())
                     .is_some_and(|action| action.key.is_press(key_event)) =>
             {
-                self.accept(SelectionActionKind::Secondary, key);
+                self.accept(SelectionActionKind::Secondary);
             }
             _ if self.is_searchable
                 && !self.search_active
@@ -1448,7 +1429,7 @@ impl BottomPaneView for ListSelectionView {
                         || item.child_label == Some(c))
                         && Self::item_is_enabled(item)
                 }) {
-                    self.select_shortcut(idx, key);
+                    self.select_shortcut(idx);
                     return;
                 }
                 if self.auto_number_shortcuts
@@ -1457,7 +1438,7 @@ impl BottomPaneView for ListSelectionView {
                         .map(|d| d as usize)
                         .and_then(|number| self.actual_idx_for_enabled_number(number))
                 {
-                    self.select_shortcut(idx, key);
+                    self.select_shortcut(idx);
                 }
             }
             _ => {}
@@ -2079,14 +2060,14 @@ mod tests {
         let items = vec![
             SelectionItem {
                 name: "Read Only".to_string(),
-                description: Some("Codex can read files".to_string()),
+                description: Some("Mikodex can read files".to_string()),
                 is_current: true,
                 dismiss_on_select: true,
                 ..Default::default()
             },
             SelectionItem {
                 name: "Full Access".to_string(),
-                description: Some("Codex can edit files".to_string()),
+                description: Some("Mikodex can edit files".to_string()),
                 is_current: false,
                 dismiss_on_select: true,
                 ..Default::default()
@@ -2195,7 +2176,7 @@ mod tests {
 
     #[test]
     fn renders_blank_line_between_subtitle_and_items() {
-        let view = make_selection_view(Some("Switch between Codex approval presets"));
+        let view = make_selection_view(Some("Switch between Mikodex approval presets"));
         assert_snapshot!("list_selection_spacing_with_subtitle", render_lines(&view));
     }
 
@@ -2204,7 +2185,7 @@ mod tests {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let home = dirs::home_dir().expect("home directory should be available");
-        let codex_home = home.join(".codex");
+        let codex_home = home.join(".mikodex");
         let params = crate::theme_picker::build_theme_picker_params(
             /*current_name*/ None,
             Some(&codex_home),
@@ -2278,7 +2259,7 @@ mod tests {
         let tx = AppEventSender::new(tx_raw);
         let items = vec![SelectionItem {
             name: "Read Only".to_string(),
-            description: Some("Codex can read files".to_string()),
+            description: Some("Mikodex can read files".to_string()),
             is_current: true,
             dismiss_on_select: true,
             ..Default::default()
@@ -2310,7 +2291,7 @@ mod tests {
         let tx = AppEventSender::new(tx_raw);
         let items = vec![SelectionItem {
             name: "Read Only".to_string(),
-            description: Some("Codex can read files".to_string()),
+            description: Some("Mikodex can read files".to_string()),
             is_current: false,
             dismiss_on_select: true,
             ..Default::default()
@@ -2891,30 +2872,6 @@ mod tests {
     }
 
     #[test]
-    fn automatic_shortcuts_stop_at_nine() {
-        let (tx, _rx) = unbounded_channel();
-        let mut view = new_view(
-            SelectionViewParams {
-                items: (1..=10)
-                    .map(|n| SelectionItem {
-                        name: format!("Row {n}"),
-                        ..Default::default()
-                    })
-                    .collect(),
-                initial_selected_idx: Some(8),
-                ..Default::default()
-            },
-            AppEventSender::new(tx),
-        );
-        let rows = view.build_rows();
-        assert_eq!(rows[8].name_prefix_spans[0].content, "› 9. ");
-        assert_eq!(rows[9].name_prefix_spans[0].content, "      ");
-        view.handle_key_event(KeyEvent::from(KeyCode::Down));
-        view.handle_key_event(KeyEvent::from(KeyCode::Enter));
-        assert_eq!(view.take_last_selected_index(), Some(9));
-    }
-
-    #[test]
     fn c0_ctrl_p_respects_unbound_list_move_up() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
@@ -3128,7 +3085,7 @@ mod tests {
             SelectionItem {
                 name: "gpt-5.1-codex".to_string(),
                 description: Some(
-                    "Optimized for Codex. Balance of reasoning quality and coding ability."
+                    "Optimized for Mikodex. Balance of reasoning quality and coding ability."
                         .to_string(),
                 ),
                 is_current: true,
@@ -3138,7 +3095,7 @@ mod tests {
             SelectionItem {
                 name: "gpt-5.1-codex-mini".to_string(),
                 description: Some(
-                    "Optimized for Codex. Cheaper, faster, but less capable.".to_string(),
+                    "Optimized for Mikodex. Cheaper, faster, but less capable.".to_string(),
                 ),
                 dismiss_on_select: true,
                 ..Default::default()
@@ -3210,7 +3167,7 @@ mod tests {
             SelectionItem {
                 name: "gpt-5.1-codex".to_string(),
                 description: Some(
-                    "Optimized for Codex. Balance of reasoning quality and coding ability."
+                    "Optimized for Mikodex. Balance of reasoning quality and coding ability."
                         .to_string(),
                 ),
                 is_current: true,
@@ -3220,7 +3177,7 @@ mod tests {
             SelectionItem {
                 name: "gpt-5.1-codex-mini".to_string(),
                 description: Some(
-                    "Optimized for Codex. Cheaper, faster, but less capable.".to_string(),
+                    "Optimized for Mikodex. Cheaper, faster, but less capable.".to_string(),
                 ),
                 dismiss_on_select: true,
                 ..Default::default()

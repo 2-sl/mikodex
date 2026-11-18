@@ -361,7 +361,6 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
         test.codex
             .mcp_server_status_snapshot(
                 "ordinary",
-                /*environment_id*/ None,
                 codex_mcp::McpSnapshotDetail::ToolsAndAuthOnly,
                 /*expected_registration*/ None,
             )
@@ -435,7 +434,6 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
             .await;
         let mut call = Box::pin(test.codex.call_mcp_tool(
             "enterprise",
-            /*environment_id*/ None,
             "calendar_list_events",
             Some(json!({"query": "permission"})),
             /*meta*/ None,
@@ -481,7 +479,6 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
             .codex
             .call_mcp_tool(
                 "enterprise",
-                /*environment_id*/ None,
                 "calendar_create_event",
                 /*arguments*/ None,
                 /*meta*/ None,
@@ -566,7 +563,6 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
             .codex
             .call_mcp_tool(
                 "ordinary",
-                /*environment_id*/ None,
                 "calendar_create_event",
                 Some(json!({"title": "control", "starts_at": "2026-06-18T12:00:00Z"})),
                 /*meta*/ None,
@@ -637,7 +633,6 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
         thread
             .call_mcp_tool(
                 "enterprise",
-                /*environment_id*/ None,
                 "calendar_list_events",
                 Some(json!({"query":"blocked"})),
                 /*meta*/ None,
@@ -670,7 +665,6 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
             let result = removed
                 .call_mcp_tool(
                     "enterprise",
-                    /*environment_id*/ None,
                     "calendar_list_events",
                     /*arguments*/ None,
                     /*meta*/ None,

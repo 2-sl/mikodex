@@ -10,7 +10,6 @@ pub(crate) use render::EFFECTS_VIEW_ID;
 pub(crate) use render::copy_on_select;
 pub(crate) use render::effects;
 pub(crate) use render::effects_with_toggle_states;
-pub(crate) use render::mouse_scroll_speed;
 pub(crate) use render::notification_condition;
 pub(crate) use render::resume_directory;
 pub(crate) use render::right_click_paste;
@@ -60,7 +59,6 @@ pub(crate) enum ConfigEditor {
     TerminalTitle,
     Keyboard,
     ModelProviders,
-    MouseScrollSpeed,
     SessionPickerLayout,
     ResumeDirectory,
     CopyOnSelect,
@@ -144,7 +142,6 @@ impl ConfigEditor {
         let label = match self {
             Self::ModelProviders => "Choose".to_string(),
             Self::Theme => tui.theme.clone().unwrap_or_else(|| "Automatic".to_string()),
-            Self::MouseScrollSpeed => format!("{}×", tui.mouse_scroll_speed.unwrap_or(1.0)),
             Self::SessionPickerLayout => match tui.session_picker_view.unwrap_or_default() {
                 codex_config::types::SessionPickerViewMode::Comfortable => "Comfortable",
                 codex_config::types::SessionPickerViewMode::Dense => "Dense",
@@ -388,13 +385,6 @@ fn settings(tui: &Tui, status: ConfigPanelStatus) -> Vec<ConfigSetting> {
                 setting: ConfigToggle::PasteDetection,
                 enabled: ConfigToggle::PasteDetection.enabled(tui),
             },
-        },
-        ConfigSetting {
-            section: ConfigSection::Input,
-            label: "Mouse scroll speed",
-            description: "Adjust how far the fullscreen transcript scrolls with the mouse wheel",
-            keywords: "wheel scrolling speed multiplier trackpad",
-            value: ConfigEditor::MouseScrollSpeed.value(tui, status),
         },
         ConfigSetting {
             section: ConfigSection::Sessions,

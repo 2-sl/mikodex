@@ -63,7 +63,6 @@ fn terminal_color(color: Option<TerminalColor>, fallback: TerminalColor) -> Term
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "statusline.d.ts"))]
 pub(super) enum Color {
     Primary,
     Surface,
@@ -122,14 +121,8 @@ impl Color {
     }
 }
 
-/// A six-digit sRGB color in `#RRGGBB` form.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-#[cfg_attr(
-    test,
-    derive(ts_rs::TS),
-    ts(export_to = "statusline.d.ts", type = "`#${string}`")
-)]
 pub(super) struct HexRgb((u8, u8, u8));
 
 impl TryFrom<String> for HexRgb {
@@ -155,7 +148,6 @@ impl From<HexRgb> for String {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "statusline.d.ts"))]
 pub(super) enum TextWeight {
     Normal,
     Bold,

@@ -54,11 +54,10 @@ fn image_receipt_preserves_submission_identity_and_attachment() {
 }
 
 #[test]
-fn completed_reply_preserves_the_full_text_phase_questions_and_timestamp() -> Result<()> {
+fn completed_reply_preserves_the_full_text_questions_and_timestamp() -> Result<()> {
     let item = cloud::ItemSummary::AgentMessage {
         id: "reply".into(),
         text: "Choose one".into(),
-        phase: Some(cloud::AgentMessagePhase::FinalAnswer),
         questions: Some(vec![cloud::AgentQuestion {
             title: "Which?".into(),
             options: Some(vec!["One".into(), "Two".into()]),
@@ -83,7 +82,7 @@ fn completed_reply_preserves_the_full_text_phase_questions_and_timestamp() -> Re
                 moderation: None,
                 id: "reply".into(),
                 text: "Choose one".into(),
-                phase: Some(MessagePhase::FinalAnswer),
+                phase: None,
                 memory_citation: None,
                 delivery: None,
                 questions: Some(vec![protocol::AsyncUserInputQuestion {

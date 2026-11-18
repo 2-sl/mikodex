@@ -75,7 +75,6 @@ fn cloud_plugin(remote_id: &str) -> PluginCatalogEntry {
         locations: vec![PluginSourceLocation::Cloud {
             resource_uri: format!("plugin://{remote_id}"),
             bundle_uri: None,
-            release_id: None,
         }],
     }
 }
@@ -109,28 +108,24 @@ fn executor_snapshot(
 }
 
 #[test]
-fn partial_refresh_replaces_entries_and_merges_executor_plugins() -> anyhow::Result<()> {
+fn partial_refresh_retains_entries_without_excluding_new_executor_plugins() -> anyhow::Result<()> {
     let mut state = PluginContributorState::default();
     let auth_key = state.prepare_cloud_generation(/*mcp_resources*/ None);
     let original = PluginCatalog {
         entries: vec![cloud_plugin("old_plugin")],
         ..Default::default()
     };
+    assert!(state.publish_cloud_catalog(auth_key.as_ref(), original.clone()));
     assert!(state.publish_cloud_catalog(
         auth_key.as_ref(),
-        /*resource_cache_key*/ None,
-        original
+        PluginCatalog {
+            entries: vec![cloud_plugin("plugin_a")],
+            is_partial: true,
+            ..Default::default()
+        },
     ));
-    let expected = PluginCatalog {
-        entries: vec![cloud_plugin("plugin_a")],
-        is_partial: true,
-        ..Default::default()
-    };
-    assert!(state.publish_cloud_catalog(
-        auth_key.as_ref(),
-        /*resource_cache_key*/ None,
-        expected.clone(),
-    ));
+    let mut expected = original;
+    expected.is_partial = true;
     assert_eq!(state.cloud_catalog(), Some(&expected));
 
     state.update_executor_catalog(&[executor_snapshot("executor-a")?]);
@@ -243,7 +238,6 @@ async fn projection_respects_discovery_mode_and_preserves_enabled_plugins() -> a
         let key = state.prepare_cloud_generation(/*mcp_resources*/ None);
         assert!(state.publish_cloud_catalog(
             key.as_ref(),
-            /*resource_cache_key*/ None,
             PluginCatalog {
                 entries: vec![cloud_plugin("plugin_a")],
                 ..Default::default()
@@ -440,11 +434,7 @@ async fn projection_respects_discovery_mode_and_preserves_enabled_plugins() -> a
             cache.cloud_generation = None;
             let key = cache.prepare_cloud_generation(/*mcp_resources*/ None);
             if let Some(catalog) = catalog {
-                assert!(cache.publish_cloud_catalog(
-                    key.as_ref(),
-                    /*resource_cache_key*/ None,
-                    catalog
-                ));
+                assert!(cache.publish_cloud_catalog(key.as_ref(), catalog));
             }
         }
         let contributions = contribution_labels(
@@ -489,7 +479,6 @@ async fn projection_respects_discovery_mode_and_preserves_enabled_plugins() -> a
             .collect::<Vec<_>>();
         assert!(state.publish_cloud_catalog(
             key.as_ref(),
-            /*resource_cache_key*/ None,
             PluginCatalog {
                 entries,
                 ..Default::default()

@@ -11,7 +11,7 @@ expression: "snapshots.join(\"\\n---\\n\")"
 
 
 
-  Keyboard shortcuts  ·  Tab: Keyboard
+  Keyboard shortcuts
 
   Compose                       Session                              Transcript (open first)
   /        Commands             tab      Send message                ⌃t            Open transcript
@@ -25,7 +25,7 @@ expression: "snapshots.join(\"\\n---\\n\")"
 
   /keymap customize
 
-› Ask Codex
+› Ask Mikodex
 
   MODEL · ~/project · Context 20% used
   ? / esc close
@@ -39,7 +39,7 @@ expression: "snapshots.join(\"\\n---\\n\")"
 
 
 
-  Keyboard shortcuts  ·  Tab: Keyboard
+  Keyboard shortcuts
 
   Compose                       Session                              Transcript (open first)
   /        Commands             tab      Send message                ⌃t            Open transcript
@@ -53,7 +53,7 @@ expression: "snapshots.join(\"\\n---\\n\")"
 
   /keymap customize
 
-› Ask Codex
+› Ask Mikodex
 
   MODEL · ~/project · Context 20% used
   ? / esc close
@@ -67,7 +67,7 @@ expression: "snapshots.join(\"\\n---\\n\")"
 
 
 
-  Keyboard shortcuts  ·  Tab: Keyboard
+  Keyboard shortcuts
 
   Compose                       Session                              Transcript (open first)
   /        Commands             tab      Send message                ⌃t            Open transcript
@@ -81,7 +81,7 @@ expression: "snapshots.join(\"\\n---\\n\")"
 
   /keymap customize
 
-› Ask Codex
+› Ask Mikodex
 
   MODEL · ~/project · Context 20% used
   ? / esc close

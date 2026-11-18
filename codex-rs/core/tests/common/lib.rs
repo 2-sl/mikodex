@@ -30,7 +30,6 @@ pub mod apps_test_server;
 pub mod code_mode_host;
 pub mod context_snapshot;
 pub mod exec_server;
-pub mod guardian;
 pub mod hooks;
 pub mod network_policy_mcp;
 pub mod oauth;
@@ -200,7 +199,7 @@ pub fn fetch_dotslash_file(
 
 /// Returns a default `Config` whose on-disk state is confined to the provided
 /// temporary directory. Using a per-test directory keeps tests hermetic and
-/// avoids clobbering a developer’s real `~/.codex`.
+/// avoids clobbering a developer’s real `~/.mikodex`.
 pub async fn load_default_config_for_test(codex_home: &TempDir) -> Config {
     load_default_config_for_test_with_cloud_config_bundle(
         codex_home,

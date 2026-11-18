@@ -2,18 +2,14 @@
 
 use super::App;
 use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
-use super::agents_overview::DetailsDividerDrag;
 use super::agents_overview_view::AgentsOverviewView;
-use super::command_reference;
 use crate::key_hint::KeyBindingListExt;
 use crate::legacy_core::config::edit::ConfigEdit;
 use crate::legacy_core::config::edit::ConfigEditsBuilder;
-
 use crate::tui::Tui;
 use crate::tui::TuiEvent;
 use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
-use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use crossterm::event::MouseButton;
@@ -30,6 +26,9 @@ const MIN_LEFT_WIDTH: u16 = 12;
 const MIN_RIGHT_WIDTH: u16 = 24;
 const MAX_DOCK_WIDTH: u16 = 60;
 const MIN_CONVERSATION_WIDTH: u16 = 32;
+pub(super) const RESIZE_HINT: &str =
+    "Dock width · ←/→ · Shift+←/→ 10 cols · Enter apply · Esc cancel";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DockDivider {
     AgentsOverview,
@@ -52,6 +51,13 @@ pub(super) struct DockDividerDrag {
 }
 
 #[derive(Clone, Copy)]
+pub(super) struct DetailsDividerDrag {
+    press_y: u16,
+    initial_height: u16,
+    screen: Rect,
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct AgentsOverviewDockLayout {
     pub(super) sidebar: Rect,
     pub(super) divider: Rect,
@@ -64,12 +70,10 @@ impl AgentsOverviewDockLayout {
     pub(super) fn render_divider(&self, buf: &mut Buffer, app: &App) {
         let left_style = if app.agents_overview.sidebar_focused
             || app
-                .agents_overview
-                .dock_resize
+                .agents_overview_dock_resize
                 .is_some_and(|mode| mode.divider == DockDivider::AgentsOverview)
             || app
-                .agents_overview
-                .dock_drag
+                .agents_overview_dock_drag
                 .is_some_and(|drag| drag.divider == DockDivider::AgentsOverview)
         {
             Style::default()
@@ -85,12 +89,10 @@ impl AgentsOverviewDockLayout {
         }
         let right_style = if app.agents_overview.command_reference_focused
             || app
-                .agents_overview
-                .dock_resize
+                .agents_overview_dock_resize
                 .is_some_and(|mode| mode.divider == DockDivider::CommandReference)
             || app
-                .agents_overview
-                .dock_drag
+                .agents_overview_dock_drag
                 .is_some_and(|drag| drag.divider == DockDivider::CommandReference)
         {
             Style::default()
@@ -134,13 +136,11 @@ pub(super) fn layout(app: &App, viewport: Rect) -> Option<AgentsOverviewDockLayo
         left_maximum,
     );
     let left_preview = app
-        .agents_overview
-        .dock_drag
+        .agents_overview_dock_drag
         .filter(|drag| drag.divider == DockDivider::AgentsOverview)
         .map(|drag| drag.width)
         .or_else(|| {
-            app.agents_overview
-                .dock_resize
+            app.agents_overview_dock_resize
                 .filter(|mode| mode.divider == DockDivider::AgentsOverview)
                 .map(|mode| mode.preview_width)
         });
@@ -162,13 +162,11 @@ pub(super) fn layout(app: &App, viewport: Rect) -> Option<AgentsOverviewDockLayo
             right_maximum,
         );
         let right_preview = app
-            .agents_overview
-            .dock_drag
+            .agents_overview_dock_drag
             .filter(|drag| drag.divider == DockDivider::CommandReference)
             .map(|drag| drag.width)
             .or_else(|| {
-                app.agents_overview
-                    .dock_resize
+                app.agents_overview_dock_resize
                     .filter(|mode| mode.divider == DockDivider::CommandReference)
                     .map(|mode| mode.preview_width)
             });
@@ -251,12 +249,19 @@ fn divider_minimum(divider: DockDivider) -> u16 {
     }
 }
 
-pub(super) fn conversation_area_visible(app: &App) -> bool {
+fn conversation_area_visible(app: &App) -> bool {
     !app.conversation_frame.has_caller_inset()
         && app
             .chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
             .is_none()
+}
+
+pub(super) fn conversation_viewport(app: &App, viewport: Rect) -> Rect {
+    if !conversation_area_visible(app) {
+        return viewport;
+    }
+    layout(app, viewport).map_or(viewport, |dock| dock.conversation)
 }
 
 impl App {
@@ -265,13 +270,13 @@ impl App {
         tui: &mut Tui,
         event: &TuiEvent,
     ) -> Result<bool> {
-        if let Some(mode) = self.agents_overview.dock_resize {
+        if let Some(mode) = self.agents_overview_dock_resize {
             match event {
                 TuiEvent::Key(key) if key.kind == KeyEventKind::Release => return Ok(true),
                 TuiEvent::Key(key) => {
                     let viewport = tui.prepare_draw_size()?.into();
                     let Some(dock) = layout(self, viewport) else {
-                        self.agents_overview.dock_resize = None;
+                        self.agents_overview_dock_resize = None;
                         tui.frame_requester().schedule_frame();
                         return Ok(false);
                     };
@@ -285,7 +290,7 @@ impl App {
                         (KeyCode::Left | KeyCode::Char('h'), KeyModifiers::SHIFT) => -10,
                         (KeyCode::Right | KeyCode::Char('l'), KeyModifiers::SHIFT) => 10,
                         (KeyCode::Enter, KeyModifiers::NONE) if key.kind == KeyEventKind::Press => {
-                            self.agents_overview.dock_resize = None;
+                            self.agents_overview_dock_resize = None;
                             self.save_agents_overview_dock_width(
                                 mode.divider,
                                 current_width,
@@ -296,7 +301,7 @@ impl App {
                             return Ok(true);
                         }
                         (KeyCode::Esc, KeyModifiers::NONE) if key.kind == KeyEventKind::Press => {
-                            self.agents_overview.dock_resize = None;
+                            self.agents_overview_dock_resize = None;
                             tui.frame_requester().schedule_frame();
                             return Ok(true);
                         }
@@ -316,7 +321,7 @@ impl App {
                         .clamp(i32::from(min.min(max)), i32::from(max.max(1)))
                         as u16;
                     if next != current_width {
-                        self.agents_overview.dock_resize = Some(DockResizeMode {
+                        self.agents_overview_dock_resize = Some(DockResizeMode {
                             divider: mode.divider,
                             preview_width: next,
                         });
@@ -325,12 +330,12 @@ impl App {
                     Ok(true)
                 }
                 TuiEvent::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
-                    self.agents_overview.dock_resize = None;
+                    self.agents_overview_dock_resize = None;
                     tui.frame_requester().schedule_frame();
                     self.handle_agents_overview_dock_mouse(tui, mouse).await
                 }
                 TuiEvent::Resize(_) | TuiEvent::FocusLost => {
-                    self.agents_overview.dock_resize = None;
+                    self.agents_overview_dock_resize = None;
                     tui.frame_requester().schedule_frame();
                     Ok(false)
                 }
@@ -368,7 +373,7 @@ impl App {
                 DockDivider::AgentsOverview => dock.sidebar.width,
                 DockDivider::CommandReference => dock.command_reference.width,
             };
-            self.agents_overview.dock_resize = Some(DockResizeMode {
+            self.agents_overview_dock_resize = Some(DockResizeMode {
                 divider,
                 preview_width,
             });
@@ -390,9 +395,12 @@ impl App {
             || self.overlay.is_some()
             || self.chat_widget.has_active_modal()
         {
-            let dock_drag_cleared = self.agents_overview.dock_drag.take().is_some();
-            let details_drag_cleared = self.agents_overview.details_divider_drag.take().is_some();
-            if details_drag_cleared && let Some(view) = self.agents_overview.sidebar_view.as_ref() {
+            let dock_drag_cleared = self.agents_overview_dock_drag.take().is_some();
+            let details_drag_cleared =
+                self.agents_overview.details_divider_drag.take().is_some();
+            if details_drag_cleared
+                && let Some(view) = self.agents_overview.sidebar_view.as_ref()
+            {
                 view.set_docked_details_resizing(false);
             }
             if dock_drag_cleared || details_drag_cleared {
@@ -411,15 +419,16 @@ impl App {
                 return Ok(false);
             }
             match mouse.kind {
-                MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
+                MouseEventKind::Drag(MouseButton::Left)
+                | MouseEventKind::Up(MouseButton::Left) => {
                     let delta_y = i32::from(mouse.row) - i32::from(drag.press_y);
                     let requested_height = (i32::from(drag.initial_height) - delta_y)
-                        .clamp(0, i32::from(u16::MAX))
-                        as u16;
-                    let details_height = AgentsOverviewView::clamp_docked_details_height(
-                        requested_height,
-                        viewport.height,
-                    );
+                        .clamp(0, i32::from(u16::MAX)) as u16;
+                    let details_height =
+                        AgentsOverviewView::clamp_docked_details_height(
+                            requested_height,
+                            viewport.height,
+                        );
                     if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
                         view.set_docked_details_height(details_height);
                         if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
@@ -444,10 +453,10 @@ impl App {
                 }
             }
         }
-        if let Some(mut drag) = self.agents_overview.dock_drag {
+        if let Some(mut drag) = self.agents_overview_dock_drag {
             let viewport = tui.prepare_draw_size()?.into();
             if viewport != drag.screen {
-                self.agents_overview.dock_drag = None;
+                self.agents_overview_dock_drag = None;
                 tui.frame_requester().schedule_frame();
                 return Ok(false);
             }
@@ -471,7 +480,7 @@ impl App {
                         max,
                     );
                     if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
-                        self.agents_overview.dock_drag = None;
+                        self.agents_overview_dock_drag = None;
                         self.save_agents_overview_dock_width(
                             drag.divider,
                             drag.width,
@@ -479,60 +488,16 @@ impl App {
                         )
                         .await;
                     } else {
-                        self.agents_overview.dock_drag = Some(drag);
+                        self.agents_overview_dock_drag = Some(drag);
                     }
                     tui.frame_requester().schedule_frame();
                     return Ok(true);
                 }
                 _ => {
-                    self.agents_overview.dock_drag = None;
+                    self.agents_overview_dock_drag = None;
                     tui.frame_requester().schedule_frame();
                     return Ok(false);
                 }
-            }
-        }
-
-        if matches!(
-            mouse.kind,
-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-        ) {
-            let viewport = tui.prepare_draw_size()?.into();
-            let Some(dock) = layout(self, viewport) else {
-                return Ok(false);
-            };
-            let point = (mouse.column, mouse.row).into();
-            if dock.sidebar.contains(point) {
-                self.agents_overview.sidebar_focused = true;
-                self.agents_overview.command_reference_focused = false;
-                if let Some(view) = self.agents_overview.sidebar_view.as_mut() {
-                    view.set_docked_focus(true);
-                    let key = if mouse.kind == MouseEventKind::ScrollUp {
-                        KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)
-                    } else {
-                        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)
-                    };
-                    view.handle_docked_key_event(key, None);
-                }
-                tui.frame_requester().schedule_frame();
-                return Ok(true);
-            }
-            if dock.command_reference.contains(point) {
-                self.agents_overview.sidebar_focused = false;
-                self.agents_overview.command_reference_focused = true;
-                if let Some(view) = self.agents_overview.sidebar_view.as_mut() {
-                    view.set_docked_focus(false);
-                }
-                let items = self.chat_widget.command_reference_items();
-                let maximum = command_reference::max_scroll(&items, dock.command_reference);
-                let current = self.agents_overview.command_reference_scroll;
-                self.agents_overview.command_reference_scroll =
-                    if mouse.kind == MouseEventKind::ScrollUp {
-                        current.saturating_sub(3)
-                    } else {
-                        current.saturating_add(3).min(maximum)
-                    };
-                tui.frame_requester().schedule_frame();
-                return Ok(true);
             }
         }
 
@@ -542,44 +507,19 @@ impl App {
                 return Ok(false);
             };
             let point = (mouse.column, mouse.row).into();
-            if dock.sidebar.contains(point) {
-                self.agents_overview.sidebar_focused = true;
-                self.agents_overview.command_reference_focused = false;
-                if let Some(view) = self.agents_overview.sidebar_view.as_mut() {
-                    view.set_docked_focus(true);
-                }
-                self.cancel_pending_key_chord();
-                tui.frame_requester().schedule_frame();
-                return Ok(true);
-            }
-            if dock.command_reference.contains(point) {
-                self.agents_overview.sidebar_focused = false;
-                self.agents_overview.command_reference_focused = true;
-                if let Some(view) = self.agents_overview.sidebar_view.as_mut() {
-                    view.set_docked_focus(false);
-                }
-                self.cancel_pending_key_chord();
-                tui.frame_requester().schedule_frame();
-                return Ok(true);
-            }
-            if dock.conversation.contains(point) {
-                self.agents_overview.sidebar_focused = false;
-                self.agents_overview.command_reference_focused = false;
-                if let Some(view) = self.agents_overview.sidebar_view.as_mut() {
-                    view.set_docked_focus(false);
-                }
-            }
             if let Some(view) = self.agents_overview.sidebar_view.as_ref()
-                && let Some((divider, initial_height)) = view.docked_details_divider(dock.sidebar)
+                && let Some((divider, initial_height)) =
+                    view.docked_details_divider(dock.sidebar)
                 && divider.contains(point)
             {
-                self.agents_overview.details_divider_drag = Some(DetailsDividerDrag {
-                    press_y: mouse.row,
-                    initial_height,
-                    screen: viewport,
-                });
+                self.agents_overview.details_divider_drag =
+                    Some(DetailsDividerDrag {
+                        press_y: mouse.row,
+                        initial_height,
+                        screen: viewport,
+                    });
                 view.set_docked_details_resizing(true);
-                self.agents_overview.dock_drag = None;
+                self.agents_overview_dock_drag = None;
                 self.pane_resize = None;
                 self.divider_drag = None;
                 self.cancel_pending_key_chord();
@@ -593,7 +533,7 @@ impl App {
             } else {
                 return Ok(false);
             };
-            self.agents_overview.dock_drag = Some(DockDividerDrag {
+            self.agents_overview_dock_drag = Some(DockDividerDrag {
                 divider,
                 press: mouse.column,
                 initial_width,
@@ -642,10 +582,10 @@ impl App {
         }
         match divider {
             DockDivider::AgentsOverview => {
-                self.local_settings.tui.agents_overview_width_percent = Some(percent);
+                self.local_settings.tui.agents_overview_width_percent = Some(percent)
             }
             DockDivider::CommandReference => {
-                self.local_settings.tui.command_reference_width_percent = Some(percent);
+                self.local_settings.tui.command_reference_width_percent = Some(percent)
             }
         }
     }

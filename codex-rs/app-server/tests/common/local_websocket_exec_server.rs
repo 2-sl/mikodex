@@ -14,20 +14,23 @@ const START_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(target_os = "linux")]
 const CODEX_LINUX_SANDBOX_EXE_ENV_VAR: &str = "CODEX_TEST_LINUX_SANDBOX_EXE";
 
-/// Runs a host-local exec-server over WebSocket for integration tests.
-pub struct LocalWebsocketExecServer {
+/// Host-local exec-server fixture that exposes a WebSocket URL.
+///
+/// This is distinct from the ordinary local stdio executor: callers use it
+/// when they need a socket transport they can interpose.
+pub(crate) struct LocalWebsocketExecServer {
     child: Child,
     websocket_url: String,
 }
 
 impl LocalWebsocketExecServer {
-    pub async fn start(codex_home: &Path, exec_server_program: &Path) -> Result<Self> {
+    pub(crate) async fn start(codex_home: &Path, exec_server_program: &Path) -> Result<Self> {
         let mut command = Command::new(exec_server_program);
         command.stdin(Stdio::null());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::inherit());
         command.current_dir(codex_home);
-        command.env("CODEX_HOME", codex_home);
+        command.env("MIKODEX_HOME", codex_home);
         #[cfg(target_os = "linux")]
         command.env(
             CODEX_LINUX_SANDBOX_EXE_ENV_VAR,
@@ -65,7 +68,7 @@ impl LocalWebsocketExecServer {
         Ok(exec_server)
     }
 
-    pub fn websocket_url(&self) -> &str {
+    pub(crate) fn websocket_url(&self) -> &str {
         &self.websocket_url
     }
 }

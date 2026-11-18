@@ -202,13 +202,9 @@ impl AppServerSession {
     }
 
     pub(crate) fn has_older_history(&self, thread_id: ThreadId) -> bool {
-        self.older_item_cursor(thread_id).is_some()
-    }
-
-    pub(crate) fn older_item_cursor(&self, thread_id: ThreadId) -> Option<&str> {
         self.history_pagination
             .get(&thread_id)
-            .and_then(|page| page.next_item_cursor.as_deref())
+            .is_some_and(|page| page.next_item_cursor.is_some())
     }
 
     pub(crate) fn begin_older_history_page(&mut self, thread_id: ThreadId) -> Option<String> {
@@ -247,7 +243,7 @@ impl AppServerSession {
         cursor: &str,
         page: ThreadItemsListResponse,
         turns: &mut Vec<Turn>,
-    ) -> Result<Vec<(String, ThreadItemPayload)>> {
+    ) -> Result<Vec<ThreadItemPayload>> {
         if !self.is_older_history_page_pending(thread_id, cursor) {
             return Ok(Vec::new());
         }
@@ -308,7 +304,7 @@ impl AppServerSession {
         page: ThreadItemsListResponse,
         state: &mut ThreadHistoryPagination,
         turns: &mut Vec<Turn>,
-    ) -> Result<Vec<(String, ThreadItemPayload)>> {
+    ) -> Result<Vec<ThreadItemPayload>> {
         state.next_item_cursor = advancing_cursor(
             state.next_item_cursor.as_deref(),
             page.next_cursor,
@@ -345,9 +341,8 @@ impl AppServerSession {
             if let Some(turn) = turns.iter_mut().find(|turn| turn.id == entry.turn_id)
                 && !turn.items.iter().any(|item| item.id() == entry.item.id())
             {
-                let turn_id = entry.turn_id.clone();
                 let item = ThreadItem::try_from(entry)?;
-                items.push((turn_id, item.payload.clone()));
+                items.push(item.payload.clone());
                 turn.items.insert(/*index*/ 0, item);
                 turn.items_view = TurnItemsView::Summary;
             }
@@ -495,7 +490,7 @@ impl AppServerSession {
 fn rendered_history_rows(
     thread_id: ThreadId,
     thread: &Thread,
-    items: Vec<(String, ThreadItemPayload)>,
+    items: Vec<ThreadItemPayload>,
     config: &Config,
     local_settings: &crate::local_settings::LocalSettings,
     width: u16,
@@ -514,7 +509,7 @@ fn rendered_history_rows(
     thread_items_to_transcript_cells(
         Some(thread_id),
         &thread.cwd,
-        items.into_iter().map(|(_, item)| item),
+        items,
         visibility,
         Some(config),
     )

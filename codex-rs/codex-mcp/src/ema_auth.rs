@@ -2,7 +2,6 @@
 //! Account and delivered-policy changes cancel the same owner and its admitted requests.
 //! Credential selection and recovery belong to each connection's token source.
 
-use crate::McpServerKey;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -147,7 +146,7 @@ impl EmaAuth {
     pub(crate) async fn connect(
         self: &Arc<Self>,
         authority: EmaRequestAuthority,
-        server_key: &McpServerKey,
+        server_name: &str,
         server: &EffectiveMcpServer,
         http_client: Arc<dyn HttpClient>,
         protocol_mode: McpProtocolMode,
@@ -161,7 +160,7 @@ impl EmaAuth {
             || !self
                 .config
                 .mcp_server_catalog
-                .server(server_key)
+                .server(server_name)
                 .is_some_and(|server| matches!(server.source(), McpServerSource::Config))
         {
             bail!("enterprise MCP requires an enabled, directly configured server");
@@ -186,7 +185,7 @@ impl EmaAuth {
             authority,
         ));
         RmcpClient::new_streamable_http_client_with_protocol_mode_and_redirect_mode(
-            server_key.name(),
+            server_name,
             &url,
             Some(StreamableHttpBearerToken::ProvidedByHttpClient),
             /*http_headers*/ None,

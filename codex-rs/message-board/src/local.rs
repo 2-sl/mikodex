@@ -6,6 +6,7 @@
 //! a board after its root has been permanently deleted.
 //! Opening storage adds optional channel metadata without invalidating older readers.
 //! Explicit connections can restrict writes; default handles retain legacy access.
+//! Fixed read views freeze the channel catalog and restrict reads to a captured post sequence.
 //! Posting subscribes and notifies; host appends share persistence without these side effects.
 
 use self::connection::Access;
@@ -61,13 +62,38 @@ const MAX_POST_BYTES: usize = 64 * 1024;
 const MAX_CHANNEL_BYTES: usize = 128;
 const MAX_READ_CHARS: usize = 20_000;
 
+/// Capturing a view makes the handle read-only, regardless of its original access.
+#[derive(Clone)]
+enum BoardMode {
+    Live { access: Option<Access> },
+    Fixed { view: Arc<catalog::ReadView> },
+}
+
+impl BoardMode {
+    const FIXED_ACCESS: Access = Access::ReadOnly;
+
+    fn access(&self) -> Option<Access> {
+        match self {
+            Self::Live { access } => *access,
+            Self::Fixed { .. } => Some(Self::FIXED_ACCESS),
+        }
+    }
+
+    fn view(&self) -> Option<&catalog::ReadView> {
+        match self {
+            Self::Live { .. } => None,
+            Self::Fixed { view } => Some(view),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct LocalAgentMessageBoard {
     identity: SessionId,
     storage_namespace: Arc<str>,
     pool: Arc<SqlitePool>,
     host: Arc<dyn MessageBoardHost>,
-    access: Option<Access>,
+    mode: BoardMode,
     nested_json_pointer: Option<&'static str>,
 }
 
@@ -92,7 +118,7 @@ impl LocalAgentMessageBoard {
             pool: pool::open(sqlite, options).await?,
             storage_namespace: Arc::from(options.storage_namespace.as_str()),
             host,
-            access: None,
+            mode: BoardMode::Live { access: None },
             nested_json_pointer: None,
         })
     }
@@ -102,7 +128,7 @@ impl LocalAgentMessageBoard {
         caller: ThreadId,
         request: CreateChannelRequest,
     ) -> Result<ChannelSummary> {
-        if let Some(access) = self.access {
+        if let Some(access) = self.mode.access() {
             access.require_write(self.identity, "board.create_channel")?;
         }
         validate_channel(&request.channel_name)?;
@@ -136,28 +162,13 @@ impl LocalAgentMessageBoard {
     /// into a recipient's later turn. Once committed, notification failures are
     /// logged without failing the post; the persisted content remains readable.
     pub async fn post(&self, caller: ThreadId, request: PostRequest) -> Result<PostMetadata> {
-        Ok(self
-            .write(caller, request, PostBehavior::Discussion)
-            .await?
-            .0)
+        self.write(caller, request, PostBehavior::Discussion).await
     }
 
     /// Appends evidence without automatic subscriptions or notifications, even on a discussion board.
     /// Uses the same access checks, caller-scoped request IDs and durable write path as posting.
     /// Reusing a request ID for a different payload or operation is an error.
     pub async fn append(&self, caller: ThreadId, request: AppendRequest) -> Result<PostMetadata> {
-        Ok(self
-            .write_append(caller, request, PostBehavior::SilentAppend)
-            .await?
-            .0)
-    }
-
-    async fn write_append(
-        &self,
-        caller: ThreadId,
-        request: AppendRequest,
-        behavior: PostBehavior,
-    ) -> Result<(PostMetadata, Vec<ThreadId>)> {
         self.write(
             caller,
             PostRequest {
@@ -166,7 +177,7 @@ impl LocalAgentMessageBoard {
                 text: request.text,
                 agents_to_notify: Vec::new(),
             },
-            behavior,
+            PostBehavior::SilentAppend,
         )
         .await
     }
@@ -176,8 +187,8 @@ impl LocalAgentMessageBoard {
         caller: ThreadId,
         request: PostRequest,
         behavior: PostBehavior,
-    ) -> Result<(PostMetadata, Vec<ThreadId>)> {
-        if let Some(access) = self.access {
+    ) -> Result<PostMetadata> {
+        if let Some(access) = self.mode.access() {
             access.require_write(
                 self.identity,
                 match &request.destination {
@@ -197,7 +208,7 @@ impl LocalAgentMessageBoard {
         caller: ThreadId,
         request: PostRequest,
         behavior: PostBehavior,
-    ) -> Result<(PostMetadata, Vec<ThreadId>)> {
+    ) -> Result<PostMetadata> {
         if request.text.len() > MAX_POST_BYTES
             || request.text.is_empty()
             || request.request_id.is_empty()
@@ -213,9 +224,7 @@ impl LocalAgentMessageBoard {
         let request_json = match behavior {
             // Keep existing post fingerprints compatible with persisted retries.
             PostBehavior::Discussion => serde_json::to_string(&request),
-            PostBehavior::SilentAppend | PostBehavior::SilentAppendWithSubscribers => {
-                serde_json::to_string(&("append", &request))
-            }
+            PostBehavior::SilentAppend => serde_json::to_string(&("append", &request)),
         }
         .map_err(storage_error)?;
         let mut conn = self.pool.acquire().await.map_err(storage_error)?;
@@ -223,25 +232,22 @@ impl LocalAgentMessageBoard {
             .existing_post(&mut conn, &request_id, &request_json)
             .await?
         {
-            return Ok((post.metadata, Vec::new()));
+            return Ok(post.metadata);
         }
         drop(conn);
-        let notify_recipients = if behavior == PostBehavior::Discussion {
-            let mut recipients = HashSet::new();
+        let mut recipients = HashSet::new();
+        if let PostBehavior::Discussion = behavior {
             for path in &request.agents_to_notify {
                 recipients.insert(self.host.resolve_agent(path.clone()).await?);
             }
-            Some(recipients)
-        } else {
-            None
-        };
+        }
         let now = self.host.current_time(caller).await?;
         let mut tx = self.begin_write().await?;
         if let Some(post) = self
             .existing_post(&mut tx, &request_id, &request_json)
             .await?
         {
-            return Ok((post.metadata, Vec::new()));
+            return Ok(post.metadata);
         }
         let id = Uuid::now_v7();
         let (channel, root, target) = match &request.destination {
@@ -302,9 +308,7 @@ impl LocalAgentMessageBoard {
         };
         // Return one JSON array to avoid handing each subscriber row across
         // SQLite's worker thread while the write transaction is held.
-        let subscribers: Vec<ThreadId> = if behavior == PostBehavior::SilentAppend {
-            Vec::new()
-        } else {
+        if let PostBehavior::Discussion = behavior {
             let subscribed = sqlx::query_scalar::<_, String>(
                 "SELECT json_group_array(agent) FROM subscriptions WHERE board=? AND target=?",
             )
@@ -313,8 +317,13 @@ impl LocalAgentMessageBoard {
             .fetch_one(&mut *tx)
             .await
             .map_err(storage_error)?;
-            serde_json::from_str(&subscribed).map_err(storage_error)?
-        };
+            let subscribed: Vec<String> =
+                serde_json::from_str(&subscribed).map_err(storage_error)?;
+            for recipient in subscribed {
+                recipients.insert(ThreadId::from_string(&recipient).map_err(storage_error)?);
+            }
+        }
+        recipients.remove(&caller);
         let post = StoredPost {
             metadata: PostMetadata {
                 message_id: id,
@@ -337,11 +346,9 @@ impl LocalAgentMessageBoard {
         }
         tx.commit().await.map_err(storage_error)?;
 
-        let Some(mut recipients) = notify_recipients else {
-            return Ok((post.metadata, subscribers));
-        };
-        recipients.extend(subscribers);
-        recipients.remove(&caller);
+        if let PostBehavior::SilentAppend = behavior {
+            return Ok(post.metadata);
+        }
         // A committed post succeeds even if a best-effort notice cannot be delivered.
         let notice = paging::preview(post.clone(), /*max_chars*/ 150);
         futures::stream::iter(recipients)
@@ -354,7 +361,7 @@ impl LocalAgentMessageBoard {
                 }
             })
             .await;
-        Ok((post.metadata, Vec::new()))
+        Ok(post.metadata)
     }
 
     pub async fn set_subscription(
@@ -366,7 +373,7 @@ impl LocalAgentMessageBoard {
         let target_path = request.target_agent.unwrap_or(caller_path);
         let target_agent = self.host.resolve_agent(target_path.clone()).await?;
         if target_agent != caller
-            && let Some(access) = self.access
+            && let Some(access) = self.mode.access()
         {
             access.require_write(self.identity, "board.manage_subscriptions")?;
         }

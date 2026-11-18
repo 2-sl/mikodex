@@ -5,10 +5,7 @@ use codex_tools::ToolSpec;
 use codex_tools::with_catalog_tool_message;
 use std::collections::BTreeMap;
 
-pub fn create_list_mcp_resources_tool(
-    messages: Option<&ToolMessage>,
-    include_environment_id: bool,
-) -> ToolSpec {
+pub fn create_list_mcp_resources_tool(messages: Option<&ToolMessage>) -> ToolSpec {
     let properties = BTreeMap::from([
         (
             "server".to_string(),
@@ -33,13 +30,10 @@ pub fn create_list_mcp_resources_tool(
         parameters: JsonSchema::object(properties, /*required*/ None, Some(false.into())),
         output_schema: None,
     };
-    resource_tool_spec(tool, messages, include_environment_id)
+    ToolSpec::Function(with_catalog_tool_message(tool, messages))
 }
 
-pub fn create_list_mcp_resource_templates_tool(
-    messages: Option<&ToolMessage>,
-    include_environment_id: bool,
-) -> ToolSpec {
+pub fn create_list_mcp_resource_templates_tool(messages: Option<&ToolMessage>) -> ToolSpec {
     let properties = BTreeMap::from([
         (
             "server".to_string(),
@@ -65,13 +59,10 @@ pub fn create_list_mcp_resource_templates_tool(
         parameters: JsonSchema::object(properties, /*required*/ None, Some(false.into())),
         output_schema: None,
     };
-    resource_tool_spec(tool, messages, include_environment_id)
+    ToolSpec::Function(with_catalog_tool_message(tool, messages))
 }
 
-pub fn create_read_mcp_resource_tool(
-    messages: Option<&ToolMessage>,
-    include_environment_id: bool,
-) -> ToolSpec {
+pub fn create_read_mcp_resource_tool(messages: Option<&ToolMessage>) -> ToolSpec {
     let properties = BTreeMap::from([
         (
             "server".to_string(),
@@ -103,28 +94,7 @@ pub fn create_read_mcp_resource_tool(
         ),
         output_schema: None,
     };
-    resource_tool_spec(tool, messages, include_environment_id)
-}
-
-fn resource_tool_spec(
-    tool: ResponsesApiTool,
-    messages: Option<&ToolMessage>,
-    include_environment_id: bool,
-) -> ToolSpec {
-    let mut tool = with_catalog_tool_message(tool, messages);
-    if include_environment_id {
-        // Catalog schemas can replace the parameters, but cannot remove environment selection.
-        tool.parameters
-            .properties
-            .get_or_insert_default()
-            .insert(
-                "environment_id".to_string(),
-                JsonSchema::string(Some(
-                    "Environment ID from resource listings or environment context. Use with a server name. Required for environment-owned servers when multiple environments are attached. Omit for shared servers.".to_string(),
-                )),
-            );
-    }
-    ToolSpec::Function(tool)
+    ToolSpec::Function(with_catalog_tool_message(tool, messages))
 }
 
 #[cfg(test)]

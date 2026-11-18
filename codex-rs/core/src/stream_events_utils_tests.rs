@@ -315,6 +315,7 @@ async fn output_context(session: Arc<Session>, turn_context: Arc<TurnContext>) -
         step_context,
         turn_store: Arc::new(ExtensionData::new(turn_context.sub_id.clone())),
         tool_runtime,
+        defer_tool_dispatch: false,
         cancellation_token: CancellationToken::new(),
     }
 }
@@ -335,7 +336,7 @@ async fn handle_output_item_done_returns_contributed_last_agent_message() {
     .expect("assistant message should complete");
 
     assert_eq!(
-        output.last_agent_message.as_ref().map(|m| m.text.as_str()),
+        output.last_agent_message.as_deref(),
         Some("contributed assistant text")
     );
 }
@@ -502,11 +503,7 @@ async fn finalized_turn_item_defers_mailbox_for_contributed_visible_text(plan_mo
     .expect("assistant message should parse");
 
     assert_eq!(
-        finalized
-            .facts
-            .last_agent_message
-            .as_ref()
-            .map(|m| m.text.as_str()),
+        finalized.facts.last_agent_message.as_deref(),
         Some("contributed assistant text")
     );
     assert!(finalized.facts.defers_mailbox_delivery_to_next_turn);
@@ -534,11 +531,7 @@ async fn finalized_turn_item_keeps_mailbox_open_for_nonterminal_text(phase: Mess
     .expect("assistant message should parse");
 
     assert_eq!(
-        finalized
-            .facts
-            .last_agent_message
-            .as_ref()
-            .map(|m| m.text.as_str()),
+        finalized.facts.last_agent_message.as_deref(),
         Some("contributed assistant text")
     );
     assert!(!finalized.facts.defers_mailbox_delivery_to_next_turn);

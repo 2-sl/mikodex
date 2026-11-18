@@ -53,7 +53,7 @@ async fn ignored_config_fields_emit_startup_and_project_warnings() -> Result<()>
 
     let project = TempDir::new()?;
     std::fs::create_dir(project.path().join(".git"))?;
-    std::fs::create_dir(project.path().join(".codex"))?;
+    std::fs::create_dir(project.path().join(".mikodex"))?;
     std::fs::write(
         project.path().join(".codex/config.toml"),
         "project_setting = 'private_value'",
@@ -83,7 +83,7 @@ foo = "bar"
     )?;
 
     let output = Command::new(codex_utils_cargo_bin::cargo_bin("codex-app-server")?)
-        .env("CODEX_HOME", codex_home.path())
+        .env("MIKODEX_HOME", codex_home.path())
         .env(
             "CODEX_APP_SERVER_MANAGED_CONFIG_PATH",
             codex_home.path().join("managed_config.toml"),
@@ -98,31 +98,6 @@ foo = "bar"
         "expected strict config error in stderr, got: {stderr}"
     );
 
-    Ok(())
-}
-
-#[test_case::test_case("otel-auth"; "bare_name")]
-#[test_case::test_case("./otel-auth"; "relative_path")]
-fn relative_managed_otel_helper_fails_startup(command: &str) -> Result<()> {
-    let home = TempDir::new()?;
-    std::fs::write(
-        home.path().join("requirements.toml"),
-        format!("[otel]\nheaders_helper = '{command}'"),
-    )?;
-    let output = Command::new(codex_utils_cargo_bin::cargo_bin("codex-app-server")?)
-        .env("CODEX_HOME", home.path())
-        .env(
-            "CODEX_APP_SERVER_MANAGED_CONFIG_PATH",
-            home.path().join("managed_config.toml"),
-        )
-        .args(["--listen", "off"])
-        .output()?;
-    let stderr = String::from_utf8(output.stderr)?;
-    assert!(!output.status.success(), "{stderr}");
-    assert!(
-        stderr.contains("otel.headers_helper must be an absolute executable path"),
-        "{stderr}"
-    );
     Ok(())
 }
 
@@ -148,7 +123,7 @@ fn managed_auth_requirements_fail_closed_for_standalone_app_server() -> Result<(
         std::fs::write(codex_home.path().join("config.toml"), config)?;
 
         let output = Command::new(codex_utils_cargo_bin::cargo_bin("codex-app-server")?)
-            .env("CODEX_HOME", codex_home.path())
+            .env("MIKODEX_HOME", codex_home.path())
             .env(
                 "CODEX_APP_SERVER_MANAGED_CONFIG_PATH",
                 codex_home.path().join("managed_config.toml"),

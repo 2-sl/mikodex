@@ -137,9 +137,6 @@ pub struct NetworkProxyConfig {
     #[serde(default = "default_proxy_url")]
     pub proxy_url: String,
     pub enable_socks5: bool,
-    /// Route outbound TCP from managed Linux sandbox commands through the managed SOCKS5 proxy.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub transparent_tcp: bool,
     #[serde(default = "default_socks_url")]
     pub socks_url: String,
     pub enable_socks5_udp: bool,
@@ -191,7 +188,6 @@ impl Default for NetworkProxyConfig {
             enabled: false,
             proxy_url: default_proxy_url(),
             enable_socks5: true,
-            transparent_tcp: false,
             socks_url: default_socks_url(),
             enable_socks5_udp: true,
             allow_upstream_proxy: true,
@@ -754,7 +750,6 @@ mod tests {
         assert_eq!(
             NetworkProxyConfig::default(),
             NetworkProxyConfig {
-                transparent_tcp: false,
                 enabled: false,
                 proxy_url: "http://127.0.0.1:3128".to_string(),
                 enable_socks5: true,

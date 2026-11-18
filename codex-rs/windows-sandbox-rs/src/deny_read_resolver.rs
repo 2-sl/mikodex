@@ -10,8 +10,6 @@ use ignore::overrides::OverrideBuilder;
 use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
-#[cfg(windows)]
-use std::time::Instant;
 
 #[derive(Debug, Eq, PartialEq)]
 struct GlobScanPlan {
@@ -70,8 +68,6 @@ fn expand_deny_read_paths(
         return Ok(paths);
     }
 
-    #[cfg(windows)]
-    let started = Instant::now();
     let glob_policy = FileSystemSandboxPolicy::restricted(
         unreadable_globs
             .iter()
@@ -90,8 +86,6 @@ fn expand_deny_read_paths(
     };
 
     let scan_plans = glob_scan_plans(unreadable_globs, glob_scan_max_depth)?;
-    #[cfg(windows)]
-    let roots = scan_plans.len();
 
     for scan_plan in scan_plans {
         if !scan_plan.root.exists() {
@@ -147,14 +141,6 @@ fn expand_deny_read_paths(
         }
     }
 
-    #[cfg(windows)]
-    {
-        let elapsed_ms = started.elapsed().as_millis();
-        let patterns = unreadable_globs.len();
-        crate::log_runtime_note(&format!(
-            "MXC deny glob expansion elapsed_ms={elapsed_ms} patterns={patterns} roots={roots} glob_scan_max_depth={glob_scan_max_depth:?}"
-        ));
-    }
     Ok(paths)
 }
 

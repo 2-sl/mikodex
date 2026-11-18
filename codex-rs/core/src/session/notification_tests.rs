@@ -34,9 +34,10 @@ async fn task_finish_preserves_notification_budget_and_queued_user_input() {
         }])
         .await
         .unwrap();
-    let user_input = vec![ResolvedUserInput::text(
-        "keep this queued user input".to_string(),
-    )];
+    let user_input = vec![UserInput::Text {
+        text: "keep this queued user input".to_string(),
+        text_elements: Vec::new(),
+    }];
     assert!(matches!(
         submit_steer_only(&session, user_input.clone(), &turn.sub_id).await,
         TurnInputSubmission::Steered { .. }
@@ -77,7 +78,7 @@ async fn task_finish_preserves_notification_budget_and_queued_user_input() {
             &text,
             codex_utils_output_truncation::TruncationPolicy::Tokens(120),
         )),
-        session.response_item_from_user_input(&user_input),
+        session.response_item_from_user_input(user_input),
         late[0].clone(),
     ];
     let history = session.clone_history().await;

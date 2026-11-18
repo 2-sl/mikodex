@@ -64,17 +64,13 @@ pub(super) fn has_explicit_settings(config: &Config) -> bool {
         .and_then(|features| features.get("token_budget"))
         .and_then(|token_budget| token_budget.as_table())
         .is_some_and(|settings| {
-            settings.keys().any(|key| {
-                !matches!(
-                    key.as_str(),
-                    "enabled" | "use_history_notes_extension" | "context_window_as_tool_output"
-                )
-            })
+            settings
+                .keys()
+                .any(|key| !matches!(key.as_str(), "enabled" | "use_history_notes_extension"))
         })
         || config.token_budget.as_ref().is_some_and(|token_budget| {
             let mut settings = token_budget.clone();
             settings.use_history_notes_extension = false;
-            settings.context_window_as_tool_output = false;
             settings != TokenBudgetConfig::default()
         })
 }
@@ -98,8 +94,6 @@ pub(super) fn resolve_token_budget(
     };
 
     let token_budget = TokenBudgetConfig {
-        context_window_as_tool_output: configured_token_budget
-            .is_some_and(|budget| budget.context_window_as_tool_output),
         use_history_notes_extension: configured_token_budget
             .is_some_and(|token_budget| token_budget.use_history_notes_extension),
         reminder_threshold_tokens: Some(model_defaults.reminder_threshold_tokens),

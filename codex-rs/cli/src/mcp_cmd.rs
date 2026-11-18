@@ -7,7 +7,6 @@ use anyhow::anyhow;
 use anyhow::bail;
 use clap::ArgGroup;
 use clap::builder::TypedValueParser;
-use codex_config::ConfigLayerSource;
 use codex_config::types::AppToolApproval;
 use codex_config::types::McpServerAuth;
 use codex_config::types::McpServerConfig;
@@ -24,7 +23,6 @@ use codex_core::plugins_manager_for_config;
 use codex_exec_server::EnvironmentManager;
 use codex_exec_server::HttpClient;
 use codex_exec_server::RouteAwareHttpClient;
-use codex_extension_api::McpServerContributionContext;
 use codex_login::AuthManager;
 use codex_mcp::McpOAuthLoginSupport;
 use codex_mcp::McpRuntimeContext;
@@ -58,7 +56,7 @@ mod tests;
 /// Subcommands:
 /// - `list`   — list configured servers (with `--json`)
 /// - `get`    — show a single server (with `--json`)
-/// - `add`    — add a server launcher entry to `~/.codex/config.toml`
+/// - `add`    — add a server launcher entry to `~/.mikodex/config.toml`
 /// - `remove` — delete a server entry
 /// - `login`  — authenticate with MCP server using OAuth
 /// - `logout` — remove OAuth credentials for MCP server
@@ -99,7 +97,7 @@ pub struct GetArgs {
 }
 
 #[derive(Debug, clap::Parser)]
-#[command(override_usage = "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
+#[command(override_usage = "mikodex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
 pub struct AddArgs {
     /// Name for the MCP server configuration.
     pub name: String,
@@ -493,7 +491,7 @@ async fn run_add(config: &Config, add_args: AddArgs) -> Result<()> {
         }
         McpOAuthLoginSupport::Unsupported => {}
         McpOAuthLoginSupport::Unknown(_) => println!(
-            "MCP server may or may not require login. Run `codex mcp login {name}` to login."
+            "MCP server may or may not require login. Run `mikodex mcp login {name}` to login."
         ),
     }
 
@@ -509,7 +507,7 @@ async fn run_remove(config_overrides: &CliConfigOverrides, remove_args: RemoveAr
 
     validate_server_name(&name)?;
 
-    let codex_home = find_codex_home().context("failed to resolve CODEX_HOME")?;
+    let codex_home = find_codex_home().context("failed to resolve MIKODEX_HOME")?;
     let mut servers = load_global_mcp_servers(&codex_home)
         .await
         .with_context(|| format!("failed to load MCP servers from {}", codex_home.display()))?;
@@ -694,9 +692,7 @@ async fn run_list(config: &Config, list_args: ListArgs) -> Result<()> {
         AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ true).await?;
     let auth = auth_manager.auth().await;
     let mcp_servers = mcp_manager.configured_servers(config).await;
-    let runtime_config = mcp_manager
-        .runtime_config(McpServerContributionContext::global(config))
-        .await;
+    let runtime_config = mcp_manager.runtime_config(config).await;
     let effective_mcp_servers = codex_mcp::effective_mcp_servers(&runtime_config, auth.as_ref());
 
     let mut entries: Vec<_> = mcp_servers.iter().collect();
@@ -710,12 +706,7 @@ async fn run_list(config: &Config, list_args: ListArgs) -> Result<()> {
         config.cwd.to_path_buf(),
     );
     let auth_statuses = compute_auth_statuses(
-        mcp_servers.keys().filter_map(|name| {
-            runtime_config
-                .mcp_server_catalog
-                .resolve_server_name(name)
-                .and_then(|key| effective_mcp_servers.get_key_value(key))
-        }),
+        effective_mcp_servers.iter(),
         config.mcp_oauth_credentials_store_mode,
         config.auth_keyring_backend_kind(),
         auth.as_ref(),
@@ -723,10 +714,7 @@ async fn run_list(config: &Config, list_args: ListArgs) -> Result<()> {
         &runtime_config.ema_state,
         &runtime_context,
     )
-    .await
-    .into_iter()
-    .map(|(key, status)| (key.name().to_owned(), status))
-    .collect::<HashMap<_, _>>();
+    .await;
 
     if list_args.json {
         let json_entries: Vec<_> = entries
@@ -792,7 +780,7 @@ async fn run_list(config: &Config, list_args: ListArgs) -> Result<()> {
     }
 
     if entries.is_empty() {
-        println!("No MCP servers configured yet. Try `codex mcp add my-tool -- my-command`.");
+        println!("No MCP servers configured yet. Try `mikodex mcp add my-tool -- my-command`.");
         return Ok(());
     }
 
@@ -1132,23 +1120,7 @@ async fn run_get(config: &Config, get_args: GetArgs) -> Result<()> {
         };
         println!("  default_tools_approval_mode: {approval_mode}");
     }
-    if let Some(layer) = config.config_layer_stack.get_active_user_layer()
-        && let ConfigLayerSource::User {
-            file,
-            profile: Some(_),
-        } = &layer.name
-        && !layer.is_disabled()
-        && layer
-            .config
-            .get("mcp_servers")
-            .and_then(|servers| servers.get(&get_args.name))
-            .is_some()
-    {
-        println!("  profile settings: {}", file.as_path().display());
-        println!("  removal scope: `codex mcp remove` only edits the global config.");
-    } else {
-        println!("  remove: codex mcp remove {}", get_args.name);
-    }
+    println!("  remove: mikodex mcp remove {}", get_args.name);
 
     Ok(())
 }

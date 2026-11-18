@@ -22,12 +22,6 @@ const REVIEW_FAILURE_INSTRUCTIONS: &str = concat!(
     "This is a review failure, not a determination that the action is unsafe. ",
     "Do not bypass the approval check; resolve the error or ask the user for guidance.",
 );
-const STALE_AUTHORIZATION_INSTRUCTIONS: &str = concat!(
-    "The action did not run. Guardian could not complete its review because authorization ",
-    "changed; this is not a policy denial. If current instructions authorize the action, ",
-    "retry once through Guardian. If authorization is unclear, resolve that uncertainty before ",
-    "proceeding. Do not bypass approval or repeatedly retry a failed review.",
-);
 const INPUT_BUDGET_MESSAGE: &str =
     "the complete action and minimum review context exceed the reviewer input budget";
 
@@ -159,11 +153,6 @@ pub fn complete_review(
                     analytics.decision = GuardianReviewDecision::Denied;
                     analytics.terminal_status = GuardianReviewTerminalStatus::FailedClosed;
                     let rationale = format!("Automatic approval review failed: {message}");
-                    let instructions = if matches!(error, GuardianReviewError::StaleAuthorization) {
-                        STALE_AUTHORIZATION_INSTRUCTIONS
-                    } else {
-                        REVIEW_FAILURE_INSTRUCTIONS
-                    };
                     // Keep the existing blocked status for client compatibility.
                     if let Some(event) = event.as_mut() {
                         event.status = GuardianAssessmentStatus::Denied;
@@ -171,7 +160,7 @@ pub fn complete_review(
                     }
                     return ReviewCompletion {
                         decision: Some(ReviewDecision::denied(format!(
-                            "{rationale}\n{instructions}"
+                            "{rationale}\n{REVIEW_FAILURE_INSTRUCTIONS}"
                         ))),
                         event,
                         warning: Some(rationale),

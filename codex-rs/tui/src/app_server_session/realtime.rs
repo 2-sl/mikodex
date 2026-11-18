@@ -12,16 +12,17 @@ use codex_app_server_protocol::ThreadRealtimeStopResponse;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::RealtimeConversationVersion;
 use codex_protocol::protocol::RealtimeOutputModality;
+use codex_protocol::protocol::RealtimeVoice;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
-use uuid::Uuid;
 
 impl AppServerSession {
     pub(crate) async fn thread_realtime_start(
         &mut self,
         thread_id: ThreadId,
-        call_id: String,
-        voice_session_id: Uuid,
+        offer_sdp: String,
+        model: Option<String>,
+        voice: Option<RealtimeVoice>,
     ) -> Result<()> {
         let request_id = self.next_request_id();
         let _: ThreadRealtimeStartResponse = self
@@ -38,21 +39,18 @@ impl AppServerSession {
                     codex_response_handoff_mode: None,
                     backend_reasoning_status: false,
                     codex_response_handoff_channel_prefixes: None,
-                    model: None,
+                    model,
                     output_modality: RealtimeOutputModality::Audio,
                     include_startup_context: Some(false),
                     initial_items: None,
                     realtime_start_instructions: None,
                     realtime_end_instructions: None,
                     prompt: None,
-                    realtime_session_id: Some(thread_id.to_string()),
-                    voice_session_id: Some(voice_session_id.to_string()),
-                    transport: Some(ThreadRealtimeStartTransport::ExistingCall {
-                        // The TUI owns the peer connection and has already negotiated this call.
-                        call_id,
-                    }),
+                    realtime_session_id: None,
+                    voice_session_id: None,
+                    transport: Some(ThreadRealtimeStartTransport::Webrtc { sdp: offer_sdp }),
                     version: Some(RealtimeConversationVersion::V3),
-                    voice: None,
+                    voice,
                 },
             })
             .await

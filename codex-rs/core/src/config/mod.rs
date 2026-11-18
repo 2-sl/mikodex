@@ -33,7 +33,6 @@ use codex_config::config_toml::DEFAULT_PROJECT_DOC_MAX_BYTES;
 use codex_config::config_toml::ProjectConfig;
 use codex_config::config_toml::RealtimeAudioConfig;
 use codex_config::config_toml::RealtimeConfig;
-use codex_config::config_toml::ResponseProcessMode;
 use codex_config::config_toml::ThreadStoreToml;
 use codex_config::config_toml::validate_model_providers;
 use codex_config::loader::load_config_layers_state;
@@ -48,7 +47,6 @@ use codex_config::types::AuthCredentialsStoreMode;
 use codex_config::types::AuthKeyringBackendKind;
 use codex_config::types::History;
 use codex_config::types::McpServerConfig;
-use codex_config::types::McpServerTransportConfig;
 use codex_config::types::MemoriesConfig;
 use codex_config::types::ModelAvailabilityNuxConfig;
 use codex_config::types::Notice;
@@ -56,7 +54,6 @@ use codex_config::types::OAuthCredentialsStoreMode;
 use codex_config::types::QuickDial;
 use codex_config::types::ResumeCwdMode;
 use codex_config::types::SessionPickerViewMode;
-use codex_config::types::StatusLineSelection;
 use codex_config::types::ToolSuggestConfig;
 use codex_config::types::ToolSuggestDisabledTool;
 use codex_config::types::ToolSuggestDiscoverable;
@@ -91,7 +88,6 @@ use codex_http_client::OutboundProxyPolicy;
 use codex_login::AuthManagerConfig;
 use codex_login::AuthRouteConfig;
 use codex_mcp::DEFAULT_OPTIONAL_MCP_STARTUP_GRACE;
-use codex_mcp::McpClientConfig;
 use codex_mcp::McpConfig;
 use codex_mcp::McpPluginAttribution;
 use codex_mcp::McpProtocolMode;
@@ -130,6 +126,7 @@ use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::models::PermissionProfile;
 pub use codex_protocol::models::PermissionProfileSnapshot;
 use codex_protocol::models::ProfileWorkspaceRoot;
+use codex_protocol::models::SandboxEnforcement;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::permissions::DenyReadValidator;
@@ -142,12 +139,10 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_rmcp_client::McpOAuthRefreshMode;
-use codex_rollout_trace::TraceCaptureLimits;
 use codex_sandboxing::SandboxType;
 pub use codex_thread_store::ExtraConfig;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
-use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathConvention;
 use codex_utils_path_uri::PathUri;
 use codex_utils_path_uri::Platform;
@@ -209,6 +204,7 @@ pub use codex_config::ConstraintError;
 pub use codex_config::ConstraintResult;
 pub use codex_config::LoaderOverrides;
 pub use codex_network_proxy::NetworkProxyAuditMetadata;
+use codex_sandboxing::compatibility_sandbox_policy_for_permission_profile;
 pub use codex_sandboxing::system_bwrap_warning;
 pub use managed_features::ManagedFeatures;
 pub(crate) use metrics::emit_session_start_metrics;
@@ -349,14 +345,6 @@ pub(crate) async fn test_config() -> Config {
     )
     .await
     .expect("load default test config")
-}
-
-/// Process-local launch directories for stdio servers supplied by the host.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct McpLaunchCwds {
-    pub plugins: HashMap<String, HashMap<String, AbsolutePathBuf>>,
-    /// Server name, expected executable, and launch directory.
-    pub configured: HashMap<String, (String, AbsolutePathBuf)>,
 }
 
 /// Application configuration loaded from disk and merged with overrides.
@@ -509,6 +497,12 @@ impl Permissions {
         self.permission_profile().network_sandbox_policy()
     }
 
+    /// Legacy compatibility projection derived from the canonical profile.
+    pub fn legacy_sandbox_policy(&self, cwd: &Path) -> SandboxPolicy {
+        let permission_profile = self.effective_permission_profile();
+        compatibility_sandbox_policy_for_permission_profile(&permission_profile, cwd)
+    }
+
     /// Check whether a legacy sandbox policy can be applied to this permission
     /// set after projecting it into the canonical permission profile.
     pub fn can_set_legacy_sandbox_policy(
@@ -516,8 +510,14 @@ impl Permissions {
         sandbox_policy: &SandboxPolicy,
         cwd: &Path,
     ) -> ConstraintResult<()> {
-        let permission_profile =
-            PermissionProfile::from_legacy_sandbox_policy_for_cwd(sandbox_policy, cwd);
+        let file_system_sandbox_policy =
+            FileSystemSandboxPolicy::from_legacy_sandbox_policy_for_cwd(sandbox_policy, cwd);
+        let network_sandbox_policy = NetworkSandboxPolicy::from(sandbox_policy);
+        let permission_profile = PermissionProfile::from_runtime_permissions_with_enforcement(
+            SandboxEnforcement::from_legacy_sandbox_policy(sandbox_policy),
+            &file_system_sandbox_policy,
+            network_sandbox_policy,
+        );
         self.can_set_permission_profile(&permission_profile)
     }
 
@@ -529,8 +529,14 @@ impl Permissions {
         cwd: &Path,
     ) -> ConstraintResult<()> {
         self.can_set_legacy_sandbox_policy(&sandbox_policy, cwd)?;
-        let permission_profile =
-            PermissionProfile::from_legacy_sandbox_policy_for_cwd(&sandbox_policy, cwd);
+        let file_system_sandbox_policy =
+            FileSystemSandboxPolicy::from_legacy_sandbox_policy_for_cwd(&sandbox_policy, cwd);
+        let network_sandbox_policy = NetworkSandboxPolicy::from(&sandbox_policy);
+        let permission_profile = PermissionProfile::from_runtime_permissions_with_enforcement(
+            SandboxEnforcement::from_legacy_sandbox_policy(&sandbox_policy),
+            &file_system_sandbox_policy,
+            network_sandbox_policy,
+        );
         self.workspace_roots = match &sandbox_policy {
             SandboxPolicy::WorkspaceWrite { writable_roots, .. } => {
                 let mut workspace_roots = vec![
@@ -754,8 +760,6 @@ pub struct Config {
     pub guardian_transcript_mode: codex_protocol::TranscriptFormat,
     /// Frozen section policy for sync Guardian; absence keeps fixed budgeting.
     pub guardian_sync_elastic_budget: Option<codex_guardian_context::ElasticBudgetConfig>,
-    /// Frozen section policy for async Guardian; absence keeps fixed budgeting.
-    pub guardian_async_elastic_budget: Option<codex_guardian_context::ElasticBudgetConfig>,
 
     /// Optional replacement for the gated history-retrieval instructions.
     /// Blank config values are treated as unset, like other Guardian policy overrides.
@@ -808,7 +812,7 @@ pub struct Config {
     /// appends one extra argument containing a JSON payload describing the
     /// event.
     ///
-    /// Example `~/.codex/config.toml` snippet:
+    /// Example `~/.mikodex/config.toml` snippet:
     ///
     /// ```toml
     /// notify = ["notify-send", "Codex"]
@@ -860,7 +864,11 @@ pub struct Config {
 
     /// Preferred docked sidebar width as a percentage of the terminal.
     pub tui_sidebar_width_percent: Option<u8>,
+
+    /// Preferred Agent Command Center rail width as a percentage of the terminal.
     pub tui_agents_overview_width_percent: Option<u8>,
+
+    /// Preferred command reference rail width as a percentage of the terminal.
     pub tui_command_reference_width_percent: Option<u8>,
 
     /// Mouse wheel speed multiplier for transcript scrolling; defaults to one row per event.
@@ -888,9 +896,6 @@ pub struct Config {
     ///
     /// When unset, the TUI defaults to: `model-with-reasoning` and `current-dir`.
     pub tui_status_line: Option<Vec<String>>,
-
-    /// Local choice of built-in status items or an MCP provider.
-    pub tui_status_line_provider: Option<Box<StatusLineSelection>>,
 
     /// Whether to color status line items with colors from the active syntax theme.
     pub tui_status_line_use_colors: bool,
@@ -969,7 +974,7 @@ pub struct Config {
     /// keyring: Use an OS-specific keyring service.
     ///          Credentials stored in the keyring will only be readable by Codex unless the user explicitly grants access via OS-level keyring access.
     ///          https://github.com/openai/codex/blob/main/codex-rs/rmcp-client/src/oauth.rs#L2
-    /// file: CODEX_HOME/.credentials.json
+    /// file: MIKODEX_HOME/.credentials.json
     ///       This file will be readable to Codex and other applications running as the same user.
     /// auto (default): keyring if available, otherwise file.
     pub mcp_oauth_credentials_store_mode: OAuthCredentialsStoreMode,
@@ -1028,23 +1033,20 @@ pub struct Config {
     /// Memories subsystem settings.
     pub memories: MemoriesConfig,
 
-    /// Directory containing all Codex state (defaults to `~/.codex` but can be
-    /// overridden by the `CODEX_HOME` environment variable).
+    /// Directory containing all Codex state (defaults to `~/.mikodex` but can be
+    /// overridden by the `MIKODEX_HOME` environment variable).
     pub codex_home: AbsolutePathBuf,
 
     /// Resolved configuration shared by all Codex SQLite databases.
     pub sqlite: codex_state::SqliteConfig,
 
-    /// Directory for log files (defaults to `$CODEX_HOME/log`).
+    /// Directory for log files (defaults to `$MIKODEX_HOME/log`).
     /// SQLite logs use this directory only when `log_dir` is explicitly configured
     /// and no managed `sqlite_home` requirement applies.
     pub log_dir: PathBuf,
 
-    /// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
+    /// Settings that govern if and what will be written to `~/.mikodex/history.jsonl`.
     pub history: History,
-
-    /// Limits shared by all threads recording into one native rollout trace.
-    pub rollout_trace_limits: TraceCaptureLimits,
 
     /// When true, session is not persisted on disk. Default to `false`
     pub ephemeral: bool,
@@ -1064,9 +1066,6 @@ pub struct Config {
     /// Optional URI-based file opener. If set, citations to files in the model
     /// output will be hyperlinked using the specified URI scheme.
     pub file_opener: UriBasedFileOpener,
-
-    /// Process-local launch directories for stdio servers supplied by the host.
-    pub mcp_launch_cwds: Arc<McpLaunchCwds>,
 
     /// Path to the current Codex executable. This cannot be set in the config
     /// file: it must be set in code via [`ConfigOverrides`].
@@ -1175,9 +1174,6 @@ pub struct Config {
     /// Policy for collecting and validating tool runtimes.
     pub tool_registry: ToolRegistryConfig,
 
-    /// When to process model output, including text and tool calls.
-    pub response_process_mode: ResponseProcessMode,
-
     /// Configuration for the experimental code-mode tool surface.
     pub code_mode: CodeModeConfig,
 
@@ -1275,7 +1271,6 @@ pub struct CodeModeConfig {
     pub direct_only_tool_namespaces: Vec<String>,
     /// Keep code mode fail-closed when the standalone host is unavailable.
     pub disable_in_process_fallback: bool,
-    pub heartbeat_interval_s: u32,
 }
 
 impl Default for CodeModeConfig {
@@ -1287,7 +1282,6 @@ impl Default for CodeModeConfig {
             excluded_tool_namespaces: Vec::new(),
             direct_only_tool_namespaces: Vec::new(),
             disable_in_process_fallback: false,
-            heartbeat_interval_s: 0,
         }
     }
 }
@@ -1299,7 +1293,6 @@ const AUTO_COMPACT_FALLBACK_PROMPT_MAX_BYTES: usize = 2000;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TokenBudgetConfig {
     pub use_history_notes_extension: bool,
-    pub context_window_as_tool_output: bool,
     pub reminder_threshold_tokens: Option<i64>,
     pub reminder_message_template: String,
     pub guidance_message: Option<String>,
@@ -1393,7 +1386,6 @@ impl Default for TokenBudgetConfig {
     fn default() -> Self {
         Self {
             use_history_notes_extension: false,
-            context_window_as_tool_output: false,
             reminder_threshold_tokens: None,
             reminder_message_template: ResolvedModelMessages::bundled()
                 .token_budget_reminder_template()
@@ -1408,19 +1400,10 @@ impl Default for TokenBudgetConfig {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RolloutBudgetConfig {
     pub enforce_limit: bool,
-    /// Positive, finite allowance, including fractional opaque units.
-    pub limit_budget: f64,
-    pub reminder_at_context_start: bool,
+    pub limit_tokens: i64,
     pub reminder_at_remaining_tokens: Vec<i64>,
     pub sampling_token_weight: f64,
     pub prefill_token_weight: f64,
-}
-
-/// An integer threshold is reached when the actual fractional balance is at
-/// or below it. Round the balance up, not the threshold to `f64`: an `i64`
-/// threshold above 2^53 is still exact, and every threshold fits in `i128`.
-pub(crate) fn rollout_budget_threshold_reached(remaining_units: f64, threshold: i64) -> bool {
-    remaining_units.ceil() as i128 <= i128::from(threshold)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1459,7 +1442,6 @@ pub struct MultiAgentV2Config {
     pub hide_spawn_agent_metadata: bool,
     pub expose_spawn_agent_model_overrides: bool,
     pub wait_agent_enabled: bool,
-    pub interrupt_at_item_boundary: bool,
     pub disable_native_tools: bool,
     pub disable_direct_message: bool,
     pub message_board_in_memory: bool,
@@ -1484,7 +1466,6 @@ impl MultiAgentV2Config {
             hide_spawn_agent_metadata: true,
             expose_spawn_agent_model_overrides: true,
             wait_agent_enabled: true,
-            interrupt_at_item_boundary: false,
             disable_native_tools: false,
             disable_direct_message: false,
             message_board_in_memory: false,
@@ -1718,21 +1699,6 @@ async fn config_toml_from_layers(layers: &ConfigLayerStack) -> std::io::Result<C
 }
 
 impl Config {
-    pub(crate) fn thread_persistence_metadata(
-        &self,
-    ) -> codex_thread_store::ThreadPersistenceMetadata {
-        use codex_protocol::protocol::ThreadMemoryMode;
-        codex_thread_store::ThreadPersistenceMetadata {
-            cwd: Some(self.cwd.to_path_buf()),
-            model_provider: self.model_provider_id.clone(),
-            memory_mode: if self.memories.generate_memories {
-                ThreadMemoryMode::Enabled
-            } else {
-                ThreadMemoryMode::Disabled
-            },
-        }
-    }
-
     /// Capture storage and sync preparation use one session-static rollout choice.
     pub(crate) fn guardian_context_budgeting(&self) -> codex_guardian_context::ContextBudgeting {
         if self.guardian_sync_elastic_budget.is_some() {
@@ -1822,6 +1788,24 @@ impl Config {
                 self.agent_max_threads.or(DEFAULT_AGENT_MAX_THREADS)
             }
         }
+    }
+
+    pub fn legacy_sandbox_policy(&self) -> SandboxPolicy {
+        self.permissions.legacy_sandbox_policy(self.cwd.as_path())
+    }
+
+    pub fn set_legacy_sandbox_policy(
+        &mut self,
+        sandbox_policy: SandboxPolicy,
+    ) -> ConstraintResult<()> {
+        self.workspace_roots_explicit = matches!(
+            &sandbox_policy,
+            SandboxPolicy::WorkspaceWrite { writable_roots, .. } if !writable_roots.is_empty()
+        );
+        self.permissions
+            .set_legacy_sandbox_policy(sandbox_policy, self.cwd.as_path())?;
+        self.workspace_roots = self.permissions.workspace_roots().to_vec();
+        Ok(())
     }
 
     /// Combine runtime and profile roots without interpreting them on the current host.
@@ -1974,18 +1958,11 @@ impl Config {
         additional_plugin_registrations: impl IntoIterator<Item = McpServerRegistration>,
     ) -> McpConfig {
         let mut catalog = ResolvedMcpCatalog::builder();
-        catalog.set_exposure(if self.features.enabled(Feature::MultiEnvironmentMcp) {
-            codex_mcp::McpServerExposure::EnvironmentQualified
-        } else {
-            codex_mcp::McpServerExposure::Legacy
-        });
         if self.features.enabled(Feature::UseXaa)
             && let Some(auth) = &self.mcp_enterprise_managed_auth
         {
             catalog.enable_ema(auth.idp.clone());
         }
-        let use_launch_cwds = self.features.enabled(Feature::McpSharedReplCwd)
-            && self.features.enabled(Feature::McpConnectionSharing);
         for (plugin_order, plugin) in loaded_plugins
             .plugins()
             .iter()
@@ -2006,61 +1983,29 @@ impl Config {
                 )
             }
             .with_host_root(PathUri::from_abs_path(&plugin.root));
-            let launch_cwds = self.mcp_launch_cwds.plugins.get(&plugin.config_name);
-            for (name, mut plugin_server) in plugin_mcp_servers {
-                if use_launch_cwds
-                    && let Some(path) = launch_cwds.and_then(|cwds| cwds.get(&name))
-                    && plugin_server.is_local_environment()
-                    && !plugin.is_agent_plugin()
-                    && let McpServerTransportConfig::Stdio { cwd, .. } =
-                        &mut plugin_server.transport
-                {
-                    *cwd = Some(LegacyAppPathString::from_abs_path(path));
-                }
-                let registration = McpServerRegistration::from_plugin(
+            for (name, plugin_server) in plugin_mcp_servers {
+                catalog.register(McpServerRegistration::from_plugin(
                     name,
                     attribution.clone(),
                     plugin_order,
                     plugin_server,
-                );
-                catalog.register(registration);
+                ));
             }
         }
         for registration in additional_plugin_registrations {
             catalog.register(registration);
         }
         for (name, server) in self.mcp_servers.get() {
-            let mut server = server.clone();
-            if use_launch_cwds
-                && let Some((executable, path)) = self.mcp_launch_cwds.configured.get(name)
-                && server.is_local_environment()
-                && let McpServerTransportConfig::Stdio { command, cwd, .. } = &mut server.transport
-                && command == executable
-                && cwd.is_none()
-            {
-                *cwd = Some(LegacyAppPathString::from_abs_path(path));
-            }
-            catalog.register(McpServerRegistration::from_config(name.clone(), server));
+            catalog.register(McpServerRegistration::from_config(
+                name.clone(),
+                server.clone(),
+            ));
         }
 
         McpConfig {
-            client: McpClientConfig {
-                chatgpt_base_url: self.chatgpt_base_url.clone(),
-                requires_read_only_mcp_tools: false,
-                protocol_mode: self.mcp_protocol_mode(),
-                discover_local_stdio: self.features.enabled(Feature::McpConnectionSharing),
-                mcp_tool_list_changed: self.features.enabled(Feature::McpToolListChanged),
-                client_elicitation_capability: if self.features.enabled(Feature::AuthElicitation) {
-                    ElicitationCapability::new()
-                        .with_form(FormElicitationCapability::new())
-                        .with_url(UrlElicitationCapability::new())
-                } else {
-                    // https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation#capabilities
-                    // indicates this should be an empty object.
-                    ElicitationCapability::default()
-                },
-            },
+            chatgpt_base_url: self.chatgpt_base_url.clone(),
             apps_mcp_product_sku: self.apps_mcp_product_sku.clone(),
+            requires_read_only_mcp_tools: false,
             codex_home: self.codex_home.to_path_buf(),
             mcp_enterprise_managed_auth: self.mcp_enterprise_managed_auth.clone(),
             ema_state: Default::default(),
@@ -2068,6 +2013,7 @@ impl Config {
             xaa_enabled: self.features.enabled(Feature::UseXaa)
                 && self.mcp_enterprise_managed_auth.is_some(),
             mcp_oauth_credentials_store_mode: self.mcp_oauth_credentials_store_mode,
+            mcp_tool_list_changed: self.features.enabled(Feature::McpToolListChanged),
             oauth_refresh_mode: if self.features.enabled(Feature::McpOAuthRefreshCoordination) {
                 McpOAuthRefreshMode::Coordinated
             } else {
@@ -2107,10 +2053,21 @@ impl Config {
             } else {
                 Vec::new()
             },
+            protocol_mode: self.mcp_protocol_mode(),
+            discover_local_stdio: self.features.enabled(Feature::McpConnectionSharing),
             host_owned_apps_protocol_mode: if self.features.enabled(Feature::CodexAppsMcp20260728) {
                 McpProtocolMode::V20260728
             } else {
                 McpProtocolMode::Legacy
+            },
+            client_elicitation_capability: if self.features.enabled(Feature::AuthElicitation) {
+                ElicitationCapability::new()
+                    .with_form(FormElicitationCapability::new())
+                    .with_url(UrlElicitationCapability::new())
+            } else {
+                // https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation#capabilities
+                // indicates this should be an empty object.
+                ElicitationCapability::default()
             },
             mcp_server_catalog: catalog.build(),
             connector_snapshot:
@@ -2638,7 +2595,7 @@ pub(crate) fn set_project_trust_level_inner(
     Ok(())
 }
 
-/// Patch `CODEX_HOME/config.toml` project state to set trust level.
+/// Patch `MIKODEX_HOME/config.toml` project state to set trust level.
 /// Use with caution.
 pub fn set_project_trust_level(
     codex_home: &Path,
@@ -2922,11 +2879,6 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
         disable_in_process_fallback: host
             .and_then(|config| config.disable_in_process_fallback)
             .unwrap_or_default(),
-        heartbeat_interval_s: config_toml
-            .code_mode
-            .as_ref()
-            .and_then(|config| config.heartbeat_interval_s)
-            .unwrap_or_default(),
     }
 }
 
@@ -2972,9 +2924,6 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
     let wait_agent_enabled = base
         .and_then(|config| config.wait_agent_enabled)
         .unwrap_or(default.wait_agent_enabled);
-    let interrupt_at_item_boundary = base
-        .and_then(|config| config.interrupt_at_item_boundary)
-        .unwrap_or(default.interrupt_at_item_boundary);
     let disable_native_tools = base
         .and_then(|config| config.disable_native_tools)
         .unwrap_or(default.disable_native_tools);
@@ -3017,7 +2966,6 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         hide_spawn_agent_metadata,
         expose_spawn_agent_model_overrides,
         wait_agent_enabled,
-        interrupt_at_item_boundary,
         disable_native_tools,
         disable_direct_message,
         message_board_in_memory,
@@ -3060,9 +3008,6 @@ pub(crate) fn resolve_token_budget_config(
 
     let token_budget = TokenBudgetConfig {
         use_history_notes_extension,
-        context_window_as_tool_output: token_budget_config
-            .and_then(|config| config.context_window_as_tool_output)
-            .unwrap_or_default(),
         reminder_threshold_tokens,
         reminder_message_template,
         guidance_message,
@@ -3077,42 +3022,31 @@ fn resolve_rollout_budget_config(
     config_toml: &ConfigToml,
     features: &ManagedFeatures,
 ) -> std::io::Result<Option<RolloutBudgetConfig>> {
-    let config = config_toml
-        .features
-        .as_ref()
-        .and_then(|features| features.rollout_budget.as_ref());
-    if let Some(FeatureToml::Config(config)) = config
-        && config.limit_tokens.is_some()
-        && config.limit_budget.is_some()
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "features.rollout_budget.limit_tokens and limit_budget cannot both be set",
-        ));
-    }
     if !features.enabled(Feature::RolloutBudget) {
         return Ok(None);
     }
     let missing_limit_error = || {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "features.rollout_budget requires limit_tokens or limit_budget when enabled",
+            "features.rollout_budget.limit_tokens is required when rollout_budget is enabled",
         )
     };
-    let Some(FeatureToml::Config(config)) = config else {
+    let Some(FeatureToml::Config(config)) = config_toml
+        .features
+        .as_ref()
+        .and_then(|features| features.rollout_budget.as_ref())
+    else {
         return Err(missing_limit_error());
     };
-    let limit_budget = config
-        .limit_budget
-        .or_else(|| config.limit_tokens.map(|tokens| tokens as f64))
-        .ok_or_else(missing_limit_error)?;
-    if !limit_budget.is_finite() || limit_budget <= 0.0 {
+    let Some(limit_tokens) = config.limit_tokens else {
+        return Err(missing_limit_error());
+    };
+    if limit_tokens <= 0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "features.rollout_budget allowance must be finite and positive",
+            "features.rollout_budget.limit_tokens must be positive",
         ));
     }
-    let reminder_at_context_start = config.reminder_at_context_start.unwrap_or(true);
     let reminder_at_remaining_tokens =
         config
             .reminder_at_remaining_tokens
@@ -3123,17 +3057,13 @@ fn resolve_rollout_budget_config(
                     "features.rollout_budget.reminder_at_remaining_tokens is required when rollout_budget is enabled",
                 )
             })?;
-    if reminder_at_remaining_tokens.iter().any(|&tokens| {
-        // Persisted token allowances and thresholds are exact integers, including above 2^53.
-        tokens <= 0
-            || match config.limit_tokens {
-                Some(limit) => tokens >= limit,
-                None => rollout_budget_threshold_reached(limit_budget, tokens),
-            }
-    }) {
+    if reminder_at_remaining_tokens
+        .iter()
+        .any(|&tokens| tokens <= 0 || tokens >= limit_tokens)
+    {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "features.rollout_budget.reminder_at_remaining_tokens must contain only positive values below the rollout allowance",
+            "features.rollout_budget.reminder_at_remaining_tokens must contain only positive values below limit_tokens",
         ));
     }
     let sampling_token_weight = config.sampling_token_weight.unwrap_or(1.0);
@@ -3151,8 +3081,7 @@ fn resolve_rollout_budget_config(
     }
     Ok(Some(RolloutBudgetConfig {
         enforce_limit: config.enforce_limit.unwrap_or(true),
-        limit_budget,
-        reminder_at_context_start,
+        limit_tokens,
         reminder_at_remaining_tokens,
         sampling_token_weight,
         prefill_token_weight,
@@ -3984,6 +3913,11 @@ impl Config {
             )
         } else {
             let configured_network_proxy_config = NetworkProxyConfig::default();
+            // No named `[permissions]` profile is active, but permissions
+            // should still flow through the canonical profile representation.
+            // Derive the old `sandbox_mode` defaults as a profile first, then
+            // keep a legacy-compatible projection only for the remaining code
+            // paths that still speak `SandboxPolicy`.
             let mut permission_profile = if let Some(PermissionConfig::Legacy { mode, workspace_write }) = permission_config {
                 translate_legacy_permissions(
                     mode,
@@ -4097,8 +4031,6 @@ impl Config {
         let experimental_request_user_input_enabled =
             resolve_experimental_request_user_input_enabled(&cfg);
         let update_plan_enabled = resolve_update_plan_enabled(&cfg);
-        let response_process_mode = cfg.responses.as_ref().and_then(|responses| responses.process_mode);
-        let response_process_mode = response_process_mode.unwrap_or_default();
         let tool_registry = ToolRegistryConfig {
             error_on_tool_collisions: cfg
                 .features
@@ -4165,12 +4097,6 @@ impl Config {
         let allow_login_shell = cfg.allow_login_shell.unwrap_or(true);
 
         let history = cfg.history.unwrap_or_default();
-        let rollout_trace = cfg.rollout_trace.unwrap_or_default();
-        let defaults = TraceCaptureLimits::default();
-        let rollout_trace_limits = TraceCaptureLimits {
-            max_payload_bytes: rollout_trace.max_payload_bytes.unwrap_or(defaults.max_payload_bytes),
-            max_bytes: rollout_trace.max_bytes.unwrap_or(defaults.max_bytes),
-        };
 
         if multi_agent_v2.max_concurrent_threads_per_session == 0 {
             return Err(std::io::Error::new(
@@ -4371,27 +4297,20 @@ impl Config {
                 FeatureToml::Enabled(_) => None,
             })
             .unwrap_or_default();
-        let resolve_elastic_budget = |named_sections: Option<&BTreeMap<String, codex_features::GuardianElasticSectionConfigToml>>, prefix: &str| {
-                let sections = named_sections.filter(|sections| !sections.is_empty())
+        let guardian_sync_elastic_budget = cfg.features.as_ref()
+            .and_then(|features| features.guardianv2.as_ref())
+            .and_then(|feature| match feature {
+                FeatureToml::Config(guardian) if guardian.sync_elastic_budgeting == Some(true) => Some(guardian),
+                FeatureToml::Config(_) | FeatureToml::Enabled(_) => None,
+            })
+            .map(|guardian| {
+                let sections = guardian.sync_elastic_sections.as_ref().filter(|sections| !sections.is_empty())
                     .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData,
-                        format!("{prefix}_elastic_sections is required when {prefix}_elastic_budgeting is enabled")))?;
-                let mut policy = codex_guardian_context::ElasticBudgetConfig::default();
+                        "sync_elastic_sections is required when sync_elastic_budgeting is enabled"))?;
+                let mut decoded_sections = BTreeMap::new();
                 for (name, limits) in sections {
                     let section = codex_guardian_context::ElasticSection::deserialize(name.as_str().into_deserializer())
                         .map_err(|error: serde::de::value::Error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-                    if section == codex_guardian_context::ElasticSection::TranscriptSelectedExecResults {
-                        if prefix == "async" {
-                            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "transcript_selected_exec_results is only supported for sync elastic budgeting"));
-                        }
-                        if limits.nested_tool_names.is_empty() || limits.nested_tool_names.iter().any(|name| name.trim().is_empty()) {
-                            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
-                                "transcript_selected_exec_results requires nonempty nested_tool_names"));
-                        }
-                        policy.selected_exec_tool_names.clone_from(&limits.nested_tool_names);
-                    } else if !limits.nested_tool_names.is_empty() {
-                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
-                            format!("nested_tool_names is only supported for transcript_selected_exec_results, found in {name}")));
-                    }
                     let mut section_limits = codex_guardian_context::ElasticSectionLimits::new(
                         limits.min_total_section_tokens,
                         limits.max_section_entry_tokens,
@@ -4400,28 +4319,15 @@ impl Config {
                         section_limits = section_limits.with_max_total_section_tokens(maximum)
                             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
                     }
-                    if policy.sections.insert(section, section_limits).is_some() {
+                    if decoded_sections.insert(section, section_limits).is_some() {
                         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
-                            format!("duplicate {prefix}_elastic_sections section: {name}")));
+                            format!("duplicate sync_elastic_sections section: {name}")));
                     }
                 }
+                let policy = codex_guardian_context::ElasticBudgetConfig { sections: decoded_sections };
                 policy.validate().map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
                 Ok::<_, std::io::Error>(policy)
-            };
-        let guardian = cfg.features.as_ref()
-            .and_then(|features| features.guardianv2.as_ref())
-            .and_then(|feature| match feature {
-                FeatureToml::Config(guardian) => Some(guardian),
-                FeatureToml::Enabled(_) => None,
-            });
-        let guardian_sync_elastic_budget = guardian
-            .filter(|guardian| guardian.sync_elastic_budgeting == Some(true))
-            .map(|guardian| resolve_elastic_budget(guardian.sync_elastic_sections.as_ref(), "sync"))
-            .transpose()?;
-        let guardian_async_elastic_budget = guardian
-            .filter(|guardian| guardian.async_elastic_budgeting == Some(true))
-            .map(|guardian| resolve_elastic_budget(guardian.async_elastic_sections.as_ref(), "async"))
-            .transpose()?;
+            }).transpose()?;
         let guardian_conversation_history_prompt = cfg.auto_review.as_ref().and_then(|auto_review| {
             normalize_guardian_policy_config(
                 auto_review.experimental_conversation_history_prompt.as_deref(),
@@ -4780,13 +4686,11 @@ impl Config {
             application_network_policy: Default::default(),
             application_auth_route_config: None,
             history,
-            rollout_trace_limits,
             ephemeral: ephemeral.unwrap_or_default(),
             allow_persistent_dynamic_tool_updates: false,
             extra_config: None,
             bypass_hook_trust,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
-            mcp_launch_cwds: Arc::default(),
             codex_self_exe,
             codex_linux_sandbox_exe,
             main_execve_wrapper_exe: None,
@@ -4803,7 +4707,6 @@ impl Config {
             guardian_policy_template: None,
             guardian_transcript_mode,
             guardian_sync_elastic_budget,
-            guardian_async_elastic_budget,
             guardian_conversation_history_prompt,
             guardian_conversation_history_max_output_tokens,
             guardian_review_timeout: cfg
@@ -4863,7 +4766,6 @@ impl Config {
             experimental_request_user_input_enabled,
             update_plan_enabled,
             tool_registry,
-            response_process_mode,
             code_mode,
             background_terminal_max_timeout,
             thread_unload_delay,
@@ -4962,7 +4864,6 @@ impl Config {
                 .map(|t| t.alternate_screen)
                 .unwrap_or_default(),
             tui_status_line: cfg.tui.as_ref().and_then(|t| t.status_line.clone()),
-            tui_status_line_provider: cfg.tui.as_ref().and_then(|t| t.status_line_provider.clone()),
             tui_status_line_use_colors: cfg
                 .tui
                 .as_ref()
@@ -5388,12 +5289,12 @@ fn normalize_guardian_policy_config(value: Option<&str>) -> Option<String> {
 }
 
 /// Returns the path to the Codex configuration directory, which can be
-/// specified by the `CODEX_HOME` environment variable. If not set, defaults to
-/// `~/.codex`.
+/// specified by the `MIKODEX_HOME` environment variable. If not set, defaults to
+/// `~/.mikodex`.
 ///
-/// - If `CODEX_HOME` is set, the value must exist and be a directory. The
+/// - If `MIKODEX_HOME` is set, the value must exist and be a directory. The
 ///   value will be canonicalized and this function will Err otherwise.
-/// - If `CODEX_HOME` is not set, this function does not verify that the
+/// - If `MIKODEX_HOME` is not set, this function does not verify that the
 ///   directory exists.
 pub fn find_codex_home() -> std::io::Result<AbsolutePathBuf> {
     codex_utils_home_dir::find_codex_home()

@@ -313,7 +313,7 @@ impl PtyCodex {
         extra_args: &[&str],
     ) -> Result<Self> {
         let codex = codex_utils_cargo_bin::cargo_bin("codex-tui")
-            .or_else(|_| codex_utils_cargo_bin::cargo_bin("codex"))?;
+            .or_else(|_| codex_utils_cargo_bin::cargo_bin("mikodex"))?;
         Self::start_binary(
             &codex, repo_root, codex_home, extra_args, /*editor*/ None,
         )
@@ -325,8 +325,8 @@ impl PtyCodex {
         codex_home: TempDir,
         extra_args: &[&str],
     ) -> Result<Self> {
-        let codex = codex_utils_cargo_bin::cargo_bin("codex")
-            .context("build codex-cli and set CARGO_BIN_EXE_codex to its executable")?;
+        let codex = codex_utils_cargo_bin::cargo_bin("mikodex")
+            .context("build codex-cli and set CARGO_BIN_EXE_mikodex to its executable")?;
         Self::start_binary(
             &codex, repo_root, codex_home, extra_args, /*editor*/ None,
         )
@@ -389,7 +389,7 @@ impl PtyCodex {
             .env_remove(codex_protocol::shell_environment::OPENAI_FEDERATION_RULE_ID_ENV_VAR)
             .env_remove(codex_protocol::shell_environment::OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR)
             .env("OPENAI_API_KEY", "focus-palette-test")
-            .env("CODEX_HOME", codex_home.path())
+            .env("MIKODEX_HOME", codex_home.path())
             .stdin(stdin)
             .stdout(stdout)
             .stderr(slave.try_clone()?)
@@ -568,24 +568,6 @@ fn contains_bytes(buffer: &[u8], needle: &[u8]) -> bool {
     buffer.windows(needle.len()).any(|window| window == needle)
 }
 
-pub(super) fn write_test_config_with_bundled_models(
-    codex_home: &Path,
-    repo_root: &Path,
-) -> Result<()> {
-    write_test_config(codex_home, repo_root)?;
-    // Model fetches must not delay the startup screens this PTY is waiting for.
-    let catalog = codex_home.join("models.json");
-    std::fs::write(
-        &catalog,
-        serde_json::to_vec(&codex_models_manager::bundled_models_response()?)?,
-    )?;
-    let catalog = serde_json::to_string(&catalog)?;
-    let path = codex_home.join("config.toml");
-    let config = std::fs::read_to_string(&path)?;
-    std::fs::write(path, format!("model_catalog_json = {catalog}\n{config}"))?;
-    Ok(())
-}
-
 pub(super) fn write_test_config(codex_home: &Path, repo_root: &Path) -> Result<()> {
     let repo_root = repo_root.display();
     let config = format!(
@@ -693,11 +675,11 @@ fn auto_daemon_start_failure_exits_with_manual_fallback_hint() -> Result<()> {
                         .canonicalize()?
                         .to_string_lossy()
                         .as_ref(),
-                    "[CODEX_HOME]",
+                    "[MIKODEX_HOME]",
                 )
                 .replace(
                     terminal._codex_home.path().to_string_lossy().as_ref(),
-                    "[CODEX_HOME]",
+                    "[MIKODEX_HOME]",
                 )
                 .replace('\r', "");
             insta::assert_snapshot!("daemon_auto_start_failure", failure.trim());

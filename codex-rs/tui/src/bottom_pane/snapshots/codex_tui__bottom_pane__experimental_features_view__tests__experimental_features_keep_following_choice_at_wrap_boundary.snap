@@ -6,7 +6,7 @@ width=68
 
   Experimental features
   Checked features are configured on. Some experimental features
-  take effect only in new tasks or after restarting the Codex
+  take effect only in new tasks or after restarting the Mikodex
   server.
 
 
@@ -15,13 +15,13 @@ width=68
   [ ] Last feature   Keep this choice visible.
 
 
-  space toggle · enter save · esc cancel
+  space toggle · enter save · esc save/close
 
 width=69
 
   Experimental features
   Checked features are configured on. Some experimental features
-  take effect only in new tasks or after restarting the Codex
+  take effect only in new tasks or after restarting the Mikodex
   server.
 
 
@@ -30,13 +30,13 @@ width=69
   [ ] Last feature   Keep this choice visible.
 
 
-  space toggle · enter save · esc cancel
+  space toggle · enter save · esc save/close
 
 width=70
 
   Experimental features
   Checked features are configured on. Some experimental features
-  take effect only in new tasks or after restarting the Codex
+  take effect only in new tasks or after restarting the Mikodex
   server.
 
 
@@ -44,30 +44,30 @@ width=70
   [ ] Last feature   Keep this choice visible.
 
 
-  space toggle · enter save · esc cancel
+  space toggle · enter save · esc save/close
 
 width=71
 
   Experimental features
   Checked features are configured on. Some experimental features take
-  effect only in new tasks or after restarting the Codex server.
+  effect only in new tasks or after restarting the Mikodex server.
 
 
 › [x] First feature  A description that fits exactly at this boundary.
   [ ] Last feature   Keep this choice visible.
 
 
-  space toggle · enter save · esc cancel
+  space toggle · enter save · esc save/close
 
 width=72
 
   Experimental features
   Checked features are configured on. Some experimental features take
-  effect only in new tasks or after restarting the Codex server.
+  effect only in new tasks or after restarting the Mikodex server.
 
 
 › [x] First feature  A description that fits exactly at this boundary.
   [ ] Last feature   Keep this choice visible.
 
 
-  space toggle · enter save · esc cancel
+  space toggle · enter save · esc save/close

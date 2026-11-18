@@ -1,7 +1,5 @@
 //! OTLP SDK transports remain disabled under application destination restrictions.
 //! Export futures are revocable, including HTTP exporters driven from SDK worker threads.
-use crate::headers_helper::HeadersHelper;
-use std::sync::Arc;
 
 use bytes::Bytes;
 use codex_http_client::NetworkPolicy;
@@ -81,7 +79,6 @@ impl<E: PushMetricExporter> PushMetricExporter for PolicyExporter<E> {
 /// Keeps blocking SDK worker threads from performing uncancellable HTTP I/O.
 #[derive(Debug)]
 pub(crate) struct RuntimeHttpClient {
-    pub(crate) headers_helper: Option<Arc<HeadersHelper>>,
     pub(crate) client: codex_http_client::HttpClient,
     pub(crate) timeout: Duration,
     pub(crate) runtime: tokio::runtime::Handle,
@@ -99,16 +96,10 @@ impl opentelemetry_http::HttpClient for RuntimeHttpClient {
         Box::pin(async move {
             let client = self.client.clone();
             let timeout = self.timeout;
-            let headers_helper = self.headers_helper.clone();
             let mut requests = tokio::task::JoinSet::new();
             requests.spawn_on(
                 async move {
-                    let (mut parts, body) = request.into_parts();
-                    if let Some(helper) = &headers_helper {
-                        // HeaderMap replaces names case-insensitively. Each export starts
-                        // from the static headers, so removed helper keys do not linger.
-                        parts.headers.extend(helper.headers().await?);
-                    }
+                    let (parts, body) = request.into_parts();
                     let response = client
                         .request(parts.method, parts.uri.to_string())
                         .version(parts.version)

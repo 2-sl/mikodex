@@ -17,24 +17,6 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
 
-    /// Connect to an existing app server.
-    #[arg(
-        id = "exec_remote",
-        long = "remote",
-        value_name = "ADDR",
-        global = true
-    )]
-    pub remote: Option<String>,
-
-    /// Environment variable containing the remote WebSocket bearer token.
-    #[arg(
-        id = "exec_remote_auth_token_env",
-        long = "remote-auth-token-env",
-        value_name = "ENV_VAR",
-        global = true
-    )]
-    pub remote_auth_token_env: Option<String>,
-
     /// Error out when config.toml contains fields that are not recognized by this version of Codex.
     #[arg(long = "strict-config", global = true, default_value_t = false)]
     pub strict_config: bool,
@@ -64,7 +46,7 @@ pub struct Cli {
     #[arg(long = "ephemeral", global = true, default_value_t = false)]
     pub ephemeral: bool,
 
-    /// Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`.
+    /// Do not load `$MIKODEX_HOME/config.toml`; auth still uses `MIKODEX_HOME`.
     #[arg(long = "ignore-user-config", global = true, default_value_t = false)]
     pub ignore_user_config: bool,
 

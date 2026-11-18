@@ -1,6 +1,5 @@
 use super::STRUCTURED_RESPONSE_MAX_BYTES;
 use super::TemporaryStructuredThreadOptions;
-use super::TemporaryThreadKind;
 use super::collect_structured_response;
 use super::start_temporary_thread;
 use crate::legacy_core::config::ConfigBuilder;
@@ -60,40 +59,14 @@ fn turn_completed_notification(turn_id: &str, status: TurnStatus) -> ServerNotif
 
 #[tokio::test]
 async fn managed_workspace_default_respects_read_only_availability() -> color_eyre::Result<()> {
-    for (kind, read_only_allowed, policies, expected_approval) in [
-        (
-            TemporaryThreadKind::Recap,
-            true,
-            r#""on-request""#,
-            AskForApproval::OnRequest,
-        ),
-        (
-            TemporaryThreadKind::Recap,
-            false,
-            r#""on-request""#,
-            AskForApproval::OnRequest,
-        ),
-        (
-            TemporaryThreadKind::Title,
-            true,
-            r#""on-request", "never""#,
-            AskForApproval::Never,
-        ),
-        (
-            TemporaryThreadKind::Title,
-            true,
-            r#""on-request""#,
-            AskForApproval::OnRequest,
-        ),
-    ] {
+    for read_only_allowed in [true, false] {
         let codex_home = tempdir()?;
         let requirements_path = codex_home.path().join("requirements.toml");
         std::fs::write(
             &requirements_path,
             format!(
-                "allowed_approval_policies = [{policies}]\n\
+                "allowed_approval_policies = [\"on-request\"]\n\
                  default_permissions = \":workspace\"\n\n\
-                 [features]\nskill_mcp_dependency_install = true\n\n\
                  [allowed_permission_profiles]\n\
                  \":read-only\" = {read_only_allowed}\n\
                  \":workspace\" = true\n"
@@ -111,7 +84,7 @@ async fn managed_workspace_default_respects_read_only_availability() -> color_ey
             .build()
             .await?;
         let options = TemporaryStructuredThreadOptions {
-            kind,
+            thread_source: ThreadSource::Feature("thread_title".to_string()),
             model: "gpt-5.2".to_string(),
             model_provider: config.model_provider_id.clone(),
             cwd: config.cwd.to_string_lossy().into_owned(),
@@ -145,9 +118,7 @@ async fn managed_workspace_default_respects_read_only_availability() -> color_ey
                     continue;
                 };
                 match *notification {
-                    ServerNotification::ConfigWarning(warning)
-                        if kind == TemporaryThreadKind::Recap =>
-                    {
+                    ServerNotification::ConfigWarning(warning) => {
                         assert!(
                             !warning.summary.contains("`approval_policy`"),
                             "{warning:?}"
@@ -171,7 +142,7 @@ async fn managed_workspace_default_respects_read_only_availability() -> color_ey
                 ),
                 (
                     Some(":read-only".to_string()),
-                    expected_approval,
+                    AskForApproval::OnRequest,
                     SandboxPolicy::ReadOnly {
                         network_access: false,
                     },
@@ -216,7 +187,7 @@ async fn preserves_custom_permissions_and_disables_required_mcp_servers() -> col
     let response = start_temporary_thread(
         &app_server.request_handle(),
         TemporaryStructuredThreadOptions {
-            kind: TemporaryThreadKind::Recap,
+            thread_source: ThreadSource::Feature("thread_title".to_string()),
             model: "gpt-5.2".to_string(),
             model_provider: config.model_provider_id.clone(),
             cwd: config.cwd.display().to_string(),
@@ -236,7 +207,7 @@ async fn preserves_custom_permissions_and_disables_required_mcp_servers() -> col
             Some("title-restricted".to_string()),
             config.model_provider_id,
             true,
-            Some(ThreadSource::Feature("system".to_string())),
+            Some(ThreadSource::Feature("thread_title".to_string())),
         )
     );
 

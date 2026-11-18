@@ -25,8 +25,6 @@ pub enum GuardianV2EventKind {
         outcome: &'static str,
         risk_level: Option<&'static str>,
         duration_ms: u64,
-        /// Responses `client_metadata.turn_id` reserved for this classifier, shared across retries.
-        classifier_turn_id: Option<String>,
     },
     FastDecision {
         decision: &'static str,

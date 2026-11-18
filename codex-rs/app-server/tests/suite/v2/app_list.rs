@@ -54,7 +54,6 @@ use rmcp::transport::streamable_http_server::session::local::LocalSessionManager
 use serde_json::json;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
-use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -317,13 +316,11 @@ async fn list_apps_uses_thread_feature_flag_when_thread_id_is_provided() -> Resu
     let ThreadStartResponse { thread, .. } =
         timeout(DEFAULT_TIMEOUT, mcp.read_response(start_request)).await??;
 
-    let catalog_path = serde_json::to_string(&codex_home.path().join("models.json"))?;
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(
             r#"
 chatgpt_base_url = "{server_url}"
-model_catalog_json = {catalog_path}
 mcp_oauth_credentials_store = "file"
 
 [features]
@@ -460,13 +457,11 @@ async fn list_apps_reports_is_enabled_from_config() -> Result<()> {
         start_apps_server_with_delays(connectors, tools, Duration::ZERO, Duration::ZERO).await?;
 
     let codex_home = TempDir::new()?;
-    let catalog_path = write_bundled_catalog(codex_home.path())?;
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(
             r#"
 chatgpt_base_url = "{server_url}"
-model_catalog_json = {catalog_path}
 
 [features]
 connectors = true
@@ -586,14 +581,13 @@ async fn list_apps_emits_updates_and_returns_after_both_lists_load() -> Result<(
     ];
 
     let tools = vec![connector_tool("beta", "Beta App")?];
-    let (server_url, server_handle, server_control) = start_apps_server_with_delays_and_control(
+    let (server_url, server_handle) = start_apps_server_with_delays(
         connectors.clone(),
         tools,
-        Duration::ZERO,
+        Duration::from_millis(300),
         Duration::ZERO,
     )
     .await?;
-    server_control.directory_paused.send_replace(true);
 
     let codex_home = TempDir::new()?;
     write_connectors_config(codex_home.path(), &server_url)?;
@@ -641,7 +635,6 @@ async fn list_apps_emits_updates_and_returns_after_both_lists_load() -> Result<(
 
     let first_update = read_app_list_updated_notification(&mut mcp).await?;
     assert_eq!(first_update.data, expected_accessible);
-    server_control.directory_paused.send_replace(false);
 
     let expected_merged = vec![
         AppInfo {
@@ -1250,12 +1243,10 @@ async fn list_apps_force_refetch_patches_updates_from_cached_snapshots() -> Resu
     let (server_url, server_handle, server_control) = start_apps_server_with_delays_and_control(
         initial_connectors,
         initial_tools,
-        Duration::ZERO,
+        Duration::from_millis(300),
         Duration::ZERO,
     )
     .await?;
-    // Keep directory responses pending until the tools-only update has arrived.
-    server_control.directory_paused.send_replace(true);
 
     let codex_home = TempDir::new()?;
     write_connectors_config(codex_home.path(), &server_url)?;
@@ -1283,7 +1274,6 @@ async fn list_apps_force_refetch_patches_updates_from_cached_snapshots() -> Resu
         })
         .await?;
     let warm_first_update = read_app_list_updated_notification(&mut mcp).await?;
-    server_control.directory_paused.send_replace(false);
     assert_eq!(
         warm_first_update.data,
         vec![AppInfo {
@@ -1371,7 +1361,6 @@ async fn list_apps_force_refetch_patches_updates_from_cached_snapshots() -> Resu
         plugin_display_names: Vec::new(),
     }]);
     server_control.set_tools(Vec::new());
-    server_control.directory_paused.send_replace(true);
 
     let refetch_request = mcp
         .send_apps_list_request(AppsListParams {
@@ -1423,9 +1412,15 @@ async fn list_apps_force_refetch_patches_updates_from_cached_snapshots() -> Resu
         ]
     );
 
-    // The very next notification must include the fresh directory. An intermediate
-    // inaccessible-only update would be read (and fail the equality check) instead.
-    server_control.directory_paused.send_replace(false);
+    let maybe_second_update = timeout(
+        Duration::from_millis(150),
+        read_app_list_updated_notification(&mut mcp),
+    )
+    .await;
+    assert!(
+        maybe_second_update.is_err(),
+        "unexpected inaccessible-only app/list update during force refetch"
+    );
 
     let expected_final = vec![AppInfo {
         id: "alpha".to_string(),
@@ -1499,7 +1494,6 @@ struct AppsServerState {
     expected_account_id: String,
     response: Arc<StdMutex<serde_json::Value>>,
     directory_delay: Duration,
-    directory_paused: watch::Sender<bool>,
 }
 
 #[derive(Clone)]
@@ -1518,7 +1512,6 @@ impl AppListMcpServer {
 struct AppsServerControl {
     response: Arc<StdMutex<serde_json::Value>>,
     tools: Arc<StdMutex<Vec<Tool>>>,
-    directory_paused: watch::Sender<bool>,
 }
 
 impl AppsServerControl {
@@ -1604,19 +1597,16 @@ async fn start_apps_server_with_delays_and_control_inner(
         json!({ "apps": connectors, "next_token": null }),
     ));
     let tools = Arc::new(StdMutex::new(tools));
-    let (directory_paused, _) = watch::channel(false);
     let state = AppsServerState {
         expected_bearer: format!("Bearer {expected_bearer}"),
         expected_account_id: "account-123".to_string(),
         response: response.clone(),
         directory_delay,
-        directory_paused: directory_paused.clone(),
     };
     let state = Arc::new(state);
     let server_control = AppsServerControl {
         response,
         tools: tools.clone(),
-        directory_paused,
     };
 
     let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -1664,12 +1654,6 @@ async fn list_directory_connectors(
     headers: HeaderMap,
     uri: Uri,
 ) -> Result<impl axum::response::IntoResponse, StatusCode> {
-    state
-        .directory_paused
-        .subscribe()
-        .wait_for(|paused| !paused)
-        .await
-        .expect("the server owns the directory gate sender");
     if state.directory_delay > Duration::ZERO {
         tokio::time::sleep(state.directory_delay).await;
     }
@@ -1721,25 +1705,13 @@ pub(super) fn connector_tool(connector_id: &str, connector_name: &str) -> Result
     Ok(tool)
 }
 
-// Keep model discovery off the network. Return the quoted path for use in config.toml.
-fn write_bundled_catalog(codex_home: &Path) -> std::io::Result<String> {
-    let catalog_path = codex_home.join("models.json");
-    std::fs::write(
-        &catalog_path,
-        serde_json::to_vec(&codex_models_manager::bundled_models_response()?)?,
-    )?;
-    Ok(serde_json::to_string(&catalog_path)?)
-}
-
-fn write_connectors_config(codex_home: &Path, base_url: &str) -> std::io::Result<()> {
+fn write_connectors_config(codex_home: &std::path::Path, base_url: &str) -> std::io::Result<()> {
     let config_toml = codex_home.join("config.toml");
-    let catalog_path = write_bundled_catalog(codex_home)?;
     std::fs::write(
         config_toml,
         format!(
             r#"
 chatgpt_base_url = "{base_url}"
-model_catalog_json = {catalog_path}
 mcp_oauth_credentials_store = "file"
 
 [features]
@@ -1751,13 +1723,11 @@ connectors = true
 
 fn write_connectors_and_plugins_config(codex_home: &Path, base_url: &str) -> std::io::Result<()> {
     let config_toml = codex_home.join("config.toml");
-    let catalog_path = write_bundled_catalog(codex_home)?;
     std::fs::write(
         config_toml,
         format!(
             r#"
 chatgpt_base_url = "{base_url}"
-model_catalog_json = {catalog_path}
 mcp_oauth_credentials_store = "file"
 
 [features]

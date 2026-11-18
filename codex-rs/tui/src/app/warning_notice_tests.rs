@@ -53,10 +53,10 @@ async fn warning_notice_keeps_details_in_transcript_and_preserves_draft() -> Res
     let after = app.render_owned_transcript(&mut tui, size)?;
     let cursor = tui.terminal.last_known_cursor_pos;
     assert_eq!(
-        (after.bottom(), after.height, cursor.x, cursor.y),
+        (after.bottom(), after.height, cursor.x, cursor.y + 1),
         (
             before.bottom(),
-            before.height,
+            before.height + 1,
             original_cursor.x,
             original_cursor.y
         )

@@ -115,11 +115,7 @@ impl PluginRequestProcessor {
                     continue;
                 }
                 remote_results.push(plugin_search_result(
-                    remote_plugin_summary_to_info(
-                        plugin,
-                        plugin_policy,
-                        /*local_version*/ None,
-                    ),
+                    remote_plugin_summary_to_info(plugin, plugin_policy),
                     plugin_id.marketplace_name,
                     /*marketplace_path*/ None,
                 ));

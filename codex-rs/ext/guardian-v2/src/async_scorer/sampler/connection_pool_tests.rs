@@ -456,7 +456,7 @@ async fn cancellation_closes_http_before_headers_and_while_draining_the_body() -
             .map(ResponseItemEnvelope::new)
             .collect();
         let (input, input_tokens) =
-            LunaSampler::finish_input(&request, LunaSampler::prepare_setup(&request), evidence);
+            LunaSampler::prepare_input(&request, /*history*/ None, evidence);
         let sample = ConversationSample {
             input: PreparedRequest {
                 input,

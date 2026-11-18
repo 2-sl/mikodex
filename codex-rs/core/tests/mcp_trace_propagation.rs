@@ -192,7 +192,7 @@ async fn mcp_requests_preserve_trace_context_across_workers_and_continuations() 
                 .iter()
                 .find(|span| span.span_context.span_id().to_string() == header[2])
                 .unwrap();
-            assert_eq!(http.name, "codex.exec_server.http_request");
+            assert_eq!(http.name, "mikodex.exec_server.http_request");
             let bridge = spans
                 .iter()
                 .find(|span| span.span_context.span_id() == http.parent_span_id)

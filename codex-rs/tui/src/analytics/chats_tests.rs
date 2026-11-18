@@ -43,7 +43,7 @@ async fn incomplete_chat_batches_retain_available_estimates_without_inventing_ze
 }
 
 #[tokio::test]
-async fn indexed_chat_listing_restarts_on_database_error_and_keeps_estimate_budget() {
+async fn slow_repairing_chat_listing_keeps_estimate_budget_and_ranks_across_pages() {
     use codex_app_server_client::RemoteAppServerClient;
     use codex_app_server_client::RemoteAppServerConnectArgs;
     use codex_app_server_client::RemoteAppServerEndpoint;
@@ -74,33 +74,12 @@ async fn indexed_chat_listing_restarts_on_database_error_and_keeps_estimate_budg
                         params["modelProviders"]
                     ]));
                     if pages.len() == 1 {
-                        // Listing has its own budget, separate from the usage estimate requests.
+                        // Simulate repair exceeding the HTTP estimate budget without a wall-clock wait.
                         tokio::time::pause();
                         tokio::time::advance(std::time::Duration::from_secs(/*secs*/ 26)).await;
                         tokio::time::resume();
                     }
-                    if pages.len() == 2 {
-                        socket
-                            .send(Message::Text(
-                                json!({
-                                    "jsonrpc":"2.0", "id":request["id"],
-                                    "error":{"code":-32603,"message":"state DB unavailable"}
-                                })
-                                .to_string()
-                                .into(),
-                            ))
-                            .await
-                            .unwrap();
-                        continue;
-                    }
-                    let first_page = params["cursor"].is_null();
-                    let range = if pages.len() == 1 {
-                        2..102
-                    } else if first_page {
-                        0..100
-                    } else {
-                        100..101
-                    };
+                    let range = if pages.len() == 1 { 0..100 } else { 100..101 };
                     let data = range.map(|index| json!({
                         "id": format!("chat-{index}"), "sessionId": format!("chat-{index}"),
                         "preview": "", "name": format!("Chat {index}"), "ephemeral": false,
@@ -108,7 +87,7 @@ async fn indexed_chat_listing_restarts_on_database_error_and_keeps_estimate_budg
                         "updatedAt": chrono::Utc::now().timestamp(), "status": {"type": "idle"},
                         "cwd": std::env::temp_dir(), "cliVersion": "test", "source": "cli", "turns": [],
                     })).collect::<Vec<_>>();
-                    json!({"data": data, "nextCursor": if first_page { Some("next") } else { None }})
+                    json!({"data": data, "nextCursor": if pages.len() == 1 { Some("next") } else { None }})
                 }
                 _ => continue,
             };
@@ -120,7 +99,7 @@ async fn indexed_chat_listing_restarts_on_database_error_and_keeps_estimate_budg
                 ))
                 .await
                 .unwrap();
-            if pages.len() == 4 {
+            if pages.len() == 2 {
                 break;
             }
         }
@@ -163,7 +142,6 @@ async fn indexed_chat_listing_restarts_on_database_error_and_keeps_estimate_budg
     .await
     .unwrap()
     .unwrap();
-    assert!(chats.rows.iter().all(|chat| chat.title != "Chat 101"));
     assert_eq!(
         (
             chats.rows.len(),
@@ -176,8 +154,6 @@ async fn indexed_chat_listing_restarts_on_database_error_and_keeps_estimate_budg
     assert_eq!(
         rpc.await.unwrap(),
         vec![
-            json!([null, 100, true, []]),
-            json!(["next", 100, true, []]),
             json!([null, 100, false, []]),
             json!(["next", 100, false, []])
         ]

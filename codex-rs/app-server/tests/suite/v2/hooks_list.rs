@@ -970,24 +970,15 @@ async fn hooks_list_shows_discovered_plugin_mcp_tool_hook() -> Result<()> {
     Ok(())
 }
 
-#[test_case::test_case("browser", "node_repl", "turn_ended", HookEventName::Stop, None; "node_repl")]
-#[test_case::test_case("unified-computer-use", "cua_repl", "turn_ended", HookEventName::Stop, None; "cua_repl")]
-#[test_case::test_case("codex-dream-memory", "codex_apps", "codex_dream_memory.get_mec", HookEventName::SessionStart, Some("^(startup|compact)$"); "memory_without_apps_connection")]
+#[test_case::test_case("browser", "node_repl"; "node_repl")]
+#[test_case::test_case("unified-computer-use", "cua_repl"; "cua_repl")]
 #[tokio::test]
 async fn hooks_list_hides_builtin_cleanup_and_preserves_other_plugin_hooks(
     plugin_name: &str,
     server: &str,
-    tool: &str,
-    event_name: HookEventName,
-    matcher: Option<&str>,
 ) -> Result<()> {
     let codex_home = TempDir::new()?;
     let cwd = TempDir::new()?;
-    let (event_key, event_wire) = match event_name {
-        HookEventName::Stop => ("stop", "Stop"),
-        HookEventName::SessionStart => ("session_start", "SessionStart"),
-        _ => unreachable!("test event"),
-    };
     let plugin_id = format!("{plugin_name}@openai-bundled");
     let plugin_root = codex_home
         .path()
@@ -1002,8 +993,8 @@ async fn hooks_list_hides_builtin_cleanup_and_preserves_other_plugin_hooks(
     std::fs::write(
         plugin_root.join("hooks/hooks.json"),
         serde_json::to_vec(&serde_json::json!({
-            "hooks": { (event_wire): [{ "matcher": matcher, "hooks": [
-                { "type": "mcp_tool", "server": server, "tool": tool },
+            "hooks": { "Stop": [{ "hooks": [
+                { "type": "mcp_tool", "server": server, "tool": "turn_ended" },
                 { "type": "command", "command": ordinary_command, "timeout": 5 },
             ] }] },
         }))?,
@@ -1018,7 +1009,7 @@ hooks = true
 [plugins."{plugin_id}"]
 enabled = true
 
-[hooks.state."{plugin_id}:hooks/hooks.json:{event_key}:0:1"]
+[hooks.state."{plugin_id}:hooks/hooks.json:stop:0:1"]
 enabled = false
 "#
         ),
@@ -1045,13 +1036,13 @@ enabled = false
         vec![HooksListEntry {
             cwd: cwd.path().to_path_buf(),
             hooks: vec![HookMetadata {
-                key: format!("{plugin_id}:hooks/hooks.json:{event_key}:0:1"),
-                event_name,
+                key: format!("{plugin_id}:hooks/hooks.json:stop:0:1"),
+                event_name: HookEventName::Stop,
                 handler: HookHandlerMetadata::Command {
                     command: ordinary_command.to_string(),
                     r#async: false,
                 },
-                matcher: matcher.map(str::to_string),
+                matcher: None,
                 timeout_sec: 5,
                 status_message: None,
                 additional_context_limit: None,
@@ -1187,7 +1178,7 @@ hooks = false
 "#,
     )?;
     std::fs::create_dir_all(workspace.path().join(".git"))?;
-    std::fs::create_dir_all(workspace.path().join(".codex"))?;
+    std::fs::create_dir_all(workspace.path().join(".mikodex"))?;
     std::fs::write(
         workspace.path().join(".codex/config.toml"),
         r#"[features]
@@ -1295,8 +1286,8 @@ async fn hooks_list_uses_root_repo_hooks_for_linked_worktrees() -> Result<()> {
         format!("{}\n", worktree_root.join(".git").display()),
     )?;
     std::fs::write(worktree_git_dir.join("commondir"), "../..\n")?;
-    write_project_hook_config(&repo_root.join(".codex"), "echo root hook")?;
-    write_project_hook_config(&worktree_root.join(".codex"), "echo worktree hook")?;
+    write_project_hook_config(&repo_root.join(".mikodex"), "echo root hook")?;
+    write_project_hook_config(&worktree_root.join(".mikodex"), "echo worktree hook")?;
     set_project_trust_level(codex_home.path(), &repo_root, TrustLevel::Trusted)?;
 
     let mut mcp = TestAppServer::builder()

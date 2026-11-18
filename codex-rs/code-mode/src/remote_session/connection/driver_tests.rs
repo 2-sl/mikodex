@@ -12,6 +12,7 @@ use codex_code_mode_protocol::CodeModeSession;
 use codex_code_mode_protocol::CodeModeSessionCellExecutionLimits;
 use codex_code_mode_protocol::CodeModeSessionDelegate;
 use codex_code_mode_protocol::CodeModeSessionOptions;
+use codex_code_mode_protocol::ExecuteRequest;
 use codex_code_mode_protocol::NotificationFuture;
 use codex_code_mode_protocol::TerminateRequest;
 use codex_code_mode_protocol::ToolInvocationFuture;
@@ -29,7 +30,6 @@ use codex_code_mode_protocol::host::HostToClient;
 use codex_code_mode_protocol::host::MAX_PENDING_DELEGATE_CALLS;
 use codex_code_mode_protocol::host::RequestId;
 use codex_code_mode_protocol::host::SessionId;
-use codex_code_mode_protocol::host::WireExecuteRequest;
 use codex_code_mode_protocol::host::WireNestedToolCall;
 use codex_code_mode_protocol::host::WireResult;
 use codex_code_mode_protocol::host::WireRuntimeResponse;
@@ -154,8 +154,7 @@ impl DriverHarness {
             .send(DriverCommand::Execute {
                 session,
                 delegate,
-                request: WireExecuteRequest {
-                    catalog_revision: None,
+                request: ExecuteRequest {
                     tool_call_id: format!("call-{request_id}"),
                     enabled_tools: Vec::new(),
                     source: "await new Promise(() => {})".to_string(),
@@ -586,8 +585,7 @@ async fn deferred_delegates_follow_cell_readiness_and_cancellation() {
             .send(DriverCommand::Execute {
                 delegate: delegate.clone(),
                 session: session.clone(),
-                request: WireExecuteRequest {
-                    catalog_revision: None,
+                request: ExecuteRequest {
                     tool_call_id: tool_call_id.to_string(),
                     enabled_tools: Vec::new(),
                     source: "text('done')".to_string(),
@@ -775,8 +773,7 @@ async fn dropped_open_waiter_shuts_down_committed_session() {
         .send(DriverCommand::Execute {
             delegate: Arc::new(RecordingDelegate::default()),
             session: session.clone(),
-            request: WireExecuteRequest {
-                catalog_revision: None,
+            request: ExecuteRequest {
                 tool_call_id: "call-1".to_string(),
                 enabled_tools: Vec::new(),
                 source: "text('ok')".to_string(),
@@ -1734,8 +1731,7 @@ async fn abandoned_execute_is_tracked_and_terminated_after_admission() {
         .send(DriverCommand::Execute {
             delegate: delegate.clone(),
             session: session.clone(),
-            request: WireExecuteRequest {
-                catalog_revision: None,
+            request: ExecuteRequest {
                 tool_call_id: "call-1".to_string(),
                 enabled_tools: Vec::new(),
                 source: "await new Promise(() => {})".to_string(),
@@ -1834,8 +1830,7 @@ async fn delivered_but_unclaimed_execute_is_terminated_when_the_caller_is_cancel
         .send(DriverCommand::Execute {
             delegate: delegate.clone(),
             session: session.clone(),
-            request: WireExecuteRequest {
-                catalog_revision: None,
+            request: ExecuteRequest {
                 tool_call_id: "call-1".to_string(),
                 enabled_tools: Vec::new(),
                 source: "await new Promise(() => {})".to_string(),
@@ -2000,8 +1995,7 @@ async fn connection_failure_closes_every_live_cell_once() {
         .send(DriverCommand::Execute {
             delegate: delegate.clone(),
             session,
-            request: WireExecuteRequest {
-                catalog_revision: None,
+            request: ExecuteRequest {
                 tool_call_id: "call-1".to_string(),
                 enabled_tools: Vec::new(),
                 source: "await new Promise(() => {})".to_string(),
@@ -2181,8 +2175,7 @@ async fn dropped_shutdown_waiter_does_not_abort_remote_cleanup() {
         .send(DriverCommand::Execute {
             delegate: Arc::new(RecordingDelegate::default()),
             session,
-            request: WireExecuteRequest {
-                catalog_revision: None,
+            request: ExecuteRequest {
                 tool_call_id: "call-2".to_string(),
                 enabled_tools: Vec::new(),
                 source: "text('unreachable')".to_string(),

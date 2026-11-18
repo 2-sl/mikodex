@@ -86,12 +86,12 @@ impl TextArea {
         if lines.len() <= height {
             return false;
         }
-        let baseline = self.effective_scroll(area, &lines, *state);
-        let scroll = baseline
+        let scroll = state
+            .scroll
             .saturating_add_signed(isize::from(rows))
             .min(lines.len() - height);
-        state.scroll = scroll;
-        if scroll != baseline {
+        if scroll != state.scroll {
+            state.scroll = scroll;
             state.manual_cursor = Some(self.cursor_pos);
         }
         true

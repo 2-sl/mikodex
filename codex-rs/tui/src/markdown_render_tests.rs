@@ -2043,9 +2043,9 @@ fn table_wraps_file_paths_before_collapsing_narrative_columns_snapshot() {
 fn table_renders_stacked_key_value_records_when_path_column_becomes_too_narrow_snapshot() {
     let md = r#"| Session | Why useful | Detected table blocks |
 | --- | --- | --- |
-| [2026-05-25 current gallery](/Users/felipe.coury/.codex/sessions/2026/05/25/rollout-2026-05-25T18-13-09-019e60fc-0518-7c21-9596-980fe97225ba.jsonl) | The large gallery from this thread: emojis, links, emphasis, code, alignment, paragraphs, and a 30+ row table | 7 |
-| [2026-05-14 renderer testing](/Users/felipe.coury/.codex/sessions/2026/05/14/rollout-2026-05-14T12-57-18-019e2734-e500-7011-8278-975c94d06000.jsonl) | Explicit "markdown tables for testing" session with several successive assistant samples | 16 |
-| [2026-05-14 five-table test](/Users/felipe.coury/.codex/sessions/2026/05/14/rollout-2026-05-14T12-27-57-019e271a-064c-78c3-a5cd-a6f20a0c1ad5.jsonl) | Explicit request for five tables containing emojis, code, italics, and varied cell content | 10 |
+| [2026-05-25 current gallery](/Users/felipe.coury/.mikodex/sessions/2026/05/25/rollout-2026-05-25T18-13-09-019e60fc-0518-7c21-9596-980fe97225ba.jsonl) | The large gallery from this thread: emojis, links, emphasis, code, alignment, paragraphs, and a 30+ row table | 7 |
+| [2026-05-14 renderer testing](/Users/felipe.coury/.mikodex/sessions/2026/05/14/rollout-2026-05-14T12-57-18-019e2734-e500-7011-8278-975c94d06000.jsonl) | Explicit "markdown tables for testing" session with several successive assistant samples | 16 |
+| [2026-05-14 five-table test](/Users/felipe.coury/.mikodex/sessions/2026/05/14/rollout-2026-05-14T12-27-57-019e271a-064c-78c3-a5cd-a6f20a0c1ad5.jsonl) | Explicit request for five tables containing emojis, code, italics, and varied cell content | 10 |
 "#;
     let text = render_markdown_text_with_width(md, Some(/*width*/ 42));
 
@@ -2058,7 +2058,7 @@ fn table_renders_records_when_multiple_prose_columns_are_starved_snapshot() {
 | --- | ---: | ---: | --- |
 | [#24485: newline shortcut fails in PyCharm terminal on Windows](https://github.com/openai/codex/issues/24485) | `+1` 0, substantive comments 0 | Low | New, deterministic regression range; localized composer/keymap path. |
 | [#23926: Vim composer `e` stalls at word end](https://github.com/openai/codex/issues/23926) | `+1` 0, comments 0 | Low | Standing best quick win; deterministic motion bug. |
-| [#23651: Zellij scrollback misses Codex transcript over SSH](https://github.com/openai/codex/issues/23651) | `+1` 3, human comments 2 | Medium | Clear regression and strong scrollback evidence. |
+| [#23651: Zellij scrollback misses Mikodex transcript over SSH](https://github.com/openai/codex/issues/23651) | `+1` 3, human comments 2 | Medium | Clear regression and strong scrollback evidence. |
 | [#23740: raw ANSI/control sequences in Windows Terminal](https://github.com/openai/codex/issues/23740) | `+1` 7, human comments 7 | Medium | Highest activity; established Windows rendering regression family. |
 | [#24527: typing lag increases with session length](https://github.com/openai/codex/issues/24527) | `+1` 0, substantive comments 0 | Medium | New TUI-visible performance report; needs profiling before implementation. |
 "#;
@@ -2185,89 +2185,4 @@ fn table_key_value_fallback_preserves_rich_values_and_themed_labels() {
             .iter()
             .any(|span| span.style.add_modifier.contains(Modifier::UNDERLINED))
     }));
-}
-
-#[test]
-fn narrow_header_only_table_retains_local_file_target() {
-    let rendered = render_markdown_lines_with_width_and_cwd(
-        "| 👩‍💻 [Guide](./guide.md) | A | B | C | D | E |\n| --- | --- | --- | --- | --- | --- |",
-        Some(32),
-        /*cwd*/ None,
-    );
-    let first = &rendered[0];
-    let text = first.line.to_string();
-    assert!(text.starts_with("| 👩‍💻"), "{text}");
-    let (before, _) = text.split_once("./guide.md").expect("visible file path");
-    let column = crate::width::display_width(before);
-    let links = first
-        .hyperlinks
-        .iter()
-        .map(|link| {
-            (
-                link.columns.clone(),
-                link.destination.as_str(),
-                link.terminal_destination(),
-            )
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        links,
-        vec![(column..column + "./guide.md".len(), "./guide.md", None)]
-    );
-}
-
-#[test]
-fn narrow_header_only_table_preserves_link_columns_and_escaped_pipes() {
-    let rendered = super::render_markdown_lines_with_width_cwd_and_hidden_link_destinations(
-        "| 👩**‍💻** [Docs](https://example.com) | x\\|́y | B | C | D | E |\n| --- | --- | --- | --- | --- | --- |",
-        Some(/*width*/ 32),
-        /*cwd*/ None,
-        &|_| true,
-    );
-    let first = &rendered[0];
-    assert!(first.line.to_string().contains("x\\|́y"));
-    assert_eq!(
-        first
-            .hyperlinks
-            .iter()
-            .map(|link| (link.columns.clone(), link.destination.as_str()))
-            .collect::<Vec<_>>(),
-        vec![(5..9, "https://example.com")]
-    );
-}
-
-#[test]
-fn narrow_table_record_labels_keep_local_file_targets() {
-    let markdown = "| [Guide](./guide.md) | A | B | C | D | E | F | G |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |";
-    for width in [20, 50] {
-        let rendered =
-            render_markdown_lines_with_width_and_cwd(markdown, Some(width), /*cwd*/ None);
-        let first = &rendered[0];
-        let text = first.line.to_string();
-        assert!(text.starts_with(" Guide"), "{text}");
-        let (before, _) = text.split_once("./guide.md").expect("visible file path");
-        let column = crate::width::display_width(before);
-        assert_eq!(
-            first
-                .hyperlinks
-                .iter()
-                .map(|link| (link.columns.clone(), link.destination.as_str()))
-                .collect::<Vec<_>>(),
-            vec![(column..column + "./guide.md".len(), "./guide.md")],
-        );
-    }
-}
-
-#[test]
-fn posix_file_uri_keeps_literal_backslash_in_preview_target() {
-    let rendered = render_markdown_lines_with_width_and_cwd(
-        "[Guide](file:///tmp/Guide%5Cnotes.md)",
-        /*width*/ None,
-        /*cwd*/ None,
-    );
-    assert!(rendered[0].line.to_string().contains("/tmp/Guide/notes.md"));
-    assert_eq!(
-        rendered[0].hyperlinks[0].destination,
-        r"/tmp/Guide\notes.md"
-    );
 }

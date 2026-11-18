@@ -4,24 +4,9 @@ expression: "models.iter().map(|model|\n(&model.model, model.show_in_picker, mod
 ---
 [
     (
-        "gpt-6.2-sol",
-        true,
-        true,
-    ),
-    (
-        "gpt-6.2-astra",
-        true,
-        false,
-    ),
-    (
-        "gpt-6.1-terra",
-        true,
-        false,
-    ),
-    (
         "gpt-6.1-sol",
         true,
-        false,
+        true,
     ),
     (
         "gpt-6-astra",
@@ -30,6 +15,11 @@ expression: "models.iter().map(|model|\n(&model.model, model.show_in_picker, mod
     ),
     (
         "gpt-6-luna",
+        true,
+        false,
+    ),
+    (
+        "gpt-6.1-terra",
         true,
         false,
     ),

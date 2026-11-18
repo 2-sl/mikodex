@@ -94,31 +94,25 @@ impl StartupDraftPump {
                 };
                 if key.code == KeyCode::Enter
                     && key.modifiers.is_empty()
-                    && (self.bottom_pane.is_startup_composer_action(key)
-                        || !self.bottom_pane.is_safe_startup_editor_key(key))
+                    && self.bottom_pane.is_in_paste_burst()
                 {
                     let text_len = self.bottom_pane.composer_text().len();
-                    let retained_paste = self.session_action
-                        == super::StartupDraftSessionAction::NewWhileRunning
-                        && !self.bottom_pane.is_in_paste_burst()
-                        && self
-                            .bottom_pane
-                            .has_startup_paste_window(Instant::now().into_std());
                     self.bottom_pane.flush_composer_paste_burst();
-                    if retained_paste
-                        || self
-                            .bottom_pane
-                            .composer_text()
-                            .len()
-                            .saturating_sub(text_len)
-                            > 1
+                    if self
+                        .bottom_pane
+                        .composer_text()
+                        .len()
+                        .saturating_sub(text_len)
+                        > 1
+                        && (self.bottom_pane.is_startup_composer_action(key)
+                            || !self.bottom_pane.is_safe_startup_editor_key(key))
                     {
                         self.pending_paste_newline = Some((Instant::now(), "\n".to_string()));
                     }
                 }
                 if self.initial_screen == StartupDraftInitialScreen::Composer
                     && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-                    && self.session_action != super::StartupDraftSessionAction::NewWhileRunning
+                    && self.session_action != super::StartupDraftSessionAction::NewFromCommandCenter
                     && self.bottom_pane.is_startup_submit_key(key)
                 {
                     self.bottom_pane.flush_composer_paste_burst();
@@ -147,7 +141,8 @@ impl StartupDraftPump {
                 }
                 let previous_text = self.bottom_pane.composer_text();
                 if let Err(error) = handle_startup_draft_key(&mut self.bottom_pane, key)
-                    && !(self.session_action == super::StartupDraftSessionAction::NewWhileRunning
+                    && !(self.session_action
+                        == super::StartupDraftSessionAction::NewFromCommandCenter
                         && StartupCancelled::matches(&error))
                 {
                     if StartupCancelled::matches(&error)
@@ -184,7 +179,7 @@ impl StartupDraftPump {
                     || !matches!(
                         self.session_action,
                         super::StartupDraftSessionAction::New
-                            | super::StartupDraftSessionAction::NewWhileRunning
+                            | super::StartupDraftSessionAction::NewFromCommandCenter
                     )
                 {
                     return Ok(());

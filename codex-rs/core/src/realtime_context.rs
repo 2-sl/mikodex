@@ -132,7 +132,6 @@ async fn load_recent_threads(sess: &Session) -> Vec<StoredThread> {
         .services
         .thread_store
         .list_threads(ListThreadsParams {
-            included_thread_ids: None,
             page_size: MAX_RECENT_THREADS,
             cursor: None,
             sort_key: ThreadSortKey::UpdatedAt,

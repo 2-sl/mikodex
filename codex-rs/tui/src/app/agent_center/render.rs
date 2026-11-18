@@ -5,6 +5,9 @@ use super::*;
 use crate::bottom_pane::render_filled_tab_bar;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crossterm::cursor::SetCursorStyle;
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
 use ratatui::widgets::WidgetRef;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -25,9 +28,6 @@ pub(super) fn line(text: impl Into<Line<'static>>, area: Rect, buf: &mut Buffer)
     }
 }
 
-const MIN_DOCKED_LIST_HEIGHT: u16 = 12;
-const MIN_DOCKED_DETAILS_HEIGHT: u16 = 8;
-
 fn visible_suffix(input: &str, available: usize) -> &str {
     let mut start = input.len();
     let mut visible_width = 0;
@@ -42,6 +42,9 @@ fn visible_suffix(input: &str, available: usize) -> &str {
     &input[start..]
 }
 
+const MIN_DOCKED_LIST_HEIGHT: u16 = 12;
+const MIN_DOCKED_DETAILS_HEIGHT: u16 = 8;
+
 struct CenterLayout {
     header: Rect,
     list: Rect,
@@ -52,24 +55,39 @@ struct CenterLayout {
 }
 
 impl AgentsOverviewView {
-    pub(in crate::app) fn clamp_docked_details_height(requested: u16, area_height: u16) -> u16 {
+    fn docked_details_height(&self, area_height: u16) -> u16 {
+        let default_height =
+            (u32::from(area_height) * 2 / 5).clamp(12, 26) as u16;
+        let preferred_height = self
+            .state()
+            .docked_details_height
+            .unwrap_or(default_height);
+        Self::clamp_docked_details_height(preferred_height, area_height)
+    }
+
+    pub(in crate::app) fn clamp_docked_details_height(
+        requested: u16,
+        area_height: u16,
+    ) -> u16 {
         let maximum = area_height
             .saturating_sub(MIN_DOCKED_LIST_HEIGHT + 1)
             .max(MIN_DOCKED_DETAILS_HEIGHT);
         requested.clamp(MIN_DOCKED_DETAILS_HEIGHT, maximum)
     }
 
-    pub(in crate::app) fn set_docked_focus(&mut self, focused: bool) {
-        self.docked_focus = focused;
-    }
-
-    pub(in crate::app) fn render_docked(&self, area: Rect, buf: &mut Buffer) {
-        self.render(area, buf);
-    }
-
-    pub(in crate::app) fn docked_details_divider(&self, _area: Rect) -> Option<(Rect, u16)> {
-        let state = self.state();
-        Some((state.details_divider_area?, state.docked_details_height?))
+    pub(in crate::app) fn docked_details_divider(
+        &self,
+        area: Rect,
+    ) -> Option<(Rect, u16)> {
+        if area.height < 34 || area.width < 20 {
+            return None;
+        }
+        let details_height = self.docked_details_height(area.height);
+        let list_height = area.height.saturating_sub(details_height + 1);
+        Some((
+            Rect::new(area.x, area.y + list_height, area.width, 1),
+            details_height,
+        ))
     }
 
     pub(in crate::app) fn set_docked_details_height(&self, height: u16) {
@@ -88,21 +106,7 @@ impl AgentsOverviewView {
         let header = row(area, /*offset*/ 0, header_height);
         let body = row(area, header_height, footer.y - header.bottom())
             .inner(Margin::new(/*horizontal*/ 2, /*vertical*/ 0));
-        let stacked_details = area.width < 90 && area.height >= 26;
-        let [list, gap, details] = if stacked_details {
-            let default_height = (u32::from(body.height) * 2 / 5).clamp(12, 26) as u16;
-            let details_height = Self::clamp_docked_details_height(
-                state.docked_details_height.unwrap_or(default_height),
-                body.height,
-            );
-            let list_height = body.height.saturating_sub(details_height + 1);
-            Layout::vertical([
-                Constraint::Length(list_height),
-                Constraint::Length(1),
-                Constraint::Fill(1),
-            ])
-            .areas(body)
-        } else if body.width >= 90 {
+        let [list, gap, details] = if body.width >= 90 {
             Layout::horizontal([
                 Constraint::Min(46),
                 Constraint::Length(3),
@@ -127,11 +131,47 @@ impl AgentsOverviewView {
             footer,
         }
     }
+
+    pub(in crate::app) fn render_docked(&self, area: Rect, buf: &mut Buffer) {
+        if area.height < 34 || area.width < 20 {
+            self.render(area, buf);
+            return;
+        }
+        let details_height = self.docked_details_height(area.height);
+        let list_height = area.height.saturating_sub(details_height + 1);
+        let resizing = self.state().docked_details_resizing;
+        let [list, divider, details] = Layout::vertical([
+            Constraint::Length(list_height),
+            Constraint::Length(1),
+            Constraint::Fill(1),
+        ])
+        .areas(area);
+        self.render(list, buf);
+        let divider_style = if resizing {
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else if self.docked_focus {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().dim()
+        };
+        for x in divider.x..divider.right() {
+            buf[(x, divider.y)]
+                .set_symbol("-")
+                .set_style(divider_style);
+        }
+        Clear.render(details, buf);
+        self.render_details(
+            row(details, /*offset*/ 1, details.height.saturating_sub(1)),
+            buf,
+        );
+    }
 }
 
 impl Renderable for AgentsOverviewView {
     fn desired_height(&self, _width: u16) -> u16 {
-        26
+        24
     }
 
     fn cursor_style(&self, _area: Rect) -> SetCursorStyle {
@@ -174,16 +214,7 @@ impl Renderable for AgentsOverviewView {
         let inset =
             |area: Rect| area.inner(Margin::new(/*horizontal*/ 2, /*vertical*/ 0));
         let footer_hints = self.center_footer_hints();
-        let mut state = self.state();
-        let stacked_details = layout.gap.height == 1 && layout.gap.width > 1;
-        state.details_divider_area = stacked_details.then_some(layout.gap);
-        state.docked_area_height = layout.list.height + layout.gap.height + layout.details.height;
-        if stacked_details {
-            state.docked_details_height = Some(layout.details.height);
-        } else {
-            state.docked_details_resizing = false;
-        }
-        let resizing_details = state.docked_details_resizing;
+        let state = self.state();
         let filter_keys = if state.editing_metadata() {
             String::new()
         } else {
@@ -202,7 +233,11 @@ impl Renderable for AgentsOverviewView {
             .unwrap_or_default();
         line(
             vec![
-                "Agent command center".bold(),
+                if self.docked_focus {
+                    "Agent command center".cyan().bold()
+                } else {
+                    "Agent command center".bold()
+                },
                 format!("  Group: {grouping}  {group_key}").dim(),
             ],
             inset(layout.header),
@@ -312,28 +347,11 @@ impl Renderable for AgentsOverviewView {
             Paragraph::new(lines).render(body, buf);
             return;
         }
-        if layout.gap.height == 1 && layout.gap.width > 1 {
-            let divider_style = if resizing_details {
-                ratatui::style::Style::default()
-                    .fg(ratatui::style::Color::Cyan)
-                    .add_modifier(ratatui::style::Modifier::BOLD)
-            } else if self.docked_focus {
-                ratatui::style::Style::default().fg(ratatui::style::Color::Cyan)
-            } else {
-                ratatui::style::Style::default().dim()
-            };
-            for x in layout.gap.x..layout.gap.right() {
-                buf[(x, layout.gap.y)]
-                    .set_symbol("-")
-                    .set_style(divider_style);
-            }
-        } else {
-            for y in layout.gap.y..layout.gap.bottom() {
-                if layout.gap.width > 1 {
-                    buf[(layout.gap.x + 1, y)]
-                        .set_symbol("\u{2502}")
-                        .set_style(Style::default().dim());
-                }
+        for y in layout.gap.y..layout.gap.bottom() {
+            if layout.gap.width > 1 {
+                buf[(layout.gap.x + 1, y)]
+                    .set_symbol("│")
+                    .set_style(Style::default().dim());
             }
         }
         self.render_center_rows(layout.list, buf);

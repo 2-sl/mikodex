@@ -28,10 +28,6 @@ enabled = true
         Some(AuthMode::Chatgpt),
     );
     let mut remote = remote_installed_plugin("sample");
-    remote.active_bundle = Some(crate::remote::ActiveRemotePluginBundle {
-        directory_version: "local".into(),
-        remote_plugin_id: None,
-    });
     remote.interface = Some(
         serde_json::from_value(serde_json::json!({
             "capabilities": [], "screenshots": [], "screenshotUrls": [],
@@ -114,10 +110,6 @@ enabled = true
     assert!(Arc::ptr_eq(&suggestions, &refreshed_suggestions));
 
     remote.version = Some("2.0.0".to_string());
-    assert!(!manager.write_remote_installed_plugins_cache(vec![remote.clone()]));
-    assert_eq!(manager.loaded_plugins_cache_generation(), loaded_generation);
-
-    remote.enabled = false;
     assert!(manager.write_remote_installed_plugins_cache(vec![remote]));
     assert_eq!(
         manager.loaded_plugins_cache_generation(),

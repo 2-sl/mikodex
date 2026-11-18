@@ -95,6 +95,7 @@ pub(super) fn render(
         } else {
             Line::from("Click or Right focus".dim())
         };
-        hint.render(Rect::new(inner.x, inner.bottom() - 1, inner.width, 1), buf);
+        hint
+            .render(Rect::new(inner.x, inner.bottom() - 1, inner.width, 1), buf);
     }
 }

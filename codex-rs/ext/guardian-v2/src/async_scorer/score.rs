@@ -1,6 +1,6 @@
 //! Owns cached-score publication, observation coverage, and reuse snapshots.
-//! Scores, authorization, and coverage stay policy-specific. Action freshness, wrapper
-//! tracking, and JS allowances span generations; late results cannot refresh another policy.
+//! The cached score, authorization, and coverage are published under one lock;
+//! failures never replace a newer sample.
 //! Pending classifications expire only when no active action can reuse their score.
 
 use std::collections::BTreeMap;
@@ -19,9 +19,8 @@ use super::wrapper_lag::WrapperLag;
 #[derive(Default)]
 pub(super) struct GuardianV2ScoreProgress {
     state: Mutex<ScoreState>,
-    pub(super) actions: Arc<Mutex<ActionState>>,
-    initial_failure_index: usize,
     pub(super) updates: tokio::sync::watch::Sender<()>,
+    observations: tokio::sync::watch::Sender<()>,
     pub(super) metrics: Option<Arc<dyn ExtensionMetrics>>,
 }
 
@@ -36,7 +35,7 @@ impl PendingScore {
     pub(super) fn is_expired(&self) -> bool {
         let state = self
             .progress
-            .actions
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state
@@ -48,13 +47,7 @@ impl PendingScore {
 
     pub(super) async fn expired(&self) {
         // Subscribe before checking so admission cannot race past the expiry check.
-        let mut observations = self
-            .progress
-            .actions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .updates
-            .subscribe();
+        let mut observations = self.progress.observations.subscribe();
         while !self.is_expired() {
             if observations.changed().await.is_err() {
                 return;
@@ -67,19 +60,13 @@ impl PendingScore {
 struct ScoreState {
     score: Option<SecurityRiskScore>,
     score_index: usize,
-    latest_scored_tool_call: usize,
-    authorization: Option<ScoreAuthorization>,
-}
-
-/// Observations of the shared thread, independent of the policy scoring them.
-#[derive(Default)]
-pub(super) struct ActionState {
     wrapper_lag: WrapperLag,
     latest_tool_call: usize,
+    js_executions: usize,
+    latest_scored_tool_call: usize,
     latest_failed_tool_call: usize,
     oversized_tool_calls: BTreeSet<String>,
-    js_executions: usize,
-    updates: tokio::sync::watch::Sender<()>,
+    authorization: Option<ScoreAuthorization>,
 }
 
 /// A consistent view of the published score and the observations it covers.
@@ -96,46 +83,37 @@ pub(super) struct CachedScore {
 }
 
 impl GuardianV2ScoreProgress {
-    pub(super) fn new(
-        metrics: Option<Arc<dyn ExtensionMetrics>>,
-        actions: Arc<Mutex<ActionState>>,
-    ) -> Self {
-        let initial_failure_index = actions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .latest_failed_tool_call;
+    pub(super) fn new(metrics: Option<Arc<dyn ExtensionMetrics>>) -> Self {
         Self {
             metrics,
-            actions,
-            initial_failure_index,
             ..Default::default()
         }
     }
 
     pub(super) fn observe(&self, input: &ToolStartInput<'_>) -> usize {
         let mut state = self
-            .actions
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.latest_tool_call = state.latest_tool_call.saturating_add(/*rhs*/ 1);
         let index = state.latest_tool_call;
         state.wrapper_lag.record(input, index);
-        state.updates.send_replace(());
+        self.observations.send_replace(());
         index
     }
 
     pub(super) fn observe_js_execution(&self) {
-        // Setup/reset calls must not consume the first JS execution allowance.
         let mut state = self
-            .actions
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Setup/reset calls must not consume the first JS execution allowance.
         state.js_executions = state.js_executions.saturating_add(/*rhs*/ 1);
     }
 
     pub(super) fn invalidate(&self, index: usize) {
         let mut state = self
-            .actions
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.latest_failed_tool_call = state.latest_failed_tool_call.max(index);
@@ -143,7 +121,7 @@ impl GuardianV2ScoreProgress {
 
     pub(super) fn mark_oversized(&self, call_id: &str, index: usize) {
         let mut state = self
-            .actions
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.oversized_tool_calls.insert(call_id.to_owned());
@@ -153,12 +131,12 @@ impl GuardianV2ScoreProgress {
     pub(super) fn finish(&self, call_id: &str) {
         // Overflow belongs to each active call even after a newer score succeeds.
         let mut state = self
-            .actions
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.oversized_tool_calls.remove(call_id);
         state.wrapper_lag.finish(call_id);
-        state.updates.send_replace(());
+        self.observations.send_replace(());
     }
 
     pub(super) fn publish(
@@ -185,9 +163,7 @@ impl GuardianV2ScoreProgress {
         accepted
     }
 
-    /// Invalidates this action across policies before publishing a local fail-closed score.
-    pub(super) fn fail_closed(&self, sampled_at: SystemTime, index: usize) {
-        self.invalidate(index);
+    pub(super) fn fail_closed(&self, sampled_at: SystemTime) {
         let mut state = self
             .state
             .lock()
@@ -206,7 +182,6 @@ impl GuardianV2ScoreProgress {
         {
             state.score = Some(score);
         }
-        self.updates.send_replace(());
     }
 
     pub(super) fn clear_score(&self) {
@@ -217,10 +192,6 @@ impl GuardianV2ScoreProgress {
     }
 
     pub(super) fn inspect(&self, call_id: Option<&str>) -> CachedScore {
-        let actions = self
-            .actions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let state = self
             .state
             .lock()
@@ -232,24 +203,21 @@ impl GuardianV2ScoreProgress {
                 .and_then(|score| score.sampled_at)
                 .map(SystemTime::from),
             // Use the accepted score's source, not the coverage high-water mark.
-            score_at_or_before_action: actions
+            score_at_or_before_action: state
                 .wrapper_lag
                 .get(call_id)
                 .is_some_and(|start| state.score_index <= start.index),
-            lag: actions
+            lag: state
                 .latest_tool_call
                 .saturating_sub(state.latest_scored_tool_call)
                 .saturating_sub(
-                    actions
+                    state
                         .wrapper_lag
                         .discount(call_id, state.latest_scored_tool_call),
                 ),
-            // Only failures newly recorded since cache creation can invalidate it.
-            // A published score covers those failures through its own action index.
-            has_unscored_failure: actions.latest_failed_tool_call
-                > self.initial_failure_index.max(state.score_index),
-            js_executions: actions.js_executions,
-            oversized: call_id.is_some_and(|id| actions.oversized_tool_calls.contains(id)),
+            has_unscored_failure: state.latest_failed_tool_call > state.latest_scored_tool_call,
+            js_executions: state.js_executions,
+            oversized: call_id.is_some_and(|id| state.oversized_tool_calls.contains(id)),
             action_risk: state
                 .score
                 .as_ref()

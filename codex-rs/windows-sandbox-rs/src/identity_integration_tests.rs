@@ -69,14 +69,12 @@ fn credential_setup_repairs_expired_accounts_once_and_reloads_credentials() -> R
     let permissions = ResolvedWindowsSandboxPermissions::try_from_permission_profile(
         &PermissionProfile::read_only(),
     )?;
-    for (expired_username, repair_succeeds, needs_registration) in [
-        (None, true, false),
-        (None, true, true),
-        (None, false, true),
-        (Some(OFFLINE_USERNAME), true, false),
-        (Some(ONLINE_USERNAME), true, false),
-        (Some(OFFLINE_USERNAME), false, false),
-        (Some(ONLINE_USERNAME), false, false),
+    for (expired_username, repair_succeeds) in [
+        (None, true),
+        (Some(OFFLINE_USERNAME), true),
+        (Some(ONLINE_USERNAME), true),
+        (Some(OFFLINE_USERNAME), false),
+        (Some(ONLINE_USERNAME), false),
     ] {
         let home = tempfile::tempdir()?;
         let marker = SetupMarker {
@@ -118,10 +116,7 @@ fn credential_setup_repairs_expired_accounts_once_and_reloads_credentials() -> R
             WindowsSandboxProxySettingsMode::Preserve,
             |_, _| {
                 // Older services must not accept stale credentials instead of repairing expiry.
-                assert_eq!(
-                    sandbox_users_path(home.path()).exists(),
-                    expired_username.is_none()
-                );
+                assert!(!sandbox_users_path(home.path()).exists());
                 setups.set(setups.get() + 1);
                 users.offline.password =
                     BASE64.encode(crate::dpapi::protect(b"new-test-password")?);
@@ -139,24 +134,18 @@ fn credential_setup_repairs_expired_accounts_once_and_reloads_credentials() -> R
                     },
                 ))
             },
-            |_| needs_registration && (setups.get() == 0 || !repair_succeeds),
         );
-        assert_eq!(
-            setups.get(),
-            usize::from(expired_username.is_some() || needs_registration)
-        );
+        assert_eq!(setups.get(), usize::from(expired_username.is_some()));
         assert_eq!(
             result
                 .map(|(creds, _)| (creds.username, creds.password))
                 .map_err(|err| err.to_string()),
-            if needs_registration && !repair_succeeds {
-                Err("protected Core setup did not publish ready runtime ownership".into())
-            } else if !repair_succeeds {
+            if !repair_succeeds {
                 Err("Windows sandbox account password is still expired after setup".into())
             } else {
                 Ok((
                     OFFLINE_USERNAME.into(),
-                    if expired_username.is_some() || needs_registration {
+                    if expired_username.is_some() {
                         "new-test-password"
                     } else {
                         "old-test-password"
@@ -257,7 +246,6 @@ fn credential_setup_reconciles_policy_and_repairs_accounts() -> Result<()> {
                     Ok(())
                 },
                 |_| Ok(account_flags.get()),
-                |_| false,
             )
         };
         for _ in 0..2 {

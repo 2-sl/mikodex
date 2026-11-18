@@ -1,4 +1,3 @@
-use crate::McpServerKey;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -12,7 +11,7 @@ use crate::tools::ToolInfo;
 
 fn tool_info(tool: Tool) -> ToolInfo {
     ToolInfo {
-        server_key: McpServerKey::unscoped("codex_apps"),
+        server_name: "codex_apps".to_string(),
         supports_parallel_tool_calls: false,
         server_origin: None,
         callable_name: tool.name.to_string(),

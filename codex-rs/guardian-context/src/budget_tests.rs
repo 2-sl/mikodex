@@ -101,7 +101,6 @@ fn section_costs_keep_multimodal_payloads_separate() {
             },
         ],
         truncations: Vec::new(),
-        enclosing_call: None,
     };
     assert_eq!(
         context.section_costs().collect::<Vec<_>>(),
@@ -185,7 +184,6 @@ fn section_estimate_bounds_the_delivered_message() {
                         ]),
                     }],
                     truncations: Vec::new(),
-                    enclosing_call: None,
                 };
                 assert_eq!(
                     context.section_costs().collect::<Vec<_>>(),
@@ -208,16 +206,6 @@ fn section_estimate_bounds_the_delivered_message() {
 fn elastic_section_config_validates_entry_limits() {
     let mut policy = complete_minimum_budget(ElasticBudgetConfig::default());
     assert_eq!(policy.validate(), Ok(()));
-    const RESERVATION: usize = 2_000;
-    let mut with_selected_exec = policy.clone();
-    with_selected_exec.sections.insert(
-        ElasticSection::TranscriptSelectedExecResults,
-        ElasticSectionLimits::new(RESERVATION, RESERVATION).unwrap(),
-    );
-    assert_eq!(
-        with_selected_exec.total_minimum_tokens(),
-        policy.total_minimum_tokens() + RESERVATION as u128
-    );
     let section = ElasticSection::TrustedSkills;
     let limits = policy.section_limits(section);
     const BELOW_MINIMUM: isize = -1;

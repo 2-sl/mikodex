@@ -25,29 +25,29 @@ use serde::Serializer;
 use serde_json::Value;
 
 /// Keeps ICE credentials out of command diagnostics and session recordings.
-/// Convert back to a string only at the media signaling boundary.
+/// Convert back to a string only when sending the offer to app-server signaling.
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct RealtimeSdp(String);
+pub(crate) struct RealtimeOfferSdp(String);
 
-impl From<String> for RealtimeSdp {
+impl From<String> for RealtimeOfferSdp {
     fn from(value: String) -> Self {
         Self(value)
     }
 }
 
-impl From<RealtimeSdp> for String {
-    fn from(value: RealtimeSdp) -> Self {
+impl From<RealtimeOfferSdp> for String {
+    fn from(value: RealtimeOfferSdp) -> Self {
         value.0
     }
 }
 
-impl fmt::Debug for RealtimeSdp {
+impl fmt::Debug for RealtimeOfferSdp {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("<redacted>")
     }
 }
 
-impl Serialize for RealtimeSdp {
+impl Serialize for RealtimeOfferSdp {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -113,8 +113,7 @@ pub(crate) enum AppCommand {
     CleanBackgroundTerminals,
     RealtimeConversationStart {
         thread_id: ThreadId,
-        attempt_id: u64,
-        offer_sdp: RealtimeSdp,
+        offer_sdp: RealtimeOfferSdp,
     },
     RealtimeConversationStop {
         thread_id: ThreadId,
