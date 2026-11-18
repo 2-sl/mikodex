@@ -40,7 +40,6 @@ use codex_extension_api::ToolCall;
 use codex_extension_api::ToolCallSource;
 use codex_extension_api::ToolPayload;
 use codex_extension_api::TurnInputContext;
-use codex_extension_api::TurnStartInput;
 use codex_extension_api::WorldStateContributionInput;
 use codex_extension_api::WorldStateSectionContribution;
 use codex_models_manager::model_info::model_info_from_slug;
@@ -107,7 +106,7 @@ mod presentation_dedup_tests;
 #[path = "skills_extension/catalog_delta_tests.rs"]
 mod catalog_delta_tests;
 
-static NEXT_MIKODEX_HOME_ID: AtomicUsize = AtomicUsize::new(0);
+static NEXT_CODEX_HOME_ID: AtomicUsize = AtomicUsize::new(0);
 const SKILLS_INTRO_WITH_ABSOLUTE_PATHS: &str = "A skill is a set of instructions provided through a `SKILL.md` source. Below is the list of skills that can be used. Each entry includes a name, description, and source locator. `file` locators are on the host filesystem, `executor package` locators are owned by their execution environment, `cloud package` locators are opaque package identifiers, and `custom resource` locators use their provider's access mechanism.";
 const DEMO_SKILL_CONTENTS: &str =
     "---\nname: demo\ndescription: Demo skill.\n---\n# Demo\n\nUse the demo skill.\n";
@@ -312,27 +311,17 @@ async fn skill_world_state_fragments(
     Ok((executor, cloud))
 }
 
-async fn start_registered_turn(
+async fn refresh_registered_catalogs_for_step(
     registry: &codex_extension_api::ExtensionRegistry<TestConfig>,
     session_store: &ExtensionData,
     thread_store: &ExtensionData,
     turn_id: &str,
 ) {
     let turn_store = ExtensionData::new(turn_id);
-    let mode = codex_protocol::config_types::CollaborationMode {
-        mode: codex_protocol::config_types::ModeKind::Default,
-        settings: codex_protocol::config_types::Settings {
-            model: "test".to_string(),
-            reasoning_effort: None,
-            developer_instructions: None,
-        },
-    };
     for contributor in registry.turn_lifecycle_contributors() {
         contributor
-            .on_turn_start(TurnStartInput {
+            .refresh_catalog_for_step(codex_extension_api::CatalogRefreshInput {
                 turn_id,
-                collaboration_mode: &mode,
-                token_usage_at_turn_start: None,
                 session_store,
                 thread_store,
                 turn_store: &turn_store,
@@ -754,7 +743,7 @@ async fn executor_cloud_and_host_share_catalog_world_state_flow() -> TestResult 
         })
         .await;
     // Host rendering stays separate even when its identity matches a Cloud skill.
-    start_registered_turn(&registry, &session_store, &thread_store, "turn-1").await;
+    refresh_registered_catalogs_for_step(&registry, &session_store, &thread_store, "turn-1").await;
 
     let selected_roots = [SelectedCapabilityRoot {
         id: "skills".to_string(),
@@ -1920,7 +1909,7 @@ async fn default_context_truncates_catalog_descriptions() -> TestResult {
             thread_store: &thread_store,
         })
         .await;
-    start_registered_turn(&registry, &session_store, &thread_store, "turn-1").await;
+    refresh_registered_catalogs_for_step(&registry, &session_store, &thread_store, "turn-1").await;
 
     let (executor, cloud) =
         skill_world_state_fragments(&registry, &session_store, &thread_store, "turn-1").await?;
@@ -2086,7 +2075,13 @@ async fn catalog_rebalances_only_to_avoid_omissions_and_retains_the_allocation()
                 );
                 let turn_id = format!("turn-{step}");
                 let turn_store = ExtensionData::new(&turn_id);
-                start_registered_turn(&registry, &session_store, &thread_store, &turn_id).await;
+                refresh_registered_catalogs_for_step(
+                    &registry,
+                    &session_store,
+                    &thread_store,
+                    &turn_id,
+                )
+                .await;
                 let sections = prepared_world_state(
                     &registry,
                     if ready { &selected_roots } else { &[] },
@@ -2270,7 +2265,7 @@ async fn extreme_budget_pressure_removes_descriptions_before_omitting_entries() 
             thread_store: &thread_store,
         })
         .await;
-    start_registered_turn(&registry, &session_store, &thread_store, "turn-1").await;
+    refresh_registered_catalogs_for_step(&registry, &session_store, &thread_store, "turn-1").await;
 
     let (executor, cloud) =
         skill_world_state_fragments(&registry, &session_store, &thread_store, "turn-1").await?;
@@ -2383,7 +2378,7 @@ async fn skills_list_only_returns_model_visible_bounded_metadata() -> TestResult
             thread_store: &thread_store,
         })
         .await;
-    start_registered_turn(&registry, &session_store, &thread_store, "turn-1").await;
+    refresh_registered_catalogs_for_step(&registry, &session_store, &thread_store, "turn-1").await;
 
     let step_store = ExtensionData::new("step");
     prepared_world_state(
@@ -2601,14 +2596,18 @@ async fn skills_list_only_returns_model_visible_bounded_metadata() -> TestResult
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn cloud_discovery_is_gated_and_reports_failures() -> TestResult {
     for (cloud_skill_enabled, has_cloud_provider) in [(false, true), (true, true), (true, false)] {
         let list_calls = Arc::new(AtomicUsize::new(0));
         let mut providers = SkillProviders::new();
         if has_cloud_provider {
             providers = providers.with_cloud_provider(Arc::new(StaticSkillProvider {
-                catalog: SkillCatalog::default(),
+                catalog: SkillCatalog {
+                    is_partial: true,
+                    warnings: vec!["catalog diagnostic".to_string()],
+                    ..SkillCatalog::default()
+                },
                 read_requests: Arc::new(Mutex::new(Vec::new())),
                 list_calls: Some(Arc::clone(&list_calls)),
                 fail_first_list: true,
@@ -2640,30 +2639,8 @@ async fn cloud_discovery_is_gated_and_reports_failures() -> TestResult {
             })
             .await;
 
-        assert_eq!(
-            registry
-                .turn_lifecycle_contributors()
-                .iter()
-                .map(|contributor| contributor.turn_start_phase(&thread_store))
-                .collect::<Vec<_>>(),
-            vec![
-                codex_extension_api::TurnStartPhase::BeforeTaskRegistration,
-                if cloud_available {
-                    codex_extension_api::TurnStartPhase::RegularTaskStart
-                } else {
-                    codex_extension_api::TurnStartPhase::BeforeTaskRegistration
-                },
-            ]
-        );
-        assert_eq!(
-            registry
-                .turn_lifecycle_contributors()
-                .iter()
-                .map(|contributor| contributor.requires_mcp_runtime(&thread_store))
-                .collect::<Vec<_>>(),
-            vec![false, cloud_available]
-        );
-        start_registered_turn(&registry, &session_store, &thread_store, "turn-1").await;
+        refresh_registered_catalogs_for_step(&registry, &session_store, &thread_store, "turn-1")
+            .await;
         assert_eq!(
             list_calls.load(Ordering::Relaxed),
             usize::from(cloud_available)
@@ -2729,6 +2706,25 @@ async fn cloud_discovery_is_gated_and_reports_failures() -> TestResult {
         assert_eq!(warning.thread_id, thread_store.level_id());
         assert_eq!(warning.turn_id.as_deref(), Some("turn-1"));
         assert!(warning.message.contains("temporary cloud failure"));
+
+        tokio::time::advance(std::time::Duration::from_secs(30)).await;
+        refresh_registered_catalogs_for_step(&registry, &session_store, &thread_store, "turn-2")
+            .await;
+        refresh_registered_catalogs_for_step(&registry, &session_store, &thread_store, "turn-3")
+            .await;
+        assert_eq!(list_calls.load(Ordering::Relaxed), 2);
+        for contributor in registry.turn_lifecycle_contributors() {
+            contributor
+                .refresh_cloud_catalog(codex_extension_api::CloudCatalogRefreshInput {
+                    session_store: &session_store,
+                    thread_store: &thread_store,
+                })
+                .await
+                .map_err(|error| format!("partial catalogs should be accepted: {error}"))?;
+        }
+        refresh_registered_catalogs_for_step(&registry, &session_store, &thread_store, "turn-4")
+            .await;
+        assert_eq!(list_calls.load(Ordering::Relaxed), 3);
     }
     Ok(())
 }
@@ -3109,7 +3105,7 @@ async fn model_context_window_scales_executor_and_cloud_catalogs() -> TestResult
             thread_store: &thread_store,
         })
         .await;
-    start_registered_turn(&registry, &session_store, &thread_store, "turn-1").await;
+    refresh_registered_catalogs_for_step(&registry, &session_store, &thread_store, "turn-1").await;
     let mut model_info = model_info_from_slug("test-model");
     model_info.context_window = Some(10_000);
 
@@ -3747,7 +3743,7 @@ fn skills_extension_config(config: &TestConfig) -> SkillsExtensionConfig {
 }
 
 fn test_codex_home() -> PathBuf {
-    let id = NEXT_MIKODEX_HOME_ID.fetch_add(1, Ordering::Relaxed);
+    let id = NEXT_CODEX_HOME_ID.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
         "codex-skills-extension-test-{}-{id}",
         std::process::id(),
