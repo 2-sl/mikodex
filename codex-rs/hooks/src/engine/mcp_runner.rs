@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use anyhow::Context;
 use anyhow::Result;
+use codex_protocol::mcp::is_node_repl_backed_server;
 use codex_protocol::models::ContentItemMetadata;
 use regex::Regex;
 use serde_json::Map;
@@ -99,11 +100,18 @@ pub(crate) async fn run_mcp_tool(
     }
     .await;
 
-    let (exit_code, stdout, error, source_tool_namespace) = match result {
-        Ok(output) => (Some(0), output.text, None, output.source_tool_namespace),
-        Err(error) => (None, String::new(), Some(error.to_string()), None),
+    let (exit_code, stdout, error, source_tool_namespace, structured_content) = match result {
+        Ok(output) => (
+            Some(0),
+            output.text,
+            None,
+            output.source_tool_namespace,
+            output.structured_content,
+        ),
+        Err(error) => (None, String::new(), Some(error.to_string()), None, None),
     };
     HandlerRunResult {
+        structured_content,
         context_metadata: ContentItemMetadata::tool(source_tool_namespace.map(Into::into)),
         started_at,
         completed_at: chrono::Utc::now().timestamp(),
