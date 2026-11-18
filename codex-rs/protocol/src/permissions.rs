@@ -41,9 +41,16 @@ pub use local_aliases::LocalFileSystemPolicyMatcher;
 pub use windows_glob::WindowsDenyReadGlobScan;
 pub use windows_glob::windows_deny_read_glob_scan;
 
+/// Selects native execution projection or an unresolved, lossless transport template.
+#[derive(Clone, Copy)]
+pub(crate) enum LegacySandboxPolicyProjection<'a> {
+    Cwd(&'a Path),
+    Template,
+}
+
 const PROTECTED_METADATA_GIT_PATH_NAME: &str = ".git";
 const PROTECTED_METADATA_AGENTS_PATH_NAME: &str = ".agents";
-const PROTECTED_METADATA_CODEX_PATH_NAME: &str = ".mikodex";
+const PROTECTED_METADATA_CODEX_PATH_NAME: &str = ".codex";
 const PROTECTED_METADATA_AWS_PATH_NAME: &str = ".aws";
 
 /// Top-level workspace metadata paths that stay protected under writable roots.
@@ -807,6 +814,32 @@ impl FileSystemSandboxPolicy {
         exclude_tmpdir_env_var: bool,
         exclude_slash_tmp: bool,
     ) -> Self {
+        let mut policy = Self::workspace_write_template(
+            writable_roots,
+            exclude_tmpdir_env_var,
+            exclude_slash_tmp,
+        );
+        for writable_root in writable_roots {
+            for protected_path in default_read_only_subpaths_for_writable_root(
+                writable_root,
+                /*protect_missing_dot_codex*/ false,
+            ) {
+                append_default_read_only_path_if_no_explicit_rule(
+                    &mut policy.entries,
+                    protected_path,
+                );
+            }
+        }
+
+        policy
+    }
+
+    /// Builds an unresolved template; admission must bind native workspace metadata.
+    pub(crate) fn workspace_write_template(
+        writable_roots: &[AbsolutePathBuf],
+        exclude_tmpdir_env_var: bool,
+        exclude_slash_tmp: bool,
+    ) -> Self {
         let mut entries = vec![FileSystemSandboxEntry::new(
             FileSystemPath::Special {
                 value: FileSystemSpecialPath::Root,
@@ -845,18 +878,9 @@ impl FileSystemSandboxPolicy {
 
         append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".git");
         append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".agents");
-        append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".mikodex");
+        append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".codex");
         append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".aws");
-        for writable_root in writable_roots {
-            for protected_path in default_read_only_subpaths_for_writable_root(
-                writable_root,
-                /*protect_missing_dot_codex*/ false,
-            ) {
-                append_default_read_only_path_if_no_explicit_rule(&mut entries, protected_path);
-            }
-        }
-
-        FileSystemSandboxPolicy::restricted(entries)
+        Self::restricted(entries)
     }
 
     /// Converts a legacy sandbox policy into an equivalent filesystem policy
@@ -869,16 +893,7 @@ impl FileSystemSandboxPolicy {
     pub fn from_legacy_sandbox_policy_for_cwd(sandbox_policy: &SandboxPolicy, cwd: &Path) -> Self {
         let mut file_system_policy = Self::from(sandbox_policy);
         if let SandboxPolicy::WorkspaceWrite { writable_roots, .. } = sandbox_policy {
-            if let Ok(cwd_root) = AbsolutePathBuf::from_absolute_path(cwd) {
-                for protected_path in default_read_only_subpaths_for_writable_root(
-                    &cwd_root, /*protect_missing_dot_codex*/ true,
-                ) {
-                    append_default_read_only_path_if_no_explicit_rule(
-                        &mut file_system_policy.entries,
-                        protected_path,
-                    );
-                }
-            }
+            file_system_policy = file_system_policy.with_workspace_write_cwd(cwd);
             for writable_root in writable_roots {
                 for protected_path in default_read_only_subpaths_for_writable_root(
                     writable_root,
@@ -893,6 +908,21 @@ impl FileSystemSandboxPolicy {
         }
 
         file_system_policy
+    }
+
+    /// Binds the default workspace metadata protections for a native working directory.
+    pub fn with_workspace_write_cwd(mut self, cwd: &Path) -> Self {
+        if let Ok(cwd_root) = AbsolutePathBuf::from_absolute_path(cwd) {
+            for protected_path in default_read_only_subpaths_for_writable_root(
+                &cwd_root, /*protect_missing_dot_codex*/ true,
+            ) {
+                append_default_read_only_path_if_no_explicit_rule(
+                    &mut self.entries,
+                    protected_path,
+                );
+            }
+        }
+        self
     }
 
     /// Returns true when filesystem reads are unrestricted on this host.
@@ -1316,19 +1346,6 @@ impl FileSystemSandboxPolicy {
         Some(self)
     }
 
-    /// Preserves symbolic `:workspace_roots` entries while also adding concrete
-    /// entries for each provided workspace root.
-    pub fn with_materialized_project_roots_for_workspace_roots(
-        self,
-        workspace_roots: &[AbsolutePathBuf],
-    ) -> Self {
-        let roots = workspace_roots
-            .iter()
-            .map(PathUri::from_abs_path)
-            .collect::<Vec<_>>();
-        self.with_materialized_project_roots_for_path_uris(&roots)
-    }
-
     pub fn with_additional_readable_roots(
         mut self,
         cwd: &Path,
@@ -1366,44 +1383,6 @@ impl FileSystemSandboxPolicy {
                 path.clone().into(),
                 FileSystemAccessMode::Write,
             ));
-        }
-
-        self
-    }
-
-    /// Add roots using legacy `WorkspaceWrite` behavior.
-    ///
-    /// Unlike [`Self::with_additional_writable_roots`], this mirrors legacy
-    /// writable-roots semantics by adding exact roots even when they are
-    /// already writable through `:workspace_roots`, and by adding the default
-    /// read-only protected subpaths for each new root.
-    pub fn with_additional_legacy_workspace_writable_roots(
-        mut self,
-        additional_writable_roots: &[AbsolutePathBuf],
-    ) -> Self {
-        if !matches!(self.kind, FileSystemSandboxKind::Restricted) {
-            return self;
-        }
-
-        for path in additional_writable_roots {
-            if !self.entries.iter().any(|entry| {
-                entry.access.can_write()
-                    && matches!(&entry.path, FileSystemPath::Path { path: existing } if existing == &PathUri::from_abs_path(path))
-            }) {
-                self.entries.push(FileSystemSandboxEntry::new(
-                    path.clone().into(),
-                    FileSystemAccessMode::Write,
-                ));
-            }
-
-            for protected_path in default_read_only_subpaths_for_writable_root(
-                path, /*protect_missing_dot_codex*/ false,
-            ) {
-                append_default_read_only_path_if_no_explicit_rule(
-                    &mut self.entries,
-                    protected_path,
-                );
-            }
         }
 
         self
@@ -1720,8 +1699,8 @@ impl FileSystemSandboxPolicy {
             // as separate WritableRoot values and are checked independently.
             // Preserve symlink path components that live under the writable root
             // so downstream sandboxes can still mask the symlink inode itself.
-            // Example: if `<root>/.mikodex -> <root>/decoy`, bwrap must still see
-            // `<root>/.mikodex`, not only the resolved `<root>/decoy`.
+            // Example: if `<root>/.codex -> <root>/decoy`, bwrap must still see
+            // `<root>/.codex`, not only the resolved `<root>/decoy`.
             read_only_subpaths.extend(
                 prepared_entries
                     .iter()
@@ -1777,7 +1756,7 @@ impl FileSystemSandboxPolicy {
                 protected_metadata_names,
                 root,
                 // Preserve literal in-root protected paths like `.git` and
-                // `.mikodex` so downstream sandboxes can still detect and mask
+                // `.codex` so downstream sandboxes can still detect and mask
                 // the symlink itself instead of only its resolved target.
                 read_only_subpaths: dedup_absolute_paths(
                     read_only_subpaths,
@@ -1901,6 +1880,17 @@ impl FileSystemSandboxPolicy {
         network_policy: NetworkSandboxPolicy,
         cwd: &Path,
     ) -> io::Result<SandboxPolicy> {
+        self.to_legacy_sandbox_policy_with_projection(
+            network_policy,
+            LegacySandboxPolicyProjection::Cwd(cwd),
+        )
+    }
+
+    pub(crate) fn to_legacy_sandbox_policy_with_projection(
+        &self,
+        network_policy: NetworkSandboxPolicy,
+        projection: LegacySandboxPolicyProjection<'_>,
+    ) -> io::Result<SandboxPolicy> {
         Ok(match self.kind {
             FileSystemSandboxKind::ExternalSandbox => SandboxPolicy::ExternalSandbox {
                 network_access: if network_policy.is_enabled() {
@@ -1919,7 +1909,12 @@ impl FileSystemSandboxPolicy {
                 }
             }
             FileSystemSandboxKind::Restricted => {
-                let cwd_absolute = AbsolutePathBuf::from_absolute_path(cwd).ok();
+                let cwd = match projection {
+                    LegacySandboxPolicyProjection::Cwd(cwd) => Some(cwd),
+                    LegacySandboxPolicyProjection::Template => None,
+                };
+                let cwd_absolute =
+                    cwd.and_then(|cwd| AbsolutePathBuf::from_absolute_path(cwd).ok());
                 let has_full_disk_write_access = self.has_full_disk_write_access();
                 let mut workspace_root_writable = false;
                 let mut writable_roots = Vec::new();
@@ -1977,15 +1972,18 @@ impl FileSystemSandboxPolicy {
 
                 if workspace_root_writable {
                     SandboxPolicy::WorkspaceWrite {
-                        writable_roots: dedup_absolute_paths(
-                            writable_roots,
-                            /*normalize_effective_paths*/ false,
-                        ),
+                        writable_roots: match projection {
+                            LegacySandboxPolicyProjection::Cwd(_) => dedup_absolute_paths(
+                                writable_roots,
+                                /*normalize_effective_paths*/ false,
+                            ),
+                            LegacySandboxPolicyProjection::Template => writable_roots,
+                        },
                         network_access: network_policy.is_enabled(),
                         exclude_tmpdir_env_var: !tmpdir_writable,
                         exclude_slash_tmp: !slash_tmp_writable,
                     }
-                } else if self.has_legacy_write_intent(cwd) {
+                } else if cwd.is_some_and(|cwd| self.has_legacy_write_intent(cwd)) {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
                         "permissions profile requests filesystem writes outside the workspace root, which is not supported until the runtime enforces FileSystemSandboxPolicy directly",

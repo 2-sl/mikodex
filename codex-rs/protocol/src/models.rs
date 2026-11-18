@@ -19,6 +19,7 @@ use crate::permissions::FileSystemSandboxEntry;
 use crate::permissions::FileSystemSandboxKind;
 use crate::permissions::FileSystemSandboxPolicy;
 use crate::permissions::FileSystemSpecialPath;
+use crate::permissions::LegacySandboxPolicyProjection;
 use crate::permissions::NetworkSandboxPolicy;
 use crate::permissions::RawFileSystemSandboxEntry;
 use crate::protocol::SandboxPolicy;
@@ -28,6 +29,7 @@ use schemars::JsonSchema;
 
 use crate::ResponseItemId;
 use crate::mcp::CallToolResult;
+use crate::response_item_id::OptionalWireItemId;
 use codex_utils_path_uri::PathUri;
 
 mod configuration_update;
@@ -648,12 +650,30 @@ impl PermissionProfile {
         }
     }
 
-    pub fn from_legacy_sandbox_policy(sandbox_policy: &SandboxPolicy) -> Self {
-        Self::from_runtime_permissions_with_enforcement(
-            SandboxEnforcement::from_legacy_sandbox_policy(sandbox_policy),
-            &FileSystemSandboxPolicy::from(sandbox_policy),
-            NetworkSandboxPolicy::from(sandbox_policy),
-        )
+    /// Decodes a portable legacy template without probing workspace metadata.
+    pub fn from_legacy_sandbox_policy_template(sandbox_policy: &SandboxPolicy) -> Self {
+        if let SandboxPolicy::WorkspaceWrite {
+            writable_roots,
+            exclude_tmpdir_env_var,
+            exclude_slash_tmp,
+            ..
+        } = sandbox_policy
+        {
+            Self::from_runtime_permissions(
+                &FileSystemSandboxPolicy::workspace_write_template(
+                    writable_roots,
+                    *exclude_tmpdir_env_var,
+                    *exclude_slash_tmp,
+                ),
+                NetworkSandboxPolicy::from(sandbox_policy),
+            )
+        } else {
+            Self::from_runtime_permissions_with_enforcement(
+                SandboxEnforcement::from_legacy_sandbox_policy(sandbox_policy),
+                &FileSystemSandboxPolicy::from(sandbox_policy),
+                NetworkSandboxPolicy::from(sandbox_policy),
+            )
+        }
     }
 
     pub fn from_legacy_sandbox_policy_for_cwd(sandbox_policy: &SandboxPolicy, cwd: &Path) -> Self {
@@ -728,6 +748,23 @@ impl PermissionProfile {
                 },
             }),
         }
+    }
+
+    /// Encodes an unresolved template without collapsing fixed roots into cwd access.
+    pub fn to_legacy_sandbox_policy_template(&self) -> io::Result<SandboxPolicy> {
+        let policy = self
+            .file_system_sandbox_policy()
+            .to_legacy_sandbox_policy_with_projection(
+                self.network_sandbox_policy(),
+                LegacySandboxPolicyProjection::Template,
+            )?;
+        if Self::from_legacy_sandbox_policy_template(&policy) != *self {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "permission profile cannot be represented by a legacy sandbox template",
+            ));
+        }
+        Ok(policy)
     }
 
     pub fn to_runtime_permissions(&self) -> (FileSystemSandboxPolicy, NetworkSandboxPolicy) {
@@ -1091,7 +1128,8 @@ impl InternalChatMessageMetadataPassthrough {
 pub enum ResponseItem {
     AdditionalTools {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         role: String,
         #[ts(type = "unknown[]")]
@@ -1106,7 +1144,8 @@ pub enum ResponseItem {
         #[ts(optional)]
         status: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         role: String,
         content: Vec<ContentItem>,
@@ -1122,7 +1161,8 @@ pub enum ResponseItem {
     },
     AgentMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         author: String,
         recipient: String,
@@ -1133,7 +1173,8 @@ pub enum ResponseItem {
     },
     Reasoning {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         summary: Vec<ReasoningItemReasoningSummary>,
         #[serde(default, skip_serializing_if = "should_serialize_reasoning_content")]
@@ -1150,7 +1191,8 @@ pub enum ResponseItem {
         encrypted_content: Option<String>,
         /// Legacy id field retained for compatibility with older payloads.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         /// Set when using the Responses API.
         call_id: Option<String>,
@@ -1168,7 +1210,8 @@ pub enum ResponseItem {
         #[ts(optional)]
         status: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1191,7 +1234,8 @@ pub enum ResponseItem {
         #[ts(optional)]
         encrypted_content: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         call_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1211,7 +1255,8 @@ pub enum ResponseItem {
     // We keep this behavior centralized in `FunctionCallOutputPayload`.
     FunctionCallOutput {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -1234,7 +1279,8 @@ pub enum ResponseItem {
         #[ts(optional)]
         encrypted_content: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -1255,7 +1301,8 @@ pub enum ResponseItem {
     // text or structured content items.
     CustomToolCallOutput {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         call_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1270,7 +1317,8 @@ pub enum ResponseItem {
     },
     ToolSearchOutput {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         call_id: Option<String>,
         status: String,
@@ -1294,7 +1342,8 @@ pub enum ResponseItem {
         #[ts(optional)]
         encrypted_content: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -1320,7 +1369,8 @@ pub enum ResponseItem {
         #[ts(optional)]
         encrypted_content: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         status: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1334,7 +1384,8 @@ pub enum ResponseItem {
     #[serde(alias = "compaction_summary")]
     Compaction {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         encrypted_content: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1349,7 +1400,8 @@ pub enum ResponseItem {
     CompactionTrigger {},
     ContextCompaction {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[serde(with = "OptionalWireItemId")]
+        #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -2324,6 +2376,14 @@ impl Default for FunctionCallOutputBody {
 }
 
 impl FunctionCallOutputPayload {
+    pub fn contains_audio(&self) -> bool {
+        self.content_items().is_some_and(|parts| {
+            parts
+                .iter()
+                .any(|part| matches!(part, FunctionCallOutputContentItem::InputAudio { .. }))
+        })
+    }
+
     pub fn from_text(content: String) -> Self {
         Self {
             body: FunctionCallOutputBody::Text(content),
@@ -2919,24 +2979,26 @@ mod tests {
     }
 
     #[test]
-    fn permission_profile_presets_match_legacy_defaults() {
+    fn permission_profile_presets_match_legacy_defaults() -> Result<()> {
+        let cwd = tempdir()?;
         assert_eq!(
-            PermissionProfile::read_only(),
-            PermissionProfile::from_legacy_sandbox_policy(&SandboxPolicy::new_read_only_policy())
+            PermissionProfile::read_only().to_legacy_sandbox_policy(cwd.path())?,
+            SandboxPolicy::new_read_only_policy()
         );
         assert_eq!(
-            PermissionProfile::workspace_write(),
-            PermissionProfile::from_legacy_sandbox_policy(
-                &SandboxPolicy::new_workspace_write_policy()
-            )
+            PermissionProfile::workspace_write().to_legacy_sandbox_policy(cwd.path())?,
+            SandboxPolicy::new_workspace_write_policy()
         );
+        Ok(())
     }
 
     #[test]
     fn permission_profile_round_trip_preserves_disabled_sandbox() -> Result<()> {
         let cwd = tempdir()?;
-        let permission_profile =
-            PermissionProfile::from_legacy_sandbox_policy(&SandboxPolicy::DangerFullAccess);
+        let permission_profile = PermissionProfile::from_legacy_sandbox_policy_for_cwd(
+            &SandboxPolicy::DangerFullAccess,
+            cwd.path(),
+        );
 
         assert_eq!(permission_profile, PermissionProfile::Disabled);
         assert_eq!(
@@ -3018,7 +3080,8 @@ mod tests {
         let sandbox_policy = SandboxPolicy::ExternalSandbox {
             network_access: crate::protocol::NetworkAccess::Restricted,
         };
-        let permission_profile = PermissionProfile::from_legacy_sandbox_policy(&sandbox_policy);
+        let permission_profile =
+            PermissionProfile::from_legacy_sandbox_policy_for_cwd(&sandbox_policy, cwd.path());
 
         assert_eq!(
             permission_profile,
@@ -3922,9 +3985,9 @@ mod tests {
             let parsed: ResponseItem = serde_json::from_str(json_literal)?;
             let expected = ResponseItem::WebSearchCall {
                 encrypted_content: None,
-                id: expected_id.clone(),
-                status: expected_status.clone(),
-                action: expected_action.clone(),
+                id: expected_id,
+                status: expected_status,
+                action: expected_action,
                 internal_chat_message_metadata_passthrough: None,
             };
             assert_eq!(parsed, expected);
