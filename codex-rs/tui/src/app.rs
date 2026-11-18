@@ -908,6 +908,9 @@ impl App {
             }
             _ => self.sidebar_press = None,
         }
+        self.transcript_view.agent_links = self
+            .side_retention_enabled(tui)
+            .then(|| app_server.backend_id());
         self.transcript_view.document_links = self.document_preview_available(tui, app_server);
         crate::markdown_render::preferences::set_document_links(
             self.transcript_view.document_links,
@@ -1177,12 +1180,23 @@ impl App {
                 && painted.passive.union(painted.focused) == Rect::from(size)
             {
                 let painted_area = painted.passive;
-                if let Some(url) = self.transcript_link_at(*press) {
+                if let Some(link) = self.transcript_link_at(*press) {
+                    use crate::terminal_hyperlinks::ReaderLink;
                     if press.modifiers.is_empty() {
                         self.passive_link_drag = Some((current.passive_thread, painted.passive));
                         self.handle_passive_transcript_event(tui, current.passive_thread, &event);
                     } else {
-                        self.open_url_in_browser(url);
+                        match link {
+                            ReaderLink::Agent(agent) => {
+                                self.app_event_tx.send(AppEvent::OpenSidebarAgent {
+                                    backend: app_server.backend_id(),
+                                    source: current.passive_thread,
+                                    agent,
+                                });
+                            }
+                            ReaderLink::External(url) => self.open_url_in_browser(url),
+                            ReaderLink::Document(link) => self.open_url_in_browser(link.path),
+                        }
                     }
                     return Ok(AppRunControl::Continue);
                 }
@@ -1353,7 +1367,20 @@ impl App {
         } else {
             match event {
                 TuiEvent::Key(key_event) => {
+                    let overview_id = agents_overview::AGENTS_OVERVIEW_VIEW_ID;
+                    let overview_was_open = self
+                        .chat_widget
+                        .selected_index_for_present_view(overview_id)
+                        .is_some();
                     self.handle_key_event(tui, app_server, key_event).await;
+                    if overview_was_open
+                        && self
+                            .chat_widget
+                            .selected_index_for_present_view(overview_id)
+                            .is_none()
+                    {
+                        self.cancel_cloud_inventory_refresh(app_server).await;
+                    }
                 }
                 TuiEvent::Paste(pasted) => {
                     // Pasted text may contain CRLF pairs or bare CRs (e.g., from iTerm2),
@@ -1482,7 +1509,7 @@ impl App {
     pub(super) fn show_shutdown_feedback(&mut self, tui: &mut tui::Tui) -> Result<()> {
         self.disable_ambient_pet_before_shutdown(tui)?;
         self.chat_widget.show_shutdown_in_progress();
-        let screen_size = tui.terminal.last_known_screen_size;
+        let screen_size = tui.prepare_draw_size()?;
         self.handle_draw_pre_render(tui, screen_size)?;
         self.chat_widget.pre_draw_tick();
         self.render_chat_widget_frame(tui, screen_size)?;
