@@ -12,14 +12,18 @@ use codex_protocol::protocol::RealtimeVoicesList;
 use codex_realtime_webrtc::AudioDeviceKind;
 use uuid::Uuid;
 
-/// Display the saved preference without guessing a provider-specific default.
-fn configured_voice(config: &codex_app_server_protocol::Config) -> Result<Option<RealtimeVoice>> {
+/// Unknown voices belong to newer servers; omit the override instead of blocking audio.
+/// An unset preference explicitly selects the V1/V3 server default, not a stale thread preference.
+fn configured_voice(
+    config: &codex_app_server_protocol::Config,
+    default_voice: RealtimeVoice,
+) -> Result<Option<RealtimeVoice>> {
     let value = config
         .additional
         .get("realtime")
         .and_then(|realtime| realtime.get("voice"));
     match value {
-        None | Some(serde_json::Value::Null) => Ok(None),
+        None | Some(serde_json::Value::Null) => Ok(Some(default_voice)),
         Some(value @ serde_json::Value::String(_)) => {
             Ok(serde_json::from_value(value.clone()).ok())
         }
@@ -176,6 +180,7 @@ impl App {
     }
 
     pub(super) async fn realtime_voices(
+        &self,
         app_server: &AppServerSession,
     ) -> Result<RealtimeVoicesList> {
         let response = app_server
@@ -191,24 +196,25 @@ impl App {
     }
 
     pub(super) async fn effective_realtime_voice(
+        &self,
         app_server: &AppServerSession,
-        cwd: &std::path::Path,
+        voices: &RealtimeVoicesList,
     ) -> Result<Option<RealtimeVoice>> {
         // Session setup installs the active conversation cwd for both server modes.
         let config = crate::config_update::read_effective_config_if_supported(
             app_server.request_handle(),
-            cwd,
+            &self.chat_widget.config_ref().cwd,
         )
         .await?;
         config
             .as_ref()
-            .map(|config| configured_voice(&config.config))
+            .map(|config| configured_voice(&config.config, voices.default_v1))
             .transpose()
             .map(Option::flatten)
     }
 
     pub(super) async fn open_realtime_voices(&mut self, app_server: &AppServerSession) {
-        let voices = match Self::realtime_voices(app_server).await {
+        let voices = match self.realtime_voices(app_server).await {
             Ok(voices) => voices,
             Err(error) => {
                 self.chat_widget
@@ -216,7 +222,7 @@ impl App {
                 return;
             }
         };
-        match Self::effective_realtime_voice(app_server, &self.chat_widget.config_ref().cwd).await {
+        match self.effective_realtime_voice(app_server, &voices).await {
             Ok(voice) => self.chat_widget.open_realtime_voices(voice, voices),
             Err(error) => self
                 .chat_widget
@@ -239,10 +245,19 @@ impl App {
         .await
         {
             Ok(response) => {
+                let voices = match self.realtime_voices(app_server).await {
+                    Ok(voices) => voices,
+                    Err(error) => {
+                        self.chat_widget.add_error_message(format!(
+                            "Voice preference was saved, but the effective voice could not be confirmed: {error}"
+                        ));
+                        return;
+                    }
+                };
                 let effective = crate::config_update::read_effective_config_if_supported(
                     app_server.request_handle(), &self.chat_widget.config_ref().cwd,
                 ).await.and_then(|config| match config.as_ref() {
-                    Some(config) => configured_voice(&config.config),
+                    Some(config) => configured_voice(&config.config, voices.default_v1),
                     None if response.status == codex_app_server_protocol::WriteStatus::OkOverridden => Err(color_eyre::eyre::eyre!("the saved voice is overridden, but this server cannot read effective settings")),
                     None => Ok(Some(voice)),
                 });

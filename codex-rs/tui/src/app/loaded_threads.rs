@@ -112,7 +112,7 @@ fn thread_spawn_agent_path(source: &SessionSource) -> Option<String> {
     }
 }
 
-pub(super) fn thread_spawn_parent_thread_id(source: &SessionSource) -> Option<ThreadId> {
+fn thread_spawn_parent_thread_id(source: &SessionSource) -> Option<ThreadId> {
     match source {
         SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
             parent_thread_id, ..

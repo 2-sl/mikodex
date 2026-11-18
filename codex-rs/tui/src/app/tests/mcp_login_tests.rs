@@ -16,7 +16,6 @@ async fn overlapping_mcp_login_preserves_first_start() {
     app.pending_mcp_login_start = Some(PendingMcpLoginStart {
         request_id: "first".into(),
         name: "enterprise".into(),
-        environment_id: None,
         thread_id,
         completions: Vec::new(),
     });
@@ -25,7 +24,6 @@ async fn overlapping_mcp_login_preserves_first_start() {
         &mut server,
         AppEvent::StartMcpLogin {
             name: "typo".into(),
-            environment_id: None,
             thread_id,
         },
     )
@@ -70,27 +68,17 @@ async fn mcp_login_retry_suppresses_old_completion_and_late_browser_open() {
     let thread_id = ThreadId::new();
     app.primary_thread_id = Some(thread_id);
     app.active_thread_id = Some(thread_id);
-    app.active_mcp_login_ids = HashMap::from([
-        ("old".into(), ("enterprise".into(), Some("env-a".into()))),
-        (
-            "early-peer".into(),
-            ("enterprise".into(), Some("env-b".into())),
-        ),
-        (
-            "late-peer".into(),
-            ("enterprise".into(), Some("env-c".into())),
-        ),
-        ("other-login".into(), ("other".into(), None)),
-    ]);
+    app.active_mcp_login_ids
+        .insert("enterprise".into(), "old".into());
+    app.active_mcp_login_ids
+        .insert("other".into(), "other-login".into());
     app.pending_mcp_login_start = Some(PendingMcpLoginStart {
         request_id: "retry".into(),
         name: "enterprise".into(),
-        environment_id: Some("env-a".into()),
         thread_id,
         completions: Vec::new(),
     });
-    // A same-named environment's completion is buffered alongside the retry's completion.
-    for (login_id, success) in [("old", false), ("new", true), ("early-peer", true)] {
+    for (login_id, success) in [("old", false), ("new", true)] {
         app.handle_app_server_event(
             &server,
             codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
@@ -126,14 +114,14 @@ async fn mcp_login_retry_suppresses_old_completion_and_late_browser_open() {
         .lock()
         .await
         .snapshot();
-    assert_eq!(snapshot.events.len(), 2);
+    assert_eq!(snapshot.events.len(), 1);
     for event in snapshot.events {
         app.handle_thread_event_replay(event);
-        assert_eq!(
-            next_history_message(&mut events),
-            "• Signed in to enterprise."
-        );
     }
+    assert_eq!(
+        next_history_message(&mut events),
+        "• Signed in to enterprise."
+    );
     assert!(events.try_recv().is_err());
     // A cancellation delivered after the replacement response is stale as well.
     app.handle_app_server_event(
@@ -159,39 +147,32 @@ async fn mcp_login_retry_suppresses_old_completion_and_late_browser_open() {
             .snapshot()
             .events
             .len(),
-        2
+        1
     );
-    // Both differently named servers and same-named environments retain later completions.
-    for (name, login_id, expected_events) in
-        [("other", "other-login", 3), ("enterprise", "late-peer", 4)]
-    {
-        app.handle_app_server_event(
-            &server,
-            codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
-                ServerNotification::McpServerOauthLoginCompleted(
-                    McpServerOauthLoginCompletedNotification {
-                        name: name.into(),
-                        thread_id: Some(thread_id.to_string()),
-                        login_id: Some(login_id.into()),
-                        success: true,
-                        error: None,
-                    },
-                ),
-            )),
-        )
-        .await;
-        let snapshot = app.thread_event_channels[&thread_id]
-            .store
-            .lock()
-            .await
-            .snapshot();
-        assert_eq!(snapshot.events.len(), expected_events);
-        app.handle_thread_event_replay(snapshot.events.last().unwrap().clone());
-        assert_eq!(
-            next_history_message(&mut events),
-            format!("• Signed in to {name}.")
-        );
-    }
+    // Retrying one server must not discard a different server's outstanding OAuth result.
+    app.handle_app_server_event(
+        &server,
+        codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
+            ServerNotification::McpServerOauthLoginCompleted(
+                McpServerOauthLoginCompletedNotification {
+                    name: "other".into(),
+                    thread_id: Some(thread_id.to_string()),
+                    login_id: Some("other-login".into()),
+                    success: true,
+                    error: None,
+                },
+            ),
+        )),
+    )
+    .await;
+    let snapshot = app.thread_event_channels[&thread_id]
+        .store
+        .lock()
+        .await
+        .snapshot();
+    assert_eq!(snapshot.events.len(), 2);
+    app.handle_thread_event_replay(snapshot.events.last().unwrap().clone());
+    assert!(next_history_message(&mut events).contains("Signed in to other."));
     server.shutdown().await.unwrap();
 }
 
@@ -207,7 +188,7 @@ async fn mcp_login_results_survive_thread_switch_and_session_refresh() {
         app.primary_thread_id = Some(origin);
         app.active_thread_id = Some(ThreadId::new());
         app.active_mcp_login_ids
-            .insert("login".into(), ("enterprise".into(), None));
+            .insert("enterprise".into(), "login".into());
         app.handle_app_server_event(
             &server,
             codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
@@ -254,11 +235,10 @@ async fn rejected_mcp_login_retry_preserves_previous_result() {
     app.primary_thread_id = Some(thread_id);
     app.active_thread_id = Some(thread_id);
     app.active_mcp_login_ids
-        .insert("old".into(), ("enterprise".into(), None));
+        .insert("enterprise".into(), "old".into());
     app.pending_mcp_login_start = Some(PendingMcpLoginStart {
         request_id: "typo".into(),
         name: "typo".into(),
-        environment_id: None,
         thread_id,
         completions: Vec::new(),
     });

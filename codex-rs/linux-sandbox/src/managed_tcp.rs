@@ -37,30 +37,12 @@ fn relay(
     Version::V5.write_to(&mut client)?;
     AuthResponse::new(AuthMethod::Noauth).write_to(&mut client)?;
 
-    pub(super) fn serve(mut self) -> io::Result<()> {
-        let names = Arc::new(Mutex::new(Names::default()));
-        crate::managed_tcp_dns::serve(Arc::clone(&names), self.dns_udp, self.dns_tcp)?;
-        let (started, readiness) = std::sync::mpsc::sync_channel(1);
-        thread::Builder::new().spawn(move || {
-            // Relay exit triggers workload cleanup in the PID namespace or its supervisor.
-            if let Ok(Err(error)) =
-                std::panic::catch_unwind(|| stack::run(self.tun, self.proxy, names, started))
-            {
-                eprintln!("transparent TCP stack exited: {error}");
-            }
-            std::process::exit(1);
-        })?;
-
-        // The workload is blocked on the pipe. Complete a native handshake through
-        // the TUN and check that its socket identity is visible before releasing it.
-        // This reserved address is never issued by DNS or forwarded upstream.
-        let probe_target = SocketAddr::from(([198, 18, 0, 0], 9));
-        let probe = TcpStream::connect_timeout(&probe_target, TIMEOUT)?;
-        let source = readiness
-            .recv_timeout(TIMEOUT)
-            .map_err(io::Error::other)??;
-        if source != probe.local_addr()? {
-            return Err(io::Error::other("unexpected readiness source"));
+    let upstream = match connect(&mut client, proxy, names) {
+        Ok(stream) => stream,
+        Err(err) => {
+            let denied = CommandResponse::reply_error(CommandReply::ConnectionNotAllowedByRuleset);
+            let _ = write_frame(&mut client, &denied);
+            return Err(err);
         }
     };
     write_frame(&mut client, &CommandResponse::success(Address::default()))?;

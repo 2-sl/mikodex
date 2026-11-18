@@ -4,8 +4,8 @@ use codex_app_server_protocol::ByteRange;
 use codex_app_server_protocol::TextElement;
 use codex_app_server_protocol::UserInput;
 
-// Context precedes this delimiter so transcript rendering across Codex surfaces can show the user's request.
-const PROMPT_REQUEST_BEGIN: &str = "## My request for Codex:";
+// Context precedes this delimiter so transcript rendering across Mikodex surfaces can show the user's request.
+const PROMPT_REQUEST_BEGIN: &str = "## My request for Mikodex:";
 
 pub(crate) fn apply_prompt_context_to_user_input(context_text: &str, items: &mut Vec<UserInput>) {
     let prefix = format!("{context_text}\n{PROMPT_REQUEST_BEGIN}\n");

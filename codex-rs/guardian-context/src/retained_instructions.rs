@@ -20,6 +20,7 @@ use codex_history::RetainedContextEntry;
 use codex_history::RetainedContextOrder;
 use codex_history::RetainedUserMessage;
 use codex_protocol::models::ContentItem;
+use codex_protocol::protocol::TruncationPolicy;
 
 use crate::ContextSection;
 use crate::GuardianRootMessage;
@@ -90,11 +91,12 @@ pub(crate) fn source_order_labels(
         })
 }
 
-/// Collects originals even when transcript selection also includes their source messages.
+/// Renders bounded originals even when transcript selection also includes their source messages.
 /// Presence in parent history alone cannot prove complete delivery to a reviewer.
 fn render_retained_instructions(
     context: &RetainedContext,
     render_assistant: impl Fn(&RetainedUserMessage) -> Option<GuardianRootMessage>,
+    target: crate::ContextTarget,
 ) -> Vec<RetainedInstructionItem> {
     // Legacy positional labels can shift after eviction. Keep resending their full
     // section instead of treating a previously delivered label as stable evidence.
@@ -113,6 +115,11 @@ fn render_retained_instructions(
                 }
                 if let Some(text) = render_assistant(message)
                     .map(|message| format!("Retained source order: {order}\n{}", message.render()))
+                    .filter(|text| {
+                        target == crate::ContextTarget::Sync
+                            || text.len()
+                                <= TruncationPolicy::Tokens(MAX_INSTRUCTION_TOKENS).byte_budget()
+                    })
                 {
                     fragments.push(RetainedInstructionItem {
                         original_assistant_bytes: GuardianRootMessage::Assistant(
@@ -134,7 +141,10 @@ fn render_retained_instructions(
             "Retained source order: {order}\n{}",
             GuardianRootMessage::User(message.text.clone()).render()
         );
-        if message.complete {
+        if message.complete
+            && (target == crate::ContextTarget::Sync
+                || text.len() <= TruncationPolicy::Tokens(MAX_INSTRUCTION_TOKENS).byte_budget())
+        {
             fragments.push(RetainedInstructionItem {
                 original_assistant_bytes: 0,
                 content: text,
@@ -189,9 +199,14 @@ impl SectionContributor for RetainedUserInstructionsSection {
         let Some(context) = input.history.retained_context() else {
             return Ok(None);
         };
-        let rendered = render_retained_instructions(context, |message| {
-            input.history.render_original_assistant(message)
-        });
+        let rendered = render_retained_instructions(
+            context,
+            |message| match input.target {
+                crate::ContextTarget::Sync => input.history.render_original_assistant(message),
+                crate::ContextTarget::Async => input.history.render_retained_assistant(message),
+            },
+            input.target,
+        );
         if rendered.is_empty() {
             // Preserve known-empty availability for history-based recovery below.
             // Empty delivery emits no message unless an earlier omission needs clearing.
@@ -232,7 +247,6 @@ impl ComposedContext {
                 .cloned()
                 .collect(),
             truncations: Vec::new(),
-            enclosing_call: None,
         }
     }
 

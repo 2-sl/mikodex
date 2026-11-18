@@ -17,7 +17,6 @@ use codex_protocol::models::FileSystemPermissions;
 use codex_protocol::models::PermissionProfile;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxManager;
-use codex_sandboxing::SandboxNetwork;
 use codex_sandboxing::SandboxSelection;
 use codex_sandboxing::SandboxTransformRequest;
 use codex_sandboxing::SandboxType;
@@ -88,7 +87,7 @@ impl ShellSnapshotSandbox {
             sandbox_exe: attempt.sandbox_exe.cloned(),
             use_legacy_landlock: attempt.use_legacy_landlock,
             windows_sandbox_level: attempt.windows_sandbox_level,
-            network: network.cloned(),
+            network: attempt.network_proxy(network).cloned(),
             environment_id: environment_id.to_string(),
             additional_permissions: additional_permissions.cloned(),
             network_denial_cancellation_token: attempt.network_denial_cancellation_token.clone(),
@@ -167,20 +166,18 @@ impl ShellSnapshotSandbox {
                 },
                 permissions: &self.permissions,
                 workspace_roots: None,
-                runtime_readable_paths: None,
+                runtime_readable_paths: &[],
                 selection: SandboxSelection::Explicit(self.sandbox),
-                network: SandboxNetwork::new(
-                    self.enforce_managed_network,
-                    self.network.as_ref(),
-                    Some(&self.environment_id),
-                ),
+                enforce_managed_network: self.enforce_managed_network,
+                environment_id: Some(&self.environment_id),
+                network: self.network.as_ref(),
                 sandbox_policy_cwd: &self.sandbox_policy_cwd,
                 sandbox_exe: self.sandbox_exe.as_deref(),
                 use_legacy_landlock: self.use_legacy_landlock,
                 windows_sandbox_level: self.windows_sandbox_level,
             })
             .context("failed to prepare shell snapshot sandbox")?
-            .into_command_request()?;
+            .into_command_request();
         let workspace_roots = self
             .workspace_roots
             .iter()

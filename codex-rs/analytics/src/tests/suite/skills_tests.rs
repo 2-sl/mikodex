@@ -39,7 +39,7 @@ fn normalize_path_for_skill_id_repo_scoped_uses_relative_path() {
 
 #[test]
 fn normalize_path_for_skill_id_user_scoped_uses_absolute_path() {
-    let skill_path = std::env::temp_dir().join("Users/abc/.codex/skills/doc/SKILL.md");
+    let skill_path = std::env::temp_dir().join("Users/abc/.mikodex/skills/doc/SKILL.md");
 
     let path = normalize_path_for_skill_id(
         /*repo_url*/ None,
@@ -68,7 +68,7 @@ fn normalize_path_for_skill_id_admin_scoped_uses_absolute_path() {
 #[test]
 fn normalize_path_for_skill_id_repo_root_not_in_skill_path_uses_absolute_path() {
     let repo_root = std::env::temp_dir().join("repo/root");
-    let skill_path = std::env::temp_dir().join("other/path/.codex/skills/doc/SKILL.md");
+    let skill_path = std::env::temp_dir().join("other/path/.mikodex/skills/doc/SKILL.md");
 
     let path = normalize_path_for_skill_id(
         Some("https://example.com/repo.git"),
@@ -85,13 +85,13 @@ fn normalize_path_for_skill_id_repo_root_not_in_skill_path_uses_absolute_path() 
 fn normalize_path_for_skill_id_foreign_path_uses_native_spelling() {
     let (uri, expected) = if cfg!(windows) {
         (
-            "file:///Users/abc/.codex/skills/doc%20%23/SKILL.md",
-            "/Users/abc/.codex/skills/doc #/SKILL.md",
+            "file:///Users/abc/.mikodex/skills/doc%20%23/SKILL.md",
+            "/Users/abc/.mikodex/skills/doc #/SKILL.md",
         )
     } else {
         (
-            "file:///C:/Users/abc/.codex/skills/doc%20%23/SKILL.md",
-            "C:/Users/abc/.codex/skills/doc #/SKILL.md",
+            "file:///C:/Users/abc/.mikodex/skills/doc%20%23/SKILL.md",
+            "C:/Users/abc/.mikodex/skills/doc #/SKILL.md",
         )
     };
     let path = normalize_path_for_skill_id(
@@ -112,7 +112,7 @@ async fn reducer_ingests_skill_invoked_fact() {
         .ancestors()
         .last()
         .expect("temporary directory root")
-        .join("Users/abc/.codex/skills/doc/SKILL.md");
+        .join("Users/abc/.mikodex/skills/doc/SKILL.md");
     let expected_skill_id = skill_id_for_local_skill(
         /*repo_url*/ None,
         /*repo_root*/ None,
@@ -171,7 +171,7 @@ async fn reducer_includes_plugin_ids_for_plugin_skill_invocations() {
         .ancestors()
         .last()
         .expect("temporary directory root")
-        .join("Users/abc/.codex/plugins/cache/test/sample/skills/doc/SKILL.md");
+        .join("Users/abc/.mikodex/plugins/cache/test/sample/skills/doc/SKILL.md");
 
     reducer
         .ingest(

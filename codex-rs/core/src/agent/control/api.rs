@@ -26,7 +26,6 @@ use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
 use codex_protocol::protocol::MultiAgentVersion;
-use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::TokenUsage;
 use codex_rollout_trace::ThreadTraceContext;
@@ -34,10 +33,6 @@ use futures::future::BoxFuture;
 use std::collections::HashSet;
 
 impl AgentControl for LocalAgentControl {
-    fn native_rollout_budget(&self) -> Option<std::sync::Arc<crate::RolloutBudget>> {
-        Some(std::sync::Arc::clone(&self.runtime.rollout_budget))
-    }
-
     fn identity(&self) -> SessionId {
         self.session_id()
     }
@@ -184,7 +179,7 @@ impl AgentControl for LocalAgentControl {
     }
 
     fn take_mailbox(&self, agent: ThreadId) -> Vec<crate::PendingAgentMessage> {
-        self.runtime.mailboxes.take(agent, |_| true)
+        self.runtime.mailboxes.take(agent)
     }
 
     fn watch_mailbox(&self, agent: ThreadId) -> tokio::sync::watch::Receiver<bool> {
@@ -212,7 +207,7 @@ impl AgentControl for LocalAgentControl {
             match version {
                 MultiAgentVersion::Disabled | MultiAgentVersion::V1 => {
                     let snapshot = self.inspect_agent(target).await?;
-                    self.interrupt_agent(target, Op::Interrupt).await?;
+                    self.interrupt_agent(target).await?;
                     Ok(snapshot)
                 }
                 MultiAgentVersion::V2 => self.interrupt_spawned_agent(caller, target).await,
@@ -287,12 +282,8 @@ impl AgentControl for LocalAgentControl {
         self.execution_guard(version, source)
     }
 
-    fn record_usage(
-        &self,
-        usage: Option<TokenUsage>,
-        hook_charge: codex_hooks::HookCharge,
-    ) -> BoxFuture<'_, Result<()>> {
-        Box::pin(async move { self.record_rollout_budget_usage(usage.as_ref(), hook_charge) })
+    fn record_usage(&self, usage: TokenUsage) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move { self.record_rollout_budget_usage(&usage) })
     }
 
     fn turn_finished<'a>(

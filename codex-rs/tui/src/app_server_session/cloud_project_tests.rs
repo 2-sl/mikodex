@@ -30,7 +30,6 @@ async fn cloud_starts_use_each_requests_host_project_without_caching() {
     use codex_app_server_client::AppServerClient;
     use codex_app_server_client::CloudClient;
     use codex_app_server_client::CloudOperation;
-    use codex_app_server_client::EnvironmentSelection;
     use codex_app_server_protocol::ClientRequest;
     use codex_app_server_protocol::JSONRPCErrorError;
 
@@ -77,23 +76,13 @@ async fn cloud_starts_use_each_requests_host_project_without_caching() {
         ThreadParamsMode::Cloud,
     );
     let worker = tokio::spawn(async move {
-        for expected in [
-            Some("first"),
-            Some("second"),
-            Some("saved"),
-            None,
-            None,
-            None,
-            None,
-        ] {
+        for expected in [Some("first"), Some("second"), None, None, None, None] {
             let command = commands.recv().await.unwrap();
             match (expected, command.operation) {
                 (
                     Some(expected),
-                    CloudOperation::StartThreadWithEnvironment {
-                        params,
-                        environment: EnvironmentSelection::Project(project),
-                        ..
+                    CloudOperation::StartProjectThread {
+                        params, project, ..
                     },
                 ) => {
                     assert_eq!(project.name, expected);
@@ -104,18 +93,6 @@ async fn cloud_starts_use_each_requests_host_project_without_caching() {
                         project.origin_urls,
                         vec![format!("https://github.com/org/{expected}")]
                     );
-                }
-                (
-                    Some("saved"),
-                    CloudOperation::StartThreadWithEnvironment {
-                        params,
-                        environment: EnvironmentSelection::Saved(id),
-                        ..
-                    },
-                ) => {
-                    assert_eq!(id, "ws~asenvcfg_saved");
-                    assert_eq!(params.cwd, None);
-                    assert_eq!(params.runtime_workspace_roots, None);
                 }
                 (None, CloudOperation::Request(request)) => {
                     assert!(matches!(*request, ClientRequest::ThreadStart { .. }))
@@ -132,26 +109,23 @@ async fn cloud_starts_use_each_requests_host_project_without_caching() {
                 .unwrap();
         }
     });
-    use super::super::CloudThreadStart::Project;
-    use super::super::CloudThreadStart::Saved;
-    for (mode, environment) in [
-        (ThreadParamsMode::Cloud, Project(Some(nested.as_path()))),
-        (ThreadParamsMode::Cloud, Project(Some(second.path()))),
-        (ThreadParamsMode::Cloud, Saved("ws~asenvcfg_saved".into())),
-        (ThreadParamsMode::Cloud, Project(Some(misleading.path()))),
-        (ThreadParamsMode::Cloud, Project(Some(projectless.path()))),
-        (ThreadParamsMode::Cloud, Project(None)),
-        (ThreadParamsMode::Remote, Project(Some(first.path()))),
+    for (mode, host) in [
+        (ThreadParamsMode::Cloud, Some(nested.as_path())),
+        (ThreadParamsMode::Cloud, Some(second.path())),
+        (ThreadParamsMode::Cloud, Some(misleading.path())),
+        (ThreadParamsMode::Cloud, Some(projectless.path())),
+        (ThreadParamsMode::Cloud, None),
+        (ThreadParamsMode::Remote, Some(first.path())),
     ] {
         session.thread_params_mode = mode;
         let result = session
-            .start_thread_with_environment(
+            .start_thread_with_session_start_source(
                 &local_settings,
                 &config,
                 /*session_start_source*/ None,
                 /*remote_cwd_override*/ None,
                 /*selected_profile*/ None,
-                environment,
+                host,
             )
             .await;
         assert!(result.unwrap_err().to_string().contains("checkout failed"));

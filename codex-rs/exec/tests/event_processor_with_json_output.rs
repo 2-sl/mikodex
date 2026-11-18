@@ -562,7 +562,6 @@ fn mcp_tool_call_begin_and_end_emit_item_events() {
             ThreadItemPayload::McpToolCall {
                 id: "mcp-1".to_string(),
                 server: "server_a".to_string(),
-                environment_id: None,
                 tool: "tool_x".to_string(),
                 status: ApiMcpToolCallStatus::InProgress,
                 arguments: json!({ "key": "value" }),
@@ -585,7 +584,6 @@ fn mcp_tool_call_begin_and_end_emit_item_events() {
             ThreadItemPayload::McpToolCall {
                 id: "mcp-1".to_string(),
                 server: "server_a".to_string(),
-                environment_id: None,
                 tool: "tool_x".to_string(),
                 status: ApiMcpToolCallStatus::Completed,
                 arguments: json!({ "key": "value" }),
@@ -662,7 +660,6 @@ fn mcp_tool_call_failure_sets_failed_status() {
             ThreadItemPayload::McpToolCall {
                 id: "mcp-2".to_string(),
                 server: "server_b".to_string(),
-                environment_id: None,
                 tool: "tool_y".to_string(),
                 status: ApiMcpToolCallStatus::Failed,
                 arguments: json!({ "param": 42 }),
@@ -716,7 +713,6 @@ fn mcp_tool_call_defaults_arguments_and_preserves_structured_content() {
             ThreadItemPayload::McpToolCall {
                 id: "mcp-3".to_string(),
                 server: "server_c".to_string(),
-                environment_id: None,
                 tool: "tool_z".to_string(),
                 status: ApiMcpToolCallStatus::InProgress,
                 arguments: serde_json::Value::Null,
@@ -739,7 +735,6 @@ fn mcp_tool_call_defaults_arguments_and_preserves_structured_content() {
             ThreadItemPayload::McpToolCall {
                 id: "mcp-3".to_string(),
                 server: "server_c".to_string(),
-                environment_id: None,
                 tool: "tool_z".to_string(),
                 status: ApiMcpToolCallStatus::Completed,
                 arguments: serde_json::Value::Null,

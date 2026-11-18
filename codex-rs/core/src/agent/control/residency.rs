@@ -66,8 +66,8 @@ impl ThreadManagerState {
                 teardown.complete();
                 return Err(err);
             }
-            // Dispatch has stopped. Put previously received mail ahead of results
-            // published directly to the mailbox while eviction owned the residency guard.
+            // Dispatch has stopped and the residency guard excludes senders. A tree
+            // shutdown deliberately discards its mailbox instead of retaining it.
             let mail = thread
                 .session
                 .input_queue
@@ -80,11 +80,10 @@ impl ThreadManagerState {
             let _ = runtime.mailboxes.enqueue(thread_id, /*id*/ None, mail);
             // Reuse the same effective configuration snapshot as a fork. This includes live
             // permissions and network restrictions that a profile name cannot reconstruct.
-            let (config, snapshot, ..) = thread.session.fork_config().await;
+            let (config, ..) = thread.session.fork_config().await;
             // Preserve configured bindings across eviction without retaining turn-only attachments.
             // Raw bindings keep the original pending owner configuration alive.
             let environments = EvictedEnvironments {
-                history_mode: snapshot.history_mode,
                 config: Arc::new(config),
                 has_independent_service_tier: matches!(
                     &thread.session.agent_runtime,
@@ -175,12 +174,6 @@ impl LocalAgentControl {
 
 impl LocalAgentRuntime {
     /// Pins and touches the registered runtime without waiting for unrelated eviction.
-    pub(super) fn touch_v2_recipient(&self, thread: &CodexThread) {
-        if is_resident_candidate(thread) {
-            self.residency.touch(thread.session.thread_id);
-        }
-    }
-
     pub(crate) async fn pin_v2_residency(
         &self,
         thread: &CodexThread,
@@ -194,7 +187,7 @@ impl LocalAgentRuntime {
         if !std::ptr::eq(thread, registered.as_ref()) {
             return Err(CodexErr::ThreadNotFound(thread_id));
         }
-        self.touch_v2_recipient(thread);
+        self.residency.touch(thread_id);
         Ok(Some(guard))
     }
 }
@@ -343,7 +336,7 @@ async fn is_unloadable(thread: &CodexThread) -> bool {
             | AgentStatus::Completed(_)
             | AgentStatus::Errored(_)
             | AgentStatus::Interrupted
-    ) && !thread.has_active_turn().await
+    ) && thread.session.active_turn.lock().await.is_none()
         && !thread.session.has_outstanding_durable_sleep()
         && !thread
             .session

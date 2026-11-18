@@ -56,7 +56,7 @@ impl App {
                 Box::new(StartupDraftPump::new(
                     tui,
                     StartupDraftInitialScreen::Composer,
-                    StartupDraftSessionAction::NewWhileRunning,
+                    StartupDraftSessionAction::NewFromCommandCenter,
                 ))
             });
         let mut display_config = self.chat_widget.config_ref().clone();
@@ -184,10 +184,13 @@ impl App {
                     );
                     if !matches!(self.app_server_target, AppServerTarget::Embedded) {
                         message.push_str(
-                            " If the server restarts, Codex will reconnect automatically.",
+                            " If the server restarts, Mikodex will reconnect automatically.",
                         );
                     }
-                    (Some("Codex's background server is shutting down"), message)
+                    (
+                        Some("Mikodex's background server is shutting down"),
+                        message,
+                    )
                 } else {
                     (None, format!("Failed to start session: {error}"))
                 };
@@ -221,8 +224,6 @@ impl App {
                 return Ok(AppRunControl::Continue);
             }
         }
-        self.backend_registry
-            .register_started(app_server.backend_id(), &started)?;
         self.agents_overview
             .blank_sessions
             .insert(thread_id, started.clone());
@@ -246,6 +247,9 @@ impl App {
                     "Could not open the new session.",
                 );
             }
+        } else {
+            self.agents_overview.sidebar_focused = false;
+            self.agents_overview.command_reference_focused = false;
         }
         Ok(control)
     }

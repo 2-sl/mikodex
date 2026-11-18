@@ -4,7 +4,6 @@ use codex_core::config::Config;
 use codex_core::config::Constrained;
 use codex_core::sandboxing::SandboxPermissions;
 use codex_protocol::config_types::ApprovalsReviewer;
-use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::MODEL_SPECIALTY_CYBER;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::PermissionMessages;
@@ -55,28 +54,14 @@ fn configure_saved_prefix_and_guardian(config: &mut Config) {
     .expect("write saved command prefix rule");
     config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
     config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-    config.workspace_roots_explicit = false;
-    let permission_profile = PermissionProfile::from_legacy_sandbox_policy_for_cwd(
-        &SandboxPolicy::WorkspaceWrite {
+    config
+        .set_legacy_sandbox_policy(SandboxPolicy::WorkspaceWrite {
             writable_roots: vec![],
             network_access: false,
             exclude_tmpdir_env_var: true,
             exclude_slash_tmp: true,
-        },
-        config.cwd.as_path(),
-    );
-    config
-        .permissions
-        .can_set_permission_profile(&permission_profile)
-        .expect("set permission profile");
-    config
-        .permissions
-        .set_workspace_roots(vec![config.cwd.clone()]);
-    config
-        .permissions
-        .set_permission_profile(permission_profile)
-        .expect("set permission profile");
-    config.workspace_roots = config.permissions.workspace_roots().to_vec();
+        })
+        .expect("set workspace sandbox policy");
 }
 
 fn command_response(response_id: &str, call_id: &str) -> Result<String> {

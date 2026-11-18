@@ -190,7 +190,6 @@ async fn refresh_keeps_superseded_mcp_server_alive_for_in_flight_calls() -> anyh
             codex
                 .call_mcp_tool(
                     "refresh_cleanup",
-                    /*environment_id*/ None,
                     "sync",
                     Some(serde_json::json!({
                         "barrier": barrier,
@@ -205,7 +204,6 @@ async fn refresh_keeps_superseded_mcp_server_alive_for_in_flight_calls() -> anyh
         .codex
         .call_mcp_tool(
             "refresh_cleanup",
-            /*environment_id*/ None,
             "sync",
             Some(serde_json::json!({ "barrier": barrier })),
             /*meta*/ None,

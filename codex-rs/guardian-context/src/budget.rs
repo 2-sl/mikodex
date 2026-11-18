@@ -123,7 +123,6 @@ pub struct RequestBudget {
 pub enum ElasticSection {
     TranscriptMessages,
     TranscriptTools,
-    TranscriptSelectedExecResults,
     #[serde(alias = "root_messages")]
     RootConversationMessages,
     #[serde(alias = "retained_instructions")]
@@ -151,7 +150,6 @@ impl ElasticSection {
     const ALL: &[Self] = &[
         Self::TranscriptMessages,
         Self::TranscriptTools,
-        Self::TranscriptSelectedExecResults,
         Self::RootConversationMessages,
         Self::RetainedUserInstructions,
         Self::TrustedUserAnswers,
@@ -169,13 +167,10 @@ impl ElasticSection {
 /// Per-group elastic limits, validated when decoded; not an activation switch.
 /// Entry caps apply to required and optional supporting text; exact actions stay whole.
 /// Omitted groups use the synchronous entry caps,
-/// reserving one capped entry as their minimum. Selected exec results reserve zero by default.
+/// reserving one capped entry as their minimum.
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ElasticBudgetConfig {
-    /// Exact nested Code Mode names selected by the host for the exec result reservation.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub selected_exec_tool_names: Vec<String>,
     #[serde(default)]
     pub sections: std::collections::BTreeMap<ElasticSection, ElasticSectionLimits>,
 }
@@ -202,11 +197,12 @@ impl ElasticBudgetConfig {
     pub(crate) fn section_limits(&self, section: ElasticSection) -> ElasticSectionLimits {
         self.sections.get(&section).copied().unwrap_or_else(|| {
             let entries = crate::ContextProfile::synchronous().transcript.entry_limits;
-            let tokens = match section {
-                ElasticSection::TranscriptMessages => entries.message_tokens,
-                ElasticSection::TranscriptTools => entries.tool_tokens,
-                ElasticSection::TranscriptSelectedExecResults => 0,
-                _ => crate::preparation::MAX_INSTRUCTION_TOKENS,
+            let tokens = if section == ElasticSection::TranscriptMessages {
+                entries.message_tokens
+            } else if section == ElasticSection::TranscriptTools {
+                entries.tool_tokens
+            } else {
+                crate::preparation::MAX_INSTRUCTION_TOKENS
             };
             ElasticSectionLimits {
                 min_total_section_tokens: tokens,
@@ -571,7 +567,7 @@ impl ByteCount {
         Self::measure(|counter| serde_json::to_writer(counter, item))
     }
 
-    pub(super) fn measure(serialize: impl FnOnce(&mut Self) -> serde_json::Result<()>) -> usize {
+    fn measure(serialize: impl FnOnce(&mut Self) -> serde_json::Result<()>) -> usize {
         let mut count = Self::default();
         if serialize(&mut count).is_err() {
             return usize::MAX;

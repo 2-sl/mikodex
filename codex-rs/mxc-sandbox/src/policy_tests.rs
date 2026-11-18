@@ -189,8 +189,7 @@ fn wrapper_preserves_exact_argv_and_separate_command_cwd() -> Result<()> {
         managed_network: None,
         env: &mut env,
     })?;
-    assert_eq!(wrapped[0], crate::CODEX_WINDOWS_MXC_ARG1);
-    assert!(wrapped.len() == 1 || (cfg!(windows) && wrapped.len() == 2));
+    assert_eq!(wrapped, vec![crate::CODEX_WINDOWS_MXC_ARG1]);
     let parsed = crate::transport::decode(&mut env)?;
     assert!(parsed.default_child_env);
     assert!(env.is_empty());

@@ -1,13 +1,12 @@
 //! In-app session picker transitions, preserving per-thread input and the view on cancellation.
 
 use super::*;
+use crate::chatwidget::ThreadInputStateRestoreMode;
 
 impl App {
-    pub(super) async fn capture_session_inputs(&mut self, owner: crate::backend_id::BackendId) {
+    pub(super) async fn capture_session_inputs(&mut self) {
         for (id, channel) in &self.thread_event_channels {
-            if channel.backend_id.is_none_or(|backend| backend == owner)
-                && let Some(input_state) = channel.store.lock().await.input_state.clone()
-            {
+            if let Some(input_state) = channel.store.lock().await.input_state.clone() {
                 self.agents_overview.input_states.insert(*id, input_state);
             }
         }
@@ -92,11 +91,33 @@ impl App {
                     return Ok(AppRunControl::Continue);
                 }
                 let thread_id = target_session.thread_id;
+                let switching_threads = self.current_displayed_thread_id() != Some(thread_id);
+                if switching_threads {
+                    self.capture_session_inputs().await;
+                }
                 if let AppRunControl::Exit(reason) = self
                     .resume_target_session(tui, app_server, target_session)
                     .await?
                 {
                     return Ok(AppRunControl::Exit(reason));
+                }
+                if switching_threads
+                    && self.current_displayed_thread_id() == Some(thread_id)
+                    && let Some(mut input_state) =
+                        self.agents_overview.input_states.remove(&thread_id)
+                {
+                    // The resumed widget already reflects the latest server result.
+                    input_state.provider_error = None;
+                    self.reconcile_saved_session_input(thread_id, &mut input_state)
+                        .await;
+                    let preserve_in_flight_turn =
+                        self.active_turn_id_for_thread(thread_id).await.is_some();
+                    self.chat_widget.restore_thread_input_state(
+                        Some(input_state),
+                        ThreadInputStateRestoreMode {
+                            preserve_in_flight_turn,
+                        },
+                    );
                 }
                 if self.active_thread_id == Some(thread_id)
                     && self
@@ -110,9 +131,13 @@ impl App {
                     self.chat_widget.pre_draw_tick();
                 }
             }
-            SessionSelection::Exit
-            | SessionSelection::StartFresh
-            | SessionSelection::AgentsOverview => {
+            SessionSelection::AgentsOverview => {
+                self.agents_overview.sidebar_focused = true;
+                self.agents_overview.command_reference_focused = false;
+                self.refresh_in_memory_config_from_disk_best_effort("closing the session picker")
+                    .await;
+            }
+            SessionSelection::Exit | SessionSelection::StartFresh => {
                 self.refresh_in_memory_config_from_disk_best_effort("closing the session picker")
                     .await;
             }

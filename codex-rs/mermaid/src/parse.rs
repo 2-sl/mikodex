@@ -1,5 +1,5 @@
 //! Strict parser for a small flowchart grammar; every non-comment byte must be consumed.
-//! Node groups expand into explicit edges within the graph edge cap; flat subgraphs retain membership.
+//! Node groups expand into explicit edges within the graph edge cap.
 
 use super::Direction;
 use super::Edge;
@@ -8,7 +8,6 @@ use super::MAX_EDGES;
 use super::MAX_LABEL;
 use super::RenderError;
 use super::Shape;
-use super::Subgraph;
 use super::syntax::delimited_label;
 use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
@@ -24,69 +23,9 @@ pub(super) fn parse(header: &str, body: &[&str]) -> Result<Graph, RenderError> {
         direction,
         ..Graph::default()
     };
-    let mut block = None;
-    for &statement in body {
-        if let Some(text) = statement
-            .strip_prefix("subgraph")
-            .and_then(|rest| rest.strip_prefix([' ', '\t']))
-        {
-            if block.is_some() {
-                return Err(RenderError::Unsupported);
-            }
-            if graph.subgraphs.len() == super::MAX_NODES {
-                return Err(RenderError::Limit);
-            }
-            let text = text.trim();
-            let (id, label) = if let Some((id, after)) =
-                text.split_once('[').filter(|_| !text.starts_with('"'))
-            {
-                let mut rest = id.trim();
-                let id = identifier(&mut rest)?;
-                if !rest.is_empty() {
-                    return Err(RenderError::Unsupported);
-                }
-                let (label, rest) = delimited_label(after, "]")?;
-                if !rest.trim().is_empty() {
-                    return Err(RenderError::Unsupported);
-                }
-                (id.to_owned(), flowchart_label(label)?)
-            } else {
-                if !text.starts_with('"')
-                    && ["--", "==", "-.", ".-", "~~~"]
-                        .iter()
-                        .any(|operator| text.contains(operator))
-                {
-                    return Err(RenderError::Unsupported);
-                }
-                let label = flowchart_label(text)?;
-                let id = if label.chars().any(char::is_whitespace) {
-                    format!("subGraph{}", graph.subgraphs.len())
-                } else {
-                    label.to_owned()
-                };
-                (id, label)
-            };
-            check_label(label)?;
-            if id.is_empty() || graph.subgraphs.iter().any(|group| group.id == id) {
-                return Err(RenderError::Unsupported);
-            }
-            block = Some(graph.subgraphs.len());
-            graph.subgraphs.push(Subgraph {
-                id,
-                label: label.to_owned(),
-                nodes: Vec::new(),
-            });
-            continue;
-        }
-        if statement == "end" {
-            let index = block.take().ok_or(RenderError::Unsupported)?;
-            if graph.subgraphs[index].nodes.is_empty() {
-                return Err(RenderError::Unsupported);
-            }
-            continue;
-        }
-        let mut rest = statement;
-        let mut from = nodes(&mut rest, &mut graph, block)?;
+    for statement in body {
+        let mut rest = *statement;
+        let mut from = nodes(&mut rest, &mut graph)?;
         while !rest.trim_start().is_empty() {
             rest = rest.trim_start();
             let mut label = String::new();
@@ -136,7 +75,7 @@ pub(super) fn parse(header: &str, body: &[&str]) -> Result<Graph, RenderError> {
                 check_label(&label)?;
                 ('─', '◄', dashed)
             };
-            let to = nodes(&mut rest, &mut graph, block)?;
+            let to = nodes(&mut rest, &mut graph)?;
             // Check the Cartesian expansion before allocating edges, including repeated IDs.
             if from.len() * to.len() > MAX_EDGES - graph.edges.len() {
                 return Err(RenderError::Limit);
@@ -157,34 +96,25 @@ pub(super) fn parse(header: &str, body: &[&str]) -> Result<Graph, RenderError> {
             from = to;
         }
     }
-    if block.is_some()
-        || graph.nodes.is_empty()
-        || graph.subgraphs.iter().any(|group| {
-            group.nodes.is_empty() || graph.nodes.iter().any(|node| node.id == group.id)
-        })
-    {
+    if graph.nodes.is_empty() {
         return Err(RenderError::Unsupported);
     }
     Ok(graph)
 }
 
-fn nodes(
-    rest: &mut &str,
-    graph: &mut Graph,
-    block: Option<usize>,
-) -> Result<Vec<usize>, RenderError> {
-    let mut nodes = vec![node(rest, graph, block)?];
+fn nodes(rest: &mut &str, graph: &mut Graph) -> Result<Vec<usize>, RenderError> {
+    let mut nodes = vec![node(rest, graph)?];
     while let Some(after) = rest.trim_start().strip_prefix('&') {
         if nodes.len() == MAX_EDGES {
             return Err(RenderError::Limit);
         }
         *rest = after;
-        nodes.push(node(rest, graph, block)?);
+        nodes.push(node(rest, graph)?);
     }
     Ok(nodes)
 }
 
-fn node(rest: &mut &str, graph: &mut Graph, block: Option<usize>) -> Result<usize, RenderError> {
+fn node(rest: &mut &str, graph: &mut Graph) -> Result<usize, RenderError> {
     let id = identifier(rest)?;
     // Reserved constructs must not be interpreted as ordinary node declarations.
     if matches!(
@@ -207,14 +137,6 @@ fn node(rest: &mut &str, graph: &mut Graph, block: Option<usize>) -> Result<usiz
         _ => None,
     };
     let index = graph.node(id)?;
-    if let Some(block) = block
-        && !graph
-            .subgraphs
-            .iter()
-            .any(|group| group.nodes.contains(&index))
-    {
-        graph.subgraphs[block].nodes.push(index);
-    }
     if let Some((open, close, shape)) = declaration {
         let (label, remaining) = delimited_label(&rest[open.len()..], close)?;
         let label = flowchart_label(label)?

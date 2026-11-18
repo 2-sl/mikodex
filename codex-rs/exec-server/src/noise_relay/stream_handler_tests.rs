@@ -57,7 +57,7 @@ fn local_decode_starts_request_span_before_queueing() -> Result<()> {
         1,
         "receipt must export while the request is still queued"
     );
-    assert_eq!(spans[0].name, "codex.exec_server.noise_request_received");
+    assert_eq!(spans[0].name, "mikodex.exec_server.noise_request_received");
     assert_eq!(
         spans[0].span_context.trace_id().to_string(),
         "00000000000000000000000000000001"

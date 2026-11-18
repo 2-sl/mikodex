@@ -522,7 +522,6 @@ impl McpToolCallItem {
             turn_id,
             invocation: McpInvocation {
                 server: self.server.clone(),
-                environment_id: self.environment_id.clone(),
                 tool: self.tool.clone(),
                 arguments: (!self.arguments.is_null()).then(|| self.arguments.clone()),
             },
@@ -549,7 +548,6 @@ impl McpToolCallItem {
             turn_id,
             invocation: McpInvocation {
                 server: self.server.clone(),
-                environment_id: self.environment_id.clone(),
                 tool: self.tool.clone(),
                 arguments: (!self.arguments.is_null()).then(|| self.arguments.clone()),
             },

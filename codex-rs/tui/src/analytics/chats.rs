@@ -4,7 +4,6 @@ use super::client::Live;
 use super::client::Session;
 use super::data;
 use codex_app_server_client::AppServerRequestHandle;
-use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SortDirection;
@@ -114,33 +113,17 @@ pub(super) async fn roots(
     let mut threads = Vec::new();
     let mut cursor = None;
     let mut seen_cursors = HashSet::new();
-    let mut use_state_db_only = true;
     loop {
-        let result = handle
+        let page: ThreadListResponse = handle
             .request_typed(ClientRequest::ThreadList {
                 request_id: RequestId::String(uuid::Uuid::new_v4().to_string()),
                 params: ThreadListParams {
                     cursor,
-                    use_state_db_only,
                     ..list_params()
                 },
             })
-            .await;
-        let page: ThreadListResponse = match result {
-            Ok(page) => page,
-            Err(TypedRequestError::Server { source, .. })
-                if use_state_db_only && source.code == -32603 =>
-            {
-                // Restart the entire walk: a cursor from SQLite need not identify the
-                // same page in the repairing filesystem listing.
-                use_state_db_only = false;
-                threads.clear();
-                cursor = None;
-                seen_cursors.clear();
-                continue;
-            }
-            Err(err) => return Err(data::error(err)),
-        };
+            .await
+            .map_err(data::error)?;
         let reached_cutoff = page.data.iter().any(|thread| thread.updated_at < cutoff);
         threads.extend(page.data.into_iter().filter(|thread| {
             thread.updated_at >= cutoff && !thread.ephemeral && thread.parent_thread_id.is_none()
@@ -163,7 +146,6 @@ pub(super) fn list_params() -> ThreadListParams {
     ThreadListParams {
         include_attached_threads: false,
         current_account_only: true,
-        included_thread_ids: None,
         excluded_thread_ids: None,
         attached_to_thread_id: None,
         limit: Some(100),

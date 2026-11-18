@@ -21,7 +21,6 @@ pub(super) struct Disclosure {
     pub(super) resume_after_approval: Option<(ThreadId, String)>,
     // Resolve against the next layout, once a toggled live row has also been rebuilt.
     pub(super) anchor_control: Option<EntryKey>,
-    pub(super) clamp_after_collapse: bool,
     pub(super) live_ids: Vec<String>,
     pub(super) keymap: RuntimeKeymap,
 }
@@ -33,7 +32,6 @@ impl Default for Disclosure {
             focused: None,
             resume_after_approval: None,
             anchor_control: None,
-            clamp_after_collapse: false,
             live_ids: Vec::new(),
             keymap: RuntimeKeymap::defaults(),
         }
@@ -431,13 +429,11 @@ impl TranscriptView {
                 offset: 0,
                 row_bias: 0,
             });
-        let collapsing = matched || self.disclosure.is_expanded(&ids);
-        if collapsing {
+        if matched || self.disclosure.is_expanded(&ids) {
             self.disclosure.expanded.retain(|id| !ids.contains(id));
         } else {
             self.disclosure.expanded.extend(ids.iter().cloned());
         }
-        self.disclosure.clamp_after_collapse = collapsing;
         self.disclosure.focused = Some((key, ids));
         self.position = Position::Reading(anchor);
         self.cache.clear();

@@ -77,7 +77,6 @@ where
 
 fn execute_request() -> WireExecuteRequest {
     WireExecuteRequest {
-        catalog_revision: None,
         tool_call_id: "call-1".to_string(),
         enabled_tools: vec![
             WireToolDefinition {

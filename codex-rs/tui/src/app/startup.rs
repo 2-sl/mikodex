@@ -67,8 +67,8 @@ pub(super) async fn prepare_fresh_startup_config(
         }
     };
     let defaults = crate::config_update::read_effective_config_with_layers(
-        &app_server.request_handle(),
-        defaults_cwd.display().to_string(),
+        app_server.request_handle(),
+        defaults_cwd,
     )
     .await?;
     super::new_session::overlay_new_session_defaults(
@@ -249,7 +249,6 @@ impl App {
         tui: &mut tui::Tui,
         initial_backends: super::backend_sessions::InitialBackendSessions,
         mut config: Config,
-        statusline_metrics: crate::statusline_metrics::StatuslineMetrics,
         launch_cwd: PathBuf,
         backend_preference_context: backend_selection::BackendPreferenceContext,
         cli_kv_overrides: Vec<(String, TomlValue)>,
@@ -937,8 +936,6 @@ impl App {
         }
         chat_widget.remote_connection = remote_connection;
         chat_widget.snapshot_local_images = app_server_target.uses_remote_workspace();
-        chat_widget.thread_params_mode = app_server.thread_params_mode();
-        chat_widget.pending_cloud_turn_settings = app_server.pending_cloud_turn_settings();
         chat_widget.set_local_worktree_operations(!crate::uses_remote_workspace_or_environment(
             &app_server_target,
             environment_manager.as_ref(),
@@ -978,7 +975,7 @@ impl App {
             color_eyre::eyre::eyre!(
                 "Invalid `tui.keymap` configuration: {err}\n\
 Fix the config and retry.\n\
-See the Codex keymap documentation for supported actions and examples."
+See the Mikodex keymap documentation for supported actions and examples."
             )
         });
         let runtime_keymap = startup_try!(runtime_keymap);
@@ -988,8 +985,6 @@ See the Codex keymap documentation for supported actions and examples."
         let agents_overview =
             agents_overview::AgentsOverviewState::new(local_settings.tui.agents_overview_grouping);
         let mut app = Self {
-            statusline_picker: None,
-            statusline_metrics,
             provider_writes,
             feature_write_lock: Arc::default(),
             config_notification_test_generation: 0,
@@ -1045,7 +1040,6 @@ See the Codex keymap documentation for supported actions and examples."
             feedback_audience,
             environment_manager,
             app_server_target,
-            app_server_backend_id: Some(app_server.backend_id()),
             pending_right_click_paste: None,
             right_click_paste_environment: super::right_click_paste::PasteEnvironment::detect(),
             reconnect: ReconnectState {
@@ -1057,7 +1051,6 @@ See the Codex keymap documentation for supported actions and examples."
             daemon_cli_executable,
             pending_update_action: None,
             daemon_restart: None,
-            remote_control_pending: false,
             pending_shutdown_exit_thread_id: None,
             windows_sandbox: WindowsSandboxState {
                 prompt_after_trust: should_prompt_windows_sandbox_nux_at_startup
@@ -1071,19 +1064,9 @@ See the Codex keymap documentation for supported actions and examples."
             background_voice: None,
             background_voice_error: None,
             temporary_structured_requests: HashMap::new(),
-            cloud_title_shutdown: Default::default(),
             pending_thread_titles: HashMap::new(),
             thread_event_listener_tasks: HashMap::new(),
             agent_navigation: AgentNavigationState::default(),
-            backend_registry: super::backend_registry::BackendRegistry::new(
-                std::iter::once(&app_server)
-                    .chain(&other_backends)
-                    .filter(|backend| {
-                        backend.thread_params_mode() == crate::ThreadParamsMode::Cloud
-                    })
-                    .map(AppServerSession::backend_id)
-                    .collect(),
-            ),
             agents_overview,
             side_threads: HashMap::new(),
             saved_openings: Default::default(),
@@ -1093,8 +1076,9 @@ See the Codex keymap documentation for supported actions and examples."
             exact_sidebar_width: None,
             divider_drag: None,
             pane_resize: None,
+            agents_overview_dock_drag: None,
+            agents_overview_dock_resize: None,
             passive_link_drag: None,
-            sidebar_press: None,
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
             active_thread_rx: None,
@@ -1154,14 +1138,6 @@ See the Codex keymap documentation for supported actions and examples."
                 CODEX_CLI_VERSION,
                 /*server_version*/ None,
             );
-        }
-        app.backend_registry.connect(&app_server);
-        if let Some(thread_id) = app.current_displayed_thread_id() {
-            app.backend_registry
-                .observe(app_server.backend_id(), thread_id);
-        }
-        for session in &other_backends {
-            app.backend_registry.connect(session);
         }
         if start_in_agents_overview {
             app.open_agents_overview(&app_server);
@@ -1312,9 +1288,6 @@ See the Codex keymap documentation for supported actions and examples."
         let mut settled_size_tags = crate::terminal_size_telemetry::tags(last_screen_size);
         let mut pending_resize: Option<(ratatui::layout::Size, Instant)> = None;
         let mut reconnect = None;
-        let mut cloud_environment_picker: Option<
-            futures::future::LocalBoxFuture<'static, crate::bottom_pane::SelectionViewParams>,
-        > = None;
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
         let mut waiting_for_initial_session_header = true;
 
@@ -1368,32 +1341,14 @@ See the Codex keymap documentation for supported actions and examples."
                 }
                 backends.replay_ready_side_startup(&app);
                 let multi_backend = app.config.features.enabled(Feature::TuiMultiBackend);
-                let draft = multi_backend.then(|| app.backend_draft()).flatten();
-                let next_backend = draft
-                    .is_some()
-                    .then(|| backends.next_listening_backend(displayed_owner))
-                    .flatten();
+                let next_backend = if multi_backend && app.can_cycle_conversation_backend() {
+                    backends.next_listening_backend(displayed_owner)
+                } else {
+                    None
+                };
                 let current_label =
                     next_backend.and_then(|_| backends.displayed_name(&app.app_server_target));
-                let cloud_draft = draft.filter(|_| {
-                    app.app_server_target == AppServerTarget::Cloud
-                        && backends.is_listening(displayed_owner)
-                });
-                let environment_name = cloud_draft.map(|id| {
-                    app.agents_overview
-                        .draft_cloud_environments
-                        .get(&id)
-                        .filter(|(owner, _)| *owner == displayed_owner)
-                        .map(|(_, env)| {
-                            crate::terminal_title::sanitize_terminal_title(
-                                &env.name,
-                                crate::terminal_title::TitleEncoding::Unicode,
-                            )
-                        })
-                        .unwrap_or_else(|| "Default".into())
-                });
-                app.chat_widget
-                    .set_new_backend_control(current_label, environment_name);
+                app.chat_widget.set_new_backend_control(current_label);
                 if !backends.is_listening(displayed_owner)
                     && !app.pending_startup_thread_start
                     && !app.reconnect.offline
@@ -1410,9 +1365,7 @@ See the Codex keymap documentation for supported actions and examples."
                         break Err(err.into());
                     }
                 }
-                // Process archive completions before the picker can list or mutate those threads.
-                if app.pending_open_resume_picker && app.agents_overview.pending_archives.is_empty()
-                {
+                if app.pending_open_resume_picker {
                     app.pending_open_resume_picker = false;
                     match Box::pin(app.open_resume_picker_for_backends(tui, &mut backends)).await {
                         Ok(AppRunControl::Continue) => {}
@@ -1548,49 +1501,8 @@ See the Codex keymap documentation for supported actions and examples."
                         }
                         AppRunControl::Continue
                     }
-                    Some(view) = futures::future::OptionFuture::from(cloud_environment_picker.as_mut()) => {
-                        cloud_environment_picker = None;
-                        app.chat_widget.replace_selection_view_if_present(
-                            super::cloud_environments::LOADING_VIEW_ID, view,
-                        );
-                        AppRunControl::Continue
-                    }
                     Some(event) = app.saved_openings.next_event(&mut app_event_rx) => {
-                        if let AppEvent::ArchiveFinished { backend_id, thread_id, result: Ok(()) } = &event
-                            && *backend_id != displayed_owner
-                            && let Some(slot) = backends.slot(*backend_id)
-                        {
-                            backends.parked_inputs_mut(slot).remove(thread_id);
-                        }
-                        if matches!(&event, AppEvent::RemoteControl(_) | AppEvent::RemoteControlForBackend { .. } | AppEvent::RemoteControlFinished { .. }) {
-                            super::remote_control::handle(&mut app, &backends, event);
-                            if app.chat_widget.has_active_modal()
-                                && let Err(err) = app.render_startup_frame(tui, &app_event_rx)
-                            {
-                                break Err(err);
-                            }
-                            continue;
-                        }
                         let switch_backend = match &event {
-                            AppEvent::ChooseCloudEnvironment => {
-                                if let Some(source) = cloud_draft
-                                    && app.chat_widget.no_modal_or_popup_active()
-                                    && let AppServerRequestHandle::Cloud(handle) = backends.session_at(displayed_session).request_handle()
-                                {
-                                    app.chat_widget.show_selection_view(super::cloud_environments::loading_view());
-                                    cloud_environment_picker = Some(Box::pin(async move {
-                                        let environments = handle.list_saved_environments().await.map_err(|error| error.to_string());
-                                        super::cloud_environments::cloud_environment_picker(environments, source)
-                                    }));
-                                }
-                                continue;
-                            }
-                            AppEvent::StartCloudConversation { source, saved_environment }
-                                if cloud_draft == Some(*source) =>
-                            {
-                                Some((displayed_owner, NewBackendSession::ChangeCloudEnvironment(saved_environment.clone())))
-                            }
-                            AppEvent::StartCloudConversation { .. } => continue,
                             AppEvent::ChooseNewSessionCheckout { name } | AppEvent::NewSession { name }
                                 if multi_backend => app.other_new_session_backend(&backends).await
                                     .map(|owner| (owner, NewBackendSession::Fresh { name: name.clone() })),
@@ -1624,9 +1536,6 @@ See the Codex keymap documentation for supported actions and examples."
                                 continue;
                             }
                             AppEvent::SavedSideChatsLoaded { backend_id, .. }
-                            | AppEvent::SidebarDocumentResolved { backend_id, .. }
-                            | AppEvent::SidebarDocumentLoaded { backend_id, .. }
-                            | AppEvent::SidebarFilesLoaded { backend_id, .. }
                             | AppEvent::StartupThreadStarted { backend_id, .. } => {
                                 backends.slot(*backend_id).unwrap_or(displayed_session)
                             }
@@ -1712,20 +1621,12 @@ See the Codex keymap documentation for supported actions and examples."
                                 backends.defer_side_startup(event);
                             }
                             Some(event) if owner != displayed_owner || !app.reconnect.offline => {
-                                if matches!(&event.event, codex_app_server_client::AppServerEvent::Disconnected { .. }) {
-                                    app.backend_registry.disconnect(owner);
-                                    app.cancel_agents_overview_refresh(owner);
-                                }
-                                if let Some(slot) = backends.slot(owner) {
-                                    let (session, parked_inputs) = backends.session_and_parked_inputs(slot);
-                                    app.handle_polled_backend_event(session, displayed_owner, parked_inputs, event).await;
+                                if let Some(session) = backends.session(owner) {
+                                    app.handle_polled_backend_event(session, displayed_owner, event).await;
                                 }
                             }
                             Some(_) => {}
                             None => {
-                                app.backend_registry.disconnect(owner);
-                                app.cancel_agents_overview_refresh(owner);
-                                app.reset_agents_overview_discovery(owner);
                                 if owner == displayed_owner {
                                     if app.reconnect.offline && app.pending_startup_thread_start {
                                         reconnect = None;
@@ -1886,23 +1787,7 @@ See the Codex keymap documentation for supported actions and examples."
         };
         // Let the pending terminal poll unwind while the app server shuts down.
         tui.pause_events();
-        // Skip pending inference on exit. Give the fallback writes a bounded chance
-        // to finish before closing the connections they use.
-        if app.cloud_title_shutdown.send(()).is_ok()
-            && tokio::time::timeout(Duration::from_secs(3), app.cloud_title_shutdown.closed())
-                .await
-                .is_err()
-        {
-            tracing::debug!("timed out saving pending Cloud titles during shutdown");
-        }
-        for cancellation in app.pending_thread_titles.values() {
-            cancellation.cancel();
-        }
         app.chat_widget.mention_usage_mut().flush().await;
-        // Closing a remote or embedded connection can abandon an outstanding archive.
-        let archive_warnings = app
-            .finish_pending_archives(tokio::time::Instant::now() + Duration::from_secs(/*secs*/ 5))
-            .await;
         if let Err(err) = backends.shutdown().await {
             tracing::warn!(error = %err, "failed to shut down embedded app server");
         }
@@ -1928,14 +1813,9 @@ See the Codex keymap documentation for supported actions and examples."
                 if let Err(clear_err) = clear_result {
                     tracing::warn!(error = %clear_err, "failed to clear terminal UI");
                 }
-                if archive_warnings.is_empty() {
-                    return Err(err);
-                }
-                return Err(err.wrap_err(archive_warnings.join("\n")));
+                return Err(err);
             }
         };
-        let mut info = app.exit_info(exit_reason);
-        info.archive_warnings = archive_warnings;
-        Ok(info)
+        Ok(app.exit_info(exit_reason))
     }
 }

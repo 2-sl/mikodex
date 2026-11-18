@@ -2,7 +2,6 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use axum::http::StatusCode;
 use codex_code_mode::GrpcSessionOpenError;
 use pretty_assertions::assert_eq;
 
@@ -10,22 +9,7 @@ use super::*;
 
 #[tokio::test]
 async fn session_admission_retries_only_transient_failures_and_is_bounded() -> Result<()> {
-    let proxy_response = axum::http::Response::builder()
-        .status(StatusCode::SERVICE_UNAVAILABLE)
-        .header(
-            axum::http::header::CONTENT_TYPE,
-            "text/plain; charset=utf-8",
-        )
-        .body("no healthy upstream")?;
-    let mut explicit_status_response = proxy_response.clone();
-    explicit_status_response
-        .headers_mut()
-        .insert(tonic::Status::GRPC_STATUS, "13".parse()?);
-    let html_proxy_response = axum::http::Response::builder()
-        .status(StatusCode::SERVICE_UNAVAILABLE)
-        .header(axum::http::header::CONTENT_TYPE, "text/html")
-        .body("<html>no healthy upstream</html>")?;
-    let cases = [
+    for (code, failures, expected_attempts, succeeds) in [
         (Code::Unavailable, 1, 2, true),
         (Code::ResourceExhausted, 1, 2, true),
         (Code::Unavailable, usize::MAX, 5, false),
@@ -33,29 +17,7 @@ async fn session_admission_retries_only_transient_failures_and_is_bounded() -> R
         (Code::DeadlineExceeded, 1, 1, false),
         (Code::InvalidArgument, 1, 1, false),
         (Code::Unknown, 1, 1, false),
-    ]
-    .into_iter()
-    .map(|(code, failures, expected_attempts, succeeds)| {
-        (
-            tonic::Status::new(code, "transient admission test").into_http::<&'static str>(),
-            code,
-            failures,
-            expected_attempts,
-            succeeds,
-        )
-    })
-    .chain([
-        (proxy_response, Code::Unavailable, usize::MAX, 5, false),
-        (html_proxy_response, Code::Unavailable, 1, 2, true),
-        (
-            explicit_status_response,
-            Code::Internal,
-            usize::MAX,
-            1,
-            false,
-        ),
-    ]);
-    for (response, code, failures, expected_attempts, succeeds) in cases {
+    ] {
         let attempts = Arc::new(AtomicUsize::new(0));
         let count = Arc::clone(&attempts);
         let app = axum::Router::new()
@@ -65,12 +27,12 @@ async fn session_admission_retries_only_transient_failures_and_is_bounded() -> R
             .layer(axum::middleware::from_fn(
                 move |request: axum::extract::Request, next: axum::middleware::Next| {
                     let count = Arc::clone(&count);
-                    let response = response.clone();
                     async move {
                         if request.uri().path().ends_with("/OpenSession")
                             && count.fetch_add(1, Ordering::SeqCst) < failures
                         {
-                            return response.map(axum::body::Body::from);
+                            return tonic::Status::new(code, "transient admission test")
+                                .into_http::<axum::body::Body>();
                         }
                         next.run(request).await
                     }

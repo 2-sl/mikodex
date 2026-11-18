@@ -138,16 +138,17 @@ pub(super) fn session_update_message(
 }
 
 pub fn session_update_session_json(config: RealtimeSessionConfig) -> JsonResult<Value> {
-    let voice = config.voice_or_default();
     match config.event_parser {
         RealtimeWireAdapter::V1 | RealtimeWireAdapter::RealtimeV2 => {
             let mut session = match config.event_parser {
-                RealtimeWireAdapter::V1 => v1_session_update_session(config.instructions, voice),
+                RealtimeWireAdapter::V1 => {
+                    v1_session_update_session(config.instructions, config.voice)
+                }
                 RealtimeWireAdapter::RealtimeV2 => v2_session_update_session(
                     config.instructions,
                     config.session_mode,
                     config.output_modality,
-                    voice,
+                    config.voice,
                 ),
                 RealtimeWireAdapter::FramelessBidi => unreachable!(),
             };
@@ -159,7 +160,7 @@ pub fn session_update_session_json(config: RealtimeSessionConfig) -> JsonResult<
             config.model,
             config.instructions,
             config.initial_items,
-            voice,
+            config.voice,
             config.delegation_ack_filler,
         )),
     }

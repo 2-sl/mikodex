@@ -1,7 +1,6 @@
 use super::McpServerConnection;
 use crate::CODEX_APPS_MCP_SERVER_NAME;
 use crate::McpRuntime;
-use crate::McpServerKey;
 use codex_rmcp_client::RmcpClient;
 use rmcp::model::ServerResult;
 use std::collections::HashMap;
@@ -35,7 +34,8 @@ impl McpConnectionSet {
         server: &str,
         generation: u64,
     ) -> Option<McpResourceServerCacheKey> {
-        self.server_by_name(server)
+        self.servers
+            .get(server)
             .map(|view| McpResourceServerCacheKey {
                 connection: Arc::downgrade(&view.connection),
                 generation,
@@ -45,15 +45,15 @@ impl McpConnectionSet {
     /// Returns resources from servers selected by `include_server`.
     pub async fn list_all_resources(
         &self,
-        include_server: impl Fn(&McpServerKey) -> bool,
-    ) -> HashMap<McpServerKey, Vec<Resource>> {
+        include_server: impl Fn(&str) -> bool,
+    ) -> HashMap<String, Vec<Resource>> {
         let mut join_set = JoinSet::new();
         for (server_name, view) in self
             .servers
             .iter()
             .filter(|(server_name, _)| include_server(server_name))
         {
-            let server_name = server_name.to_owned();
+            let server_name = server_name.clone();
             let Ok(client) = view.connection.client().await else {
                 continue;
             };
@@ -92,14 +92,13 @@ impl McpConnectionSet {
     /// Returns resource templates from servers selected by `include_server`.
     pub async fn list_all_resource_templates(
         &self,
-        include_server: impl Fn(&McpServerKey) -> bool,
-    ) -> HashMap<McpServerKey, Vec<ResourceTemplate>> {
+        include_server: impl Fn(&str) -> bool,
+    ) -> HashMap<String, Vec<ResourceTemplate>> {
         let mut join_set = JoinSet::new();
-        for (server_name, view) in self.servers.iter().filter(|(server_name, view)| {
-            include_server(server_name)
-                && !self.skips_resource_template_listing(&view.metadata.server_key)
+        for (server_name, view) in self.servers.iter().filter(|(server_name, _)| {
+            include_server(server_name) && !self.skips_resource_template_listing(server_name)
         }) {
-            let server_name = server_name.to_owned();
+            let server_name = server_name.clone();
             let Ok(client) = view.connection.client().await else {
                 continue;
             };
@@ -139,10 +138,10 @@ impl McpConnectionSet {
 
     pub async fn list_resources(
         &self,
-        server: &McpServerKey,
+        server: &str,
         params: Option<PaginatedRequestParams>,
     ) -> Result<ListResourcesResult> {
-        let (managed, timeout) = self.client(server).await?;
+        let (managed, timeout) = self.client_by_name(server).await?;
         managed
             .list_resources(params, timeout)
             .await
@@ -151,10 +150,10 @@ impl McpConnectionSet {
 
     pub async fn list_resource_templates(
         &self,
-        server: &McpServerKey,
+        server: &str,
         params: Option<PaginatedRequestParams>,
     ) -> Result<ListResourceTemplatesResult> {
-        let (managed, timeout) = self.client(server).await?;
+        let (managed, timeout) = self.client_by_name(server).await?;
         managed
             .list_resource_templates(params, timeout)
             .await
@@ -162,8 +161,8 @@ impl McpConnectionSet {
     }
 
     // Hosted Apps always returns an empty list. Resume discovery if it gains templates.
-    pub(crate) fn skips_resource_template_listing(&self, server: &McpServerKey) -> bool {
-        self.servers.contains_key(server)
+    pub(crate) fn skips_resource_template_listing(&self, server: &str) -> bool {
+        self.contains_server(server)
             && self
                 .config
                 .as_ref()
@@ -171,16 +170,16 @@ impl McpConnectionSet {
                 .is_some_and(|registration| {
                     registration
                         .source()
-                        .is_host_owned_apps(server.name(), registration.config())
+                        .is_host_owned_apps(server, registration.config())
                 })
     }
 
     pub async fn read_resource(
         &self,
-        server: &McpServerKey,
+        server: &str,
         params: ReadResourceRequestParams,
     ) -> Result<ReadResourceResult> {
-        let (managed, timeout) = self.client(server).await?;
+        let (managed, timeout) = self.client_by_name(server).await?;
         let uri = params.uri.clone();
         managed
             .read_resource(params, timeout)
@@ -188,8 +187,9 @@ impl McpConnectionSet {
             .with_context(|| format!("resources/read failed for `{server}` ({uri})"))
     }
 
-    pub(crate) fn server_environment_id(&self, server: &McpServerKey) -> Option<&str> {
-        self.server(server)
+    pub(crate) fn server_environment_id(&self, server: &str) -> Option<&str> {
+        self.servers
+            .get(server)
             .map(|view| view.metadata.environment_id.as_str())
     }
 
@@ -200,9 +200,7 @@ impl McpConnectionSet {
         if !self.config.as_ref()?.apps_early_resource_discovery {
             return None;
         }
-        let view = self
-            .servers
-            .get(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME))?;
+        let view = self.servers.get(CODEX_APPS_MCP_SERVER_NAME)?;
         let connection = &view.connection;
         if connection.initialized_apps.is_some()
             && !connection.client.startup_complete.load(Ordering::Acquire)
@@ -217,16 +215,10 @@ impl McpConnectionSet {
         &self,
         name: &str,
     ) -> Result<(ManagedClient, Option<Duration>)> {
-        let key = self
-            .resolve_server_name(name)
-            .ok_or_else(|| anyhow!("unknown MCP server '{name}'"))?;
-        self.client(key).await
-    }
-
-    async fn client(&self, key: &McpServerKey) -> Result<(ManagedClient, Option<Duration>)> {
         let view = self
-            .server(key)
-            .ok_or_else(|| anyhow!("unknown MCP server '{key}'"))?;
+            .servers
+            .get(name)
+            .ok_or_else(|| anyhow!("unknown MCP server '{name}'"))?;
         let client = view
             .connection
             .client()

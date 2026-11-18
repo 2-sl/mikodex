@@ -95,10 +95,6 @@ impl MentionUsage {
         counts
     }
 
-    pub(super) fn codex_home(&self) -> Option<&Path> {
-        self.storage.as_ref()?.path.parent()
-    }
-
     pub(super) fn record(&mut self, identity: &str) {
         append_recent(&mut self.recent, identity.to_owned());
         let Some(Storage {

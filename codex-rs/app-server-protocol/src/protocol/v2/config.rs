@@ -25,7 +25,6 @@ use serde::Serialize;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::num::NonZeroU64;
 use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -71,7 +70,7 @@ pub enum ConfigLayerSource {
         name: String,
     },
 
-    /// User config layer from $CODEX_HOME/config.toml. This layer is special
+    /// User config layer from $MIKODEX_HOME/config.toml. This layer is special
     /// in that it is expected to be:
     /// - writable by the user
     /// - generally outside the workspace directory
@@ -508,8 +507,6 @@ pub struct FeedbackRequirements {
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "v2/")]
 pub struct OtelRequirements {
-    pub headers_helper: Option<String>,
-    pub headers_helper_refresh_interval_ms: Option<NonZeroU64>,
     pub tool_result: Option<OtelToolResultLogConfig>,
     pub log_sse_deltas: Option<bool>,
     pub log_user_prompt: Option<bool>,

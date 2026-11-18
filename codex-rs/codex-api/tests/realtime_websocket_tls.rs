@@ -145,7 +145,7 @@ async fn check_connection(address: String) {
                 event_parser: RealtimeEventParser::V1,
                 session_mode: RealtimeSessionMode::Conversational,
                 output_modality: RealtimeOutputModality::Audio,
-                voice: Some(RealtimeVoice::Cove),
+                voice: RealtimeVoice::Cove,
             },
             HeaderMap::new(),
             HeaderMap::new(),

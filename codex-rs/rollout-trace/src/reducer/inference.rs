@@ -5,14 +5,12 @@
 
 use anyhow::Result;
 use anyhow::bail;
-use anyhow::ensure;
 
 use super::TraceReducer;
 use crate::model::ExecutionStatus;
 use crate::model::ExecutionWindow;
 use crate::model::InferenceCall;
 use crate::model::InferenceCallId;
-use crate::payload::RawPayloadKind;
 use crate::payload::RawPayloadRef;
 use crate::raw_event::RawEventSeq;
 use crate::raw_event::RawTraceEventPayload;
@@ -28,9 +26,6 @@ pub(super) struct StartedInferenceCall {
     pub(super) model: String,
     pub(super) provider_name: String,
     pub(super) request_payload: RawPayloadRef,
-    pub(super) prepared_prompt_payload: RawPayloadRef,
-    pub(super) warmup_context_payload: Option<RawPayloadRef>,
-    pub(super) stripped_tool_output_ids: Vec<(usize, String)>,
 }
 
 impl TraceReducer {
@@ -55,25 +50,10 @@ impl TraceReducer {
             );
         }
 
-        ensure!(
-            started.request_payload.kind == RawPayloadKind::InferenceRequest
-                && started.prepared_prompt_payload.kind == RawPayloadKind::PreparedPrompt
-                && started
-                    .warmup_context_payload
-                    .as_ref()
-                    .is_none_or(|p| p.kind == RawPayloadKind::WarmupContext),
-            "inference {} has mislabeled request evidence",
-            started.inference_call_id
-        );
         let inference_call_id = started.inference_call_id.clone();
         let thread_id = started.thread_id.clone();
         let codex_turn_id = started.codex_turn_id.clone();
-        // A warmup has no inference row to follow. Preserve its formatted context for
-        // the transcript while keeping the actual (often empty) delta available for mocks.
-        let context = started
-            .warmup_context_payload
-            .as_ref()
-            .unwrap_or(&started.request_payload);
+        let request_payload = started.request_payload.clone();
         let Some(turn) = self.rollout.codex_turns.get(&codex_turn_id) else {
             bail!(
                 "inference start {inference_call_id} referenced unknown codex turn {codex_turn_id}"
@@ -92,8 +72,7 @@ impl TraceReducer {
             &inference_call_id,
             &thread_id,
             &codex_turn_id,
-            context,
-            started.stripped_tool_output_ids,
+            &request_payload,
         )?;
 
         self.thread_mut(&thread_id)?;
@@ -120,7 +99,6 @@ impl TraceReducer {
                 tool_call_ids_started_by_response: Vec::new(),
                 usage: None,
                 raw_request_payload_id: started.request_payload.raw_payload_id,
-                prepared_prompt_payload_id: started.prepared_prompt_payload.raw_payload_id,
                 raw_response_payload_id: None,
             },
         );

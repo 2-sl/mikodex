@@ -388,49 +388,6 @@ mod worker {
         time_budget_exhausted: bool,
     }
 
-    impl CompressionStats {
-        fn scanned_file(&mut self, trigger: RolloutCompressionTrigger) {
-            self.scanned = self.scanned.saturating_add(1);
-            metrics::file(trigger, "scanned");
-        }
-
-        fn measured_file(
-            &mut self,
-            trigger: RolloutCompressionTrigger,
-            duration: Duration,
-            measurement: CompressionMeasurement,
-        ) {
-            let outcome = measurement.outcome;
-            match outcome {
-                CompressionOutcome::Compressed => {
-                    self.compressed = self.compressed.saturating_add(1)
-                }
-                CompressionOutcome::SkippedNotCold
-                | CompressionOutcome::SkippedBusy
-                | CompressionOutcome::SkippedChanged
-                | CompressionOutcome::SkippedAlreadyCompressed => {
-                    self.skipped = self.skipped.saturating_add(1)
-                }
-            }
-            metrics::file(trigger, outcome.tag());
-            metrics::file_duration(trigger, outcome.tag(), duration);
-            if let Some(source_bytes) = measurement.source_bytes {
-                metrics::source_bytes(trigger, outcome.tag(), source_bytes);
-            }
-            if let Some(compressed_bytes) = measurement.compressed_bytes {
-                metrics::compressed_bytes(trigger, outcome.tag(), compressed_bytes);
-                if let Some(source_bytes) = measurement.source_bytes {
-                    metrics::compression_ratio(
-                        trigger,
-                        outcome.tag(),
-                        source_bytes,
-                        compressed_bytes,
-                    );
-                }
-            }
-        }
-    }
-
     pub(super) struct CompressionRunMarker {
         path: PathBuf,
         remove_on_drop: bool,
@@ -713,25 +670,6 @@ mod worker {
                     metrics::file(trigger, "skipped_unreadable_meta");
                     continue;
                 };
-                // Recent files cannot be compressed. Only open the header for a
-                // possible candidate; the job rechecks its age before encoding.
-                let checked_at = Instant::now();
-                if let Ok(metadata) = entry.metadata().await
-                    && let Ok(modified) = metadata.modified()
-                    && !is_cold(modified)
-                {
-                    stats.scanned_file(trigger);
-                    stats.measured_file(
-                        trigger,
-                        checked_at.elapsed(),
-                        CompressionMeasurement::new(
-                            CompressionOutcome::SkippedNotCold,
-                            Some(metadata.len()),
-                            /*compressed_bytes*/ None,
-                        ),
-                    );
-                    continue;
-                }
                 let thread_id = match crate::read_session_meta_line(path.as_path()).await {
                     Ok(metadata) => metadata.meta.id,
                     Err(err) => {
@@ -778,7 +716,8 @@ mod worker {
                         continue;
                     }
                 };
-                stats.scanned_file(trigger);
+                stats.scanned = stats.scanned.saturating_add(1);
+                metrics::file(trigger, "scanned");
                 while jobs.len() >= MAX_CONCURRENT_COMPRESSION_JOBS {
                     collect_next_compression_job(&mut jobs, stats, trigger).await;
                 }
@@ -868,7 +807,34 @@ mod worker {
         };
         match result {
             Ok((_, duration, Ok(measurement))) => {
-                stats.measured_file(trigger, duration, measurement);
+                let outcome = measurement.outcome;
+                match outcome {
+                    CompressionOutcome::Compressed => {
+                        stats.compressed = stats.compressed.saturating_add(1);
+                    }
+                    CompressionOutcome::SkippedNotCold
+                    | CompressionOutcome::SkippedBusy
+                    | CompressionOutcome::SkippedChanged
+                    | CompressionOutcome::SkippedAlreadyCompressed => {
+                        stats.skipped = stats.skipped.saturating_add(1);
+                    }
+                }
+                metrics::file(trigger, outcome.tag());
+                metrics::file_duration(trigger, outcome.tag(), duration);
+                if let Some(source_bytes) = measurement.source_bytes {
+                    metrics::source_bytes(trigger, outcome.tag(), source_bytes);
+                }
+                if let Some(compressed_bytes) = measurement.compressed_bytes {
+                    metrics::compressed_bytes(trigger, outcome.tag(), compressed_bytes);
+                    if let Some(source_bytes) = measurement.source_bytes {
+                        metrics::compression_ratio(
+                            trigger,
+                            outcome.tag(),
+                            source_bytes,
+                            compressed_bytes,
+                        );
+                    }
+                }
             }
             Ok((path, duration, Err(err))) => {
                 stats.failed = stats.failed.saturating_add(1);
@@ -1038,14 +1004,13 @@ mod worker {
             #[cfg(unix)]
             change_time: (metadata.ctime(), metadata.ctime_nsec()),
         };
-        if !is_cold(modified) {
+        let age = SystemTime::now()
+            .duration_since(modified)
+            .unwrap_or(Duration::ZERO);
+        if age < MIN_ROLLOUT_AGE {
             return Ok(ColdFileState::NotCold(Some(state)));
         }
         Ok(ColdFileState::Cold(state))
-    }
-
-    fn is_cold(modified: SystemTime) -> bool {
-        modified.elapsed().unwrap_or_default() >= MIN_ROLLOUT_AGE
     }
 
     fn same_file_state(path: &Path, expected: &FileState) -> io::Result<bool> {

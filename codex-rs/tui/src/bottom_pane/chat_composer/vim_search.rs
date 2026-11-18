@@ -8,7 +8,7 @@ impl ChatComposer {
     pub(crate) fn cancel_vim_search(&mut self) -> bool {
         let canceled = self.draft.textarea.cancel_vim_search();
         if canceled {
-            self.finish_edit();
+            self.finish_vim_edit();
         }
         canceled
     }

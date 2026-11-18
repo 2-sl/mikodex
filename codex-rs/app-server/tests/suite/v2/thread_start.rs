@@ -115,7 +115,7 @@ model = "gpt-5.4-mini"
         })
         .await?;
 
-    assert_eq!(response.model, "openai.gpt-6.2-sol");
+    assert_eq!(response.model, "openai.gpt-6.1-sol");
     Ok(())
 }
 
@@ -246,8 +246,6 @@ async fn thread_start_provider_model_fallback_uses_bedrock_static_catalog() -> R
     .await?;
     for model in [
         "openai.gpt-6.1-sol",
-        "openai.gpt-6.2-astra",
-        "openai.gpt-6.2-sol",
         "openai.gpt-6.1-terra",
         "openai.gpt-6-sol",
         "openai.gpt-6-luna",
@@ -277,7 +275,7 @@ async fn thread_start_provider_model_fallback_uses_bedrock_static_catalog() -> R
             supported_with_fallback.model,
             unsupported_without_fallback.model,
         ],
-        vec!["openai.gpt-6.2-sol", "openai.gpt-5.5", "gpt-5.4-mini"]
+        vec!["openai.gpt-6.1-sol", "openai.gpt-5.5", "gpt-5.4-mini"]
     );
     Ok(())
 }
@@ -298,10 +296,6 @@ async fn thread_start_bedrock_runtime_prefers_global_cross_region_models() -> Re
     for model in [
         "global.openai.gpt-6.1-sol",
         "us.openai.gpt-6.1-sol",
-        "global.openai.gpt-6.2-astra",
-        "us.openai.gpt-6.2-astra",
-        "global.openai.gpt-6.2-sol",
-        "us.openai.gpt-6.2-sol",
         "global.openai.gpt-6.1-terra",
         "us.openai.gpt-6.1-terra",
         "global.openai.gpt-6-sol",
@@ -323,7 +317,7 @@ async fn thread_start_bedrock_runtime_prefers_global_cross_region_models() -> Re
         /*allow_provider_model_fallback*/ true,
     )
     .await?;
-    assert_eq!(response.model, "global.openai.gpt-6.2-sol");
+    assert_eq!(response.model, "global.openai.gpt-6.1-sol");
 
     Ok(())
 }
@@ -1007,7 +1001,7 @@ async fn thread_start_respects_project_config_from_cwd() -> Result<()> {
     create_config_toml_without_approval_policy(codex_home.path(), &server.uri())?;
 
     let workspace = TempDir::new()?;
-    let project_config_dir = workspace.path().join(".codex");
+    let project_config_dir = workspace.path().join(".mikodex");
     std::fs::create_dir_all(&project_config_dir)?;
     std::fs::write(
         project_config_dir.join("config.toml"),
@@ -1351,7 +1345,6 @@ async fn thread_start_emits_mcp_server_status_updated_notifications() -> Result<
         McpServerStatusUpdatedNotification {
             thread_id: Some(start_response.thread.id.clone()),
             name: "optional_broken".to_string(),
-            environment_id: None,
             status: McpServerStartupState::Starting,
             error: None,
             failure_reason: None,
@@ -1546,7 +1539,7 @@ async fn thread_start_workspace_write_respects_effective_permissions_for_project
     create_config_toml_without_approval_policy(codex_home.path(), &server.uri())?;
 
     let workspace = TempDir::new()?;
-    let project_config_dir = workspace.path().join(".codex");
+    let project_config_dir = workspace.path().join(".mikodex");
     std::fs::create_dir_all(&project_config_dir)?;
     std::fs::write(
         project_config_dir.join("config.toml"),
@@ -1618,7 +1611,7 @@ async fn thread_start_with_managed_read_only_does_not_trust_or_load_project_mcp(
 
     let workspace = TempDir::new()?;
     std::fs::create_dir(workspace.path().join(".git"))?;
-    let project_config_dir = workspace.path().join(".codex");
+    let project_config_dir = workspace.path().join(".mikodex");
     std::fs::create_dir(&project_config_dir)?;
     std::fs::write(
         project_config_dir.join("config.toml"),
@@ -1664,7 +1657,6 @@ required = true
         .request(|request_id| ClientRequest::McpServerStatusList {
             request_id,
             params: ListMcpServerStatusParams {
-                environment_id: None,
                 server_name: None,
                 cursor: None,
                 limit: None,
@@ -1761,7 +1753,7 @@ async fn thread_start_projectless_does_not_preapprove_later_project_config() -> 
     );
     assert_eq!(std::fs::read_to_string(&config_path)?, config_before);
 
-    let project_config_dir = workspace.path().join(".codex");
+    let project_config_dir = workspace.path().join(".mikodex");
     std::fs::create_dir(&project_config_dir)?;
     std::fs::write(
         project_config_dir.join("config.toml"),
@@ -1787,7 +1779,7 @@ async fn thread_start_with_read_only_sandbox_does_not_persist_project_trust() ->
     create_config_toml_without_approval_policy(codex_home.path(), &server.uri())?;
 
     let workspace = TempDir::new()?;
-    std::fs::create_dir(workspace.path().join(".codex"))?;
+    std::fs::create_dir(workspace.path().join(".mikodex"))?;
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -1815,7 +1807,7 @@ async fn thread_start_preserves_untrusted_project_trust() -> Result<()> {
     create_config_toml_without_approval_policy(codex_home.path(), &server.uri())?;
 
     let workspace = TempDir::new()?;
-    std::fs::create_dir(workspace.path().join(".codex"))?;
+    std::fs::create_dir(workspace.path().join(".mikodex"))?;
     let config_path = codex_home.path().join("config.toml");
     let workspace_key = workspace.path().display().to_string();
     let mut config_toml =
@@ -1850,7 +1842,7 @@ async fn thread_start_skips_trust_write_when_project_is_already_trusted() -> Res
     create_config_toml_without_approval_policy(codex_home.path(), &server.uri())?;
 
     let workspace = TempDir::new()?;
-    let project_config_dir = workspace.path().join(".codex");
+    let project_config_dir = workspace.path().join(".mikodex");
     std::fs::create_dir_all(&project_config_dir)?;
     std::fs::write(
         project_config_dir.join("config.toml"),

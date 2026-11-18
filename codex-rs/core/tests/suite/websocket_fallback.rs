@@ -30,9 +30,6 @@ use wiremock::http::Method;
 use wiremock::matchers::method;
 use wiremock::matchers::path_regex;
 
-#[path = "websocket_fallback_close.rs"]
-mod close_code;
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn websocket_fallback_switches_to_http_on_upgrade_required_connect() -> Result<()> {
     skip_if_no_network!(Ok(()));

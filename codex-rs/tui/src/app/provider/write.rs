@@ -22,10 +22,7 @@ const SAVING_VIEW: &str = "model_provider_saving";
 
 #[derive(derive_more::Debug, Clone)]
 pub(crate) enum Write {
-    Default {
-        id: String,
-        name: String,
-    },
+    Default(String),
     #[debug("Settings(..)")]
     Settings(Box<(editor::Draft, ModelProviderConfigWriteParams)>),
 }
@@ -58,7 +55,7 @@ impl Write {
         };
         let (view, dismissed) = progress(SAVING_VIEW, "Saving model provider…");
         let source = match self {
-            Self::Default { .. } => LIST_VIEW,
+            Self::Default(_) => LIST_VIEW,
             Self::Settings(_) => editor::VIEW_ID,
         };
         if !app
@@ -102,19 +99,10 @@ impl Write {
                         rpc::ProviderWrite::UnconfirmedCreate => SaveNotice::UnconfirmedCreate,
                     })
             }
-            Self::Default { id, name } => {
-                let name = if name.trim().is_empty() {
-                    id.as_str()
-                } else {
-                    name.trim()
-                };
+            Self::Default(id) => {
                 let response = rpc::set_default_provider(handle, id)
                     .await
                     .map_err(|error| match error {
-                        TypedRequestError::Server { .. } if rpc::unsupported_method(&error) => {
-                            "Update the connected app server to change the default model provider."
-                                .into()
-                        }
                         TypedRequestError::Server { .. } => {
                             format!("Could not save provider: {error}")
                         }
@@ -122,17 +110,19 @@ impl Write {
                         | TypedRequestError::Deserialize { .. } => {
                             // The server may have committed the write before its reply was lost.
                             *provider_changed = true;
-                            format!("Could not confirm whether {name} was saved: {error}")
+                            format!("Could not confirm whether {id} was saved: {error}")
                         }
                     })?;
                 match response.status {
                     WriteStatus::Ok => {
                         *provider_changed = true;
-                        Ok(SaveNotice::Saved(format!("New chats now use {name}.")))
+                        Ok(SaveNotice::Saved(format!(
+                            "/new now uses {id}. Restart the app server and TUI to refresh /model."
+                        )))
                     }
                     WriteStatus::OkOverridden => {
                         let reason = rpc::override_reason(response);
-                        Ok(SaveNotice::Saved(format!("Saved {name}. {reason}")))
+                        Ok(SaveNotice::Saved(format!("Saved {id}. {reason}")))
                     }
                 }
             }
@@ -167,7 +157,7 @@ impl Completion {
                 };
                 if present {
                     let view = match self.write {
-                        Write::Default { .. } => SAVING_VIEW,
+                        Write::Default(_) => SAVING_VIEW,
                         Write::Settings(_) => {
                             app.chat_widget.dismiss_provider_view(SAVING_VIEW);
                             LIST_VIEW

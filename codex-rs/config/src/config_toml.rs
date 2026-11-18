@@ -161,17 +161,7 @@ pub struct FeatureToggleToml {
     pub enabled: Option<bool>,
 }
 
-/// Storage budgets for one native rollout trace, shared by the root and its children.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct RolloutTraceToml {
-    /// Maximum uncompressed bytes retained per new body or separated value. Defaults to 64 MiB.
-    pub max_payload_bytes: Option<usize>,
-    /// Maximum bytes for the manifest, event log, and compressed payload shards. Defaults to 256 MiB.
-    pub max_bytes: Option<u64>,
-}
-
-/// Base config deserialized from ~/.codex/config.toml.
+/// Base config deserialized from ~/.mikodex/config.toml.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigToml {
@@ -234,10 +224,10 @@ pub struct ConfigToml {
     /// Sandbox mode to use.
     pub sandbox_mode: Option<SandboxMode>,
 
-    /// Allow macOS sandbox writable roots at or beneath CODEX_HOME to traverse
+    /// Allow macOS sandbox writable roots at or beneath MIKODEX_HOME to traverse
     /// symlinks. Read only from the host's user config at startup; defaults to false.
     /// This grants no write access by itself, but trusts symlink targets even if
-    /// they change between commands or lie outside CODEX_HOME.
+    /// they change between commands or lie outside MIKODEX_HOME.
     /// This setting has no effect on Linux or Windows.
     pub allow_symlinked_codex_home: Option<bool>,
 
@@ -377,20 +367,17 @@ pub struct ConfigToml {
     #[serde(default)]
     pub profiles: HashMap<String, ConfigProfile>,
 
-    /// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
+    /// Settings that govern if and what will be written to `~/.mikodex/history.jsonl`.
     #[serde(default = "default_history")]
     pub history: Option<History>,
 
-    /// Capture limits for local rollout traces when recording is enabled.
-    pub rollout_trace: Option<RolloutTraceToml>,
-
     /// Directory where Codex stores the SQLite state DB.
-    /// Defaults to `$CODEX_SQLITE_HOME` when set. Otherwise uses `$CODEX_HOME`.
+    /// Defaults to `$MIKODEX_SQLITE_HOME` when set. Otherwise uses `$MIKODEX_HOME`.
     pub sqlite_home: Option<AbsolutePathBuf>,
 
     /// Directory for log files. Setting this value explicitly also routes the
     /// SQLite logs database here and enables the TUI text log in this directory.
-    /// When unset, log files use `$CODEX_HOME/log` and SQLite logs use `sqlite_home`.
+    /// When unset, log files use `$MIKODEX_HOME/log` and SQLite logs use `sqlite_home`.
     /// Existing SQLite logs in `sqlite_home` are not migrated automatically.
     /// A managed `sqlite_home` requirement keeps SQLite logs in that required directory.
     pub log_dir: Option<AbsolutePathBuf>,
@@ -433,9 +420,6 @@ pub struct ConfigToml {
 
     /// Optional product SKU forwarded on host-owned Codex Apps MCP requests.
     pub apps_mcp_product_sku: Option<String>,
-
-    /// Controls how Codex processes model responses.
-    pub responses: Option<ResponsesToml>,
 
     /// Bounded, product-owned metadata attached to every Responses API request.
     pub responses_api_metadata: Option<BTreeMap<String, String>>,
@@ -500,9 +484,6 @@ pub struct ConfigToml {
     /// Additional discoverable tools that can be suggested for installation.
     pub tool_suggest: Option<ToolSuggestConfig>,
 
-    /// Code Mode session settings.
-    pub code_mode: Option<CodeModeToml>,
-
     /// Agent-related settings (thread limits, etc.).
     pub agents: Option<AgentsToml>,
 
@@ -541,7 +522,7 @@ pub struct ConfigToml {
     pub ghost_snapshot: Option<GhostSnapshotToml>,
 
     /// Markers used to detect the project root when searching parent
-    /// directories for `.codex` folders. Defaults to [".git"] when unset.
+    /// directories for `.mikodex` folders. Defaults to [".git"] when unset.
     #[serde(default)]
     pub project_root_markers: Option<Vec<String>>,
 
@@ -729,31 +710,6 @@ pub struct ToolsToml {
     pub web_search: Option<WebSearchToolConfig>,
     pub experimental_request_user_input: Option<ExperimentalRequestUserInput>,
     pub update_plan: Option<UpdatePlanToolConfig>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct CodeModeToml {
-    /// Idle seconds between gRPC stream heartbeats. Zero (the default) disables them.
-    pub heartbeat_interval_s: Option<u32>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct ResponsesToml {
-    /// When to process response items, including text and tool calls. Defaults to `streaming`.
-    pub process_mode: Option<ResponseProcessMode>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ResponseProcessMode {
-    /// Process items as they arrive. A tool can start before its response is complete.
-    #[default]
-    Streaming,
-    /// Process buffered items in order after the response completes, synchronous post-hooks
-    /// finish, and any budget charges are posted.
-    AfterCompleteResponse,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]

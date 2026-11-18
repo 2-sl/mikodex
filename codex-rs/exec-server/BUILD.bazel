@@ -2,7 +2,7 @@ load("//:defs.bzl", "codex_rust_crate")
 load("//bazel/rules/testing/compat:exec_server_compat_test.bzl", "exec_server_compat_test")
 
 exports_files(
-    ["src/proto/codex.exec_server.relay.v1.rs"],
+    ["src/proto/mikodex.exec_server.relay.v1.rs"],
     visibility = ["//codex-rs/exec-server/tests/support:__pkg__"],
 )
 
@@ -13,13 +13,18 @@ codex_rust_crate(
         "src/**/*.rs",
         "tests/unit/**/*.rs",
     ]),
+    deps_extra = [
+        "@crates//:opentelemetry",
+        "@crates//:opentelemetry_sdk",
+        "@crates//:toml",
+    ],
     extra_binaries = [
         "//codex-rs/bwrap:bwrap",
         "//codex-rs/windows-sandbox-rs:codex-command-runner",
         "//codex-rs/windows-sandbox-rs:codex-windows-sandbox-setup",
     ],
     integration_compile_data_extra = [
-        "src/proto/codex.exec_server.relay.v1.rs",
+        "src/proto/mikodex.exec_server.relay.v1.rs",
     ],
     # Keep the crate's tests single-threaded under Bazel because they install
     # process-global test-binary dispatch state, and the remote exec-server

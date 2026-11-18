@@ -155,9 +155,7 @@ async fn saved_workspace_is_discovered_once_and_not_the_default_account(
     .await??;
     assert_eq!(
         notification.params,
-        Some(
-            json!({"authMode": "chatgpt", "planType": plan_type, "reason": "workspaceRoutingReady"})
-        )
+        Some(json!({"authMode": "chatgpt", "planType": plan_type}))
     );
     let expected = json!({
         "account": {"type": "chatgpt", "email": "user@example.com", "planType": plan_type, "workspaceName": "Selected workspace"},
@@ -347,9 +345,7 @@ async fn login_and_workspace_switch_notify_after_routing_is_ready_then_logout_cl
         .await??;
         assert_eq!(
             notification.params,
-            Some(
-                json!({"authMode": "chatgptAuthTokens", "planType": "enterprise", "reason": null})
-            )
+            Some(json!({"authMode": "chatgptAuthTokens", "planType": "enterprise"}))
         );
         assert_eq!(
             read(&mut server).await?["workspaceRouting"],
@@ -366,15 +362,6 @@ async fn login_and_workspace_switch_notify_after_routing_is_ready_then_logout_cl
     }
     let request = server.send_logout_account_request().await?;
     let _: LogoutAccountResponse = timeout(READ_TIMEOUT, server.read_response(request)).await??;
-    let notification = timeout(
-        READ_TIMEOUT,
-        server.read_stream_until_notification_message("account/updated"),
-    )
-    .await??;
-    assert_eq!(
-        notification.params,
-        Some(json!({"authMode": null, "planType": null, "reason": null}))
-    );
     assert_eq!(
         read(&mut server).await?,
         json!({"account": null, "userId": null, "requiresOpenaiAuth": true, "workspaceRouting": null})

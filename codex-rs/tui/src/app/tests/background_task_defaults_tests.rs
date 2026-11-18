@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::app::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
-use crate::app::session_lifecycle::FreshSessionStart;
 use crate::app::tests::session_lifecycle_requests::HistoryCapabilities;
 use crate::app::tests::session_lifecycle_requests::recorded_params;
 use crate::app::tests::session_lifecycle_requests::start_recording_app_server_with_history;
@@ -259,7 +258,7 @@ async fn command_center_new_reads_server_defaults_for_actual_destination() -> Re
                 }
             ),
         )?;
-        std::fs::create_dir(destination.path().join(".codex"))?;
+        std::fs::create_dir(destination.path().join(".mikodex"))?;
         std::fs::write(
             destination.path().join(".codex/config.toml"),
             "model = \"destination-model\"\nservice_tier = \"flex\"\n",
@@ -600,7 +599,7 @@ async fn command_center_new_read_failure_keeps_overview_and_does_not_start() -> 
             .find(|message| {
                 message.contains("Failed to")
                     || message.contains("Unable to check folder trust")
-                    || message.contains("Codex's background server is shutting down")
+                    || message.contains("Mikodex's background server is shutting down")
             })
             .expect("visible read error");
         if capability == HistoryCapabilities::ConfigReadFails {
@@ -913,7 +912,7 @@ async fn command_center_new_restores_blank_drafts_and_builtin_permissions() -> R
     app.start_fresh_session(
         &mut tui,
         &mut server,
-        FreshSessionStart::PreserveCurrentView(None),
+        /*session_start_source*/ None,
         /*initial_user_message*/ None,
         /*new_thread_name*/ None,
     )
@@ -1223,7 +1222,7 @@ async fn command_center_new_checkout_and_worktree_preserve_source_and_default_br
                     return Ok::<_, color_eyre::Report>(());
                 }
             }
-            color_eyre::eyre::bail!("permissions menu event stream closed");
+            color_eyre::eyre::bail!("permissions menu event stream closed")
         })
         .await??;
         app.chat_widget.handle_key_event(KeyCode::Up.into());

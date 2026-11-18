@@ -1,6 +1,6 @@
 //! Model-invisible Guardian transcript checkpoints and retained-section delivery proof.
-//! Entries preserve rollback provenance and allocation ordinals. Readers also accept
-//! metadata-free checkpoints and legacy string IDs.
+//! Entries preserve rollback provenance; their flattened wire shape still reads as
+//! ResponseItem on older hosts, and old metadata-free checkpoints remain readable.
 
 use std::borrow::Cow;
 
@@ -11,7 +11,6 @@ use serde::Serialize;
 
 use crate::CodexHarnessMetadata;
 use crate::ResponseItemEnvelope;
-use crate::rollout_payload::ItemPayload;
 
 /// Host omission notices delivered by a complete retained-instructions section.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -28,7 +27,7 @@ pub struct GuardianHistoryCheckpoint(pub Vec<ResponseItemEnvelope>);
 #[derive(Serialize, Deserialize, JsonSchema)]
 struct Entry<'a> {
     #[serde(flatten)]
-    item: ItemPayload<'a, ResponseItem>,
+    item: Cow<'a, ResponseItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     guardian_metadata: Option<Cow<'a, CodexHarnessMetadata>>,
 }
@@ -36,7 +35,7 @@ struct Entry<'a> {
 impl Serialize for GuardianHistoryCheckpoint {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_seq(self.0.iter().map(|entry| Entry {
-            item: (&entry.item).into(),
+            item: Cow::Borrowed(&entry.item),
             guardian_metadata: entry.metadata.as_ref().map(Cow::Borrowed),
         }))
     }
@@ -48,7 +47,7 @@ impl<'de> Deserialize<'de> for GuardianHistoryCheckpoint {
             Vec::<Entry<'_>>::deserialize(deserializer)?
                 .into_iter()
                 .map(|entry| ResponseItemEnvelope {
-                    item: entry.item.into(),
+                    item: entry.item.into_owned(),
                     metadata: entry.guardian_metadata.map(Cow::into_owned),
                 })
                 .collect(),

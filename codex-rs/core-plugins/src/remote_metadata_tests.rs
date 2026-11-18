@@ -17,7 +17,6 @@ fn plugin(renewal: &str) -> RemoteInstalledPlugin {
         marketplace_name: REMOTE_GLOBAL_MARKETPLACE_NAME.to_string(),
         id: "plugin-test".to_string(),
         version: Some("1.0.0".to_string()),
-        active_bundle: None,
         name: "test".to_string(),
         canonical_app_id: None,
         installed_at: None,
@@ -46,38 +45,16 @@ fn catalog(plugins: &[RemoteInstalledPlugin]) -> Vec<RemoteMarketplace> {
 }
 
 #[test]
-fn runtime_metadata_changes_invalidate() {
+fn behavioral_metadata_changes_still_invalidate() {
     let changes: &[fn(&mut RemoteInstalledPlugin)] = &[
-        |plugin| plugin.marketplace_name.push_str("-other"),
         |plugin| plugin.id.push_str("-other"),
         |plugin| plugin.name.push_str("-other"),
-        |plugin| plugin.canonical_app_id = Some("new-app".to_string()),
-        |plugin| plugin.enabled = false,
-        |plugin| {
-            plugin.active_bundle = Some(crate::remote::ActiveRemotePluginBundle {
-                directory_version: "2.0.0".into(),
-                remote_plugin_id: None,
-            })
-        },
-    ];
-    for change in changes {
-        let previous = [plugin("old")];
-        let mut current = previous.clone();
-        change(&mut current[0]);
-        assert!(!installed_plugin_metadata_eq(&previous, &current));
-    }
-    assert!(!installed_plugin_metadata_eq(&[plugin("old")], &[]));
-    assert!(!remote_catalog_metadata_eq(&catalog(&[plugin("old")]), &[]));
-}
-
-#[test]
-fn catalog_metadata_changes_do_not_invalidate_the_installed_runtime() {
-    let changes: &[fn(&mut RemoteInstalledPlugin)] = &[
         |plugin| plugin.version = Some("2.0.0".to_string()),
         |plugin| {
             plugin.installed_at =
                 chrono::DateTime::from_timestamp(/*secs*/ 1, /*nsecs*/ 0)
         },
+        |plugin| plugin.enabled = false,
         |plugin| plugin.install_policy = PluginInstallPolicy::NotAvailable,
         |plugin| {
             plugin.install_policy_source =
@@ -90,15 +67,20 @@ fn catalog_metadata_changes_do_not_invalidate_the_installed_runtime() {
     ];
     for change in changes {
         let previous = [plugin("old")];
-        let mut current = previous.clone();
+        let mut current = [plugin("new")];
         change(&mut current[0]);
-        assert!(installed_plugin_metadata_eq(&previous, &current));
-        assert!(installed_plugin_metadata_changes(&previous, &current).is_empty());
+        assert!(!installed_plugin_metadata_eq(&previous, &current));
         assert!(!remote_catalog_metadata_eq(
             &catalog(&previous),
             &catalog(&current)
         ));
     }
+    let previous = [plugin("old")];
+    let mut current = [plugin("new")];
+    current[0].canonical_app_id = Some("new-app".to_string());
+    assert!(!installed_plugin_metadata_eq(&previous, &current));
+    assert!(!installed_plugin_metadata_eq(&previous, &[]));
+    assert!(!remote_catalog_metadata_eq(&catalog(&previous), &[]));
 }
 
 #[test]
@@ -230,7 +212,7 @@ fn diagnostics_attribute_fields_by_plugin_id_across_membership_changes() {
         std::collections::BTreeMap::from([
             ("added".into(), vec!["added"]),
             ("removed".into(), vec!["removed"]),
-            (id, vec!["enabled"]),
+            (id, vec!["version", "enabled"]),
         ])
     );
 }

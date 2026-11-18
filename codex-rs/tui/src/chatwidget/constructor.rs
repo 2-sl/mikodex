@@ -65,7 +65,9 @@ impl ChatWidget {
             settings: fallback_default,
         };
 
-        let empty_state_animation = crate::empty_state_animation::EmptyStateAnimation::default();
+        let empty_state_animation = crate::empty_state_animation::EmptyStateAnimation::for_home(
+            config.codex_home.as_path(),
+        );
         let header = Self::placeholder_session_header_cell(&config);
         let active_cell = Some(header);
 
@@ -135,7 +137,6 @@ impl ChatWidget {
             model_catalog,
             model_popup_request_id: None,
             cloud_picker_selection: None,
-            pending_cloud_turn_settings: None,
             permission_popup_pending: false,
             permission_popup_request_id: None,
             permission_discovery: None,
@@ -148,10 +149,7 @@ impl ChatWidget {
             initial_user_message,
             status_account_display,
             remote_connection: None,
-            statusline_read: None,
-            statusline_disconnected: false,
             snapshot_local_images: false,
-            thread_params_mode: crate::app_server_session::ThreadParamsMode::Embedded,
             pending_image_submission: None,
             local_worktree_operations: true,
             windows_sandbox_local_server: false,
@@ -162,7 +160,6 @@ impl ChatWidget {
             token_info: None,
             token_usage_pending: false,
             rate_limit_snapshots_by_limit_id: BTreeMap::new(),
-            inherited_quota_provider: None,
             refreshing_status_outputs: Vec::new(),
             next_status_refresh_request_id: 0,
             pending_rate_limit_reset_request_id: None,
@@ -173,8 +170,6 @@ impl ChatWidget {
             pending_rate_limit_reset_hint: None,
             available_rate_limit_reset_credits: None,
             next_rate_limit_reset_request_id: 0,
-            account_plan: initial_plan_type,
-            quota_plan: None,
             plan_type: initial_plan_type,
             codex_rate_limit_reached_type: None,
             codex_spend_control_reached: None,
@@ -250,9 +245,7 @@ impl ChatWidget {
             thread_rename_block_message: None,
             active_side_conversation: false,
             blocks_direct_input: false,
-            read_only_thread: None,
-            read_only_history: false,
-            thread_settings_confirmed: false,
+            external_writer_view: false,
             provider_error: None,
             fork_in_progress: false,
             misalignment_policy_violation: None,
@@ -261,7 +254,6 @@ impl ChatWidget {
             forked_from: None,
             interrupted_turn_notice_mode: InterruptedTurnNoticeMode::Default,
             input_queue: InputQueueState::default(),
-            thread_stream_disconnected: false,
             safety_buffering_prompt: None,
             safety_buffering_source: UserMessageSource::Prompt,
             chat_keymap,
@@ -273,7 +265,6 @@ impl ChatWidget {
             pending_notification: None,
             quit_shortcut_expires_at: None,
             new_backend_label: None,
-            cloud_environment_name: None,
             quick_dial_menu: false,
             quick_dial_menu_key_guard: None,
             quit_shortcut_key: None,
@@ -282,7 +273,6 @@ impl ChatWidget {
             feedback,
             current_rollout_path: None,
             current_cwd,
-            primary_environment_cwd: None,
             workspace_command_runner,
             instruction_source_paths: Vec::new(),
             session_network_proxy: None,
@@ -305,6 +295,7 @@ impl ChatWidget {
             status_line_git_summary_lookup_complete: false,
             status_line_workspace_headline: None,
             status_line_workspace_headline_pending_request_id: None,
+            next_status_line_workspace_headline_request_id: 0,
             status_line_workspace_headline_last_requested_at: None,
             status_line_workspace_messages_disabled: false,
             thread_usage: thread_usage::ThreadUsageState::default(),

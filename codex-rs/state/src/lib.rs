@@ -106,9 +106,6 @@ pub use runtime::ThreadReadState;
 pub use runtime::backup_runtime_db_for_fresh_start;
 pub use runtime::collect_runtime_db_backups;
 pub use runtime::is_sqlite_corruption_error;
-pub use runtime::model_ids::MemoryModelIdStore;
-pub use runtime::model_ids::ModelIdStoreFuture;
-pub use runtime::model_ids::SessionModelIdStore;
 pub use runtime::open_thread_history_db;
 pub use runtime::recovery::RuntimeDbBackup;
 pub use runtime::runtime_db_path_for_corruption_error;
@@ -146,7 +143,7 @@ pub const PINNED_THREAD_SECTION_ID: &str = "01984de2-8f74-7c91-a3b2-5c5e937cf318
 pub const PINNED_THREAD_SECTION_NAME: &str = "Pinned";
 
 /// Environment variable for overriding the SQLite state database home directory.
-pub const SQLITE_HOME_ENV: &str = "CODEX_SQLITE_HOME";
+pub const SQLITE_HOME_ENV: &str = "MIKODEX_SQLITE_HOME";
 
 /// Errors encountered during DB operations. Tags: [stage]
 pub const DB_ERROR_METRIC: &str = "codex.db.error";

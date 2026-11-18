@@ -1,8 +1,6 @@
 //! Exercise backend policy preparation and dependency discovery.
 
 use super::backend;
-#[cfg(target_os = "linux")]
-use super::dependencies::IntegrityCommand;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::permissions::FileSystemAccessMode;
@@ -15,8 +13,6 @@ use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::sandbox::SandboxOverride;
 use codex_sandboxing::FileContentsChecker;
 use codex_sandboxing::SandboxExecRequest;
-#[cfg(target_os = "linux")]
-use codex_sandboxing::SandboxIntegrityRequest;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
@@ -55,7 +51,6 @@ pub(super) fn sandbox_request(
     policy: &FileSystemSandboxPolicy,
 ) -> SandboxExecRequest {
     SandboxExecRequest {
-        native_program: None,
         sandbox_override: SandboxOverride::NoOverride,
         command: vec![cwd.join("not-executed").to_string_lossy().into_owned()],
         cwd: PathUri::from_abs_path(cwd),
@@ -94,7 +89,6 @@ fn dependency_inventory_uses_launcher_location_and_command_path() -> io::Result<
     let policy = FileSystemSandboxPolicy::restricted(vec![deny_glob("*.key")]);
     let mut request = sandbox_request(&cwd, &policy);
     request.command[0] = launcher.to_string_lossy().into_owned();
-    let mut request = IntegrityCommand::from(SandboxIntegrityRequest::from(&request));
     for path in ["../tools", ":../tools"] {
         request.env.insert("PATH".to_owned(), path.to_owned());
         let dependencies = backend::critical_dependencies(&request, &policy, &cwd)?
@@ -142,7 +136,6 @@ fn policy_preparation_uses_command_tmpdir_and_home() -> io::Result<()> {
     request
         .env
         .insert("HOME".to_owned(), home.to_string_lossy().into_owned());
-    let mut request = IntegrityCommand::from(SandboxIntegrityRequest::from(&request));
     for (tmpdir, expected) in [
         ("", None),
         ("scratch", Some(cwd.join("scratch"))),

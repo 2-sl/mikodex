@@ -14,8 +14,7 @@ use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::client_common::ResponseEvent;
-use crate::client_common::SamplingEvent;
-use crate::client_common::SamplingStream;
+use crate::client_common::ResponseStream;
 use crate::session::session::Session;
 use crate::session::turn::get_last_assistant_message_from_turn;
 use crate::tools::ToolRouter;
@@ -42,9 +41,12 @@ impl ResponseResampling {
         }
     }
 
-    pub(crate) async fn next(&mut self, stream: &mut SamplingStream) -> Option<SamplingEvent> {
+    pub(crate) async fn next(
+        &mut self,
+        stream: &mut ResponseStream,
+    ) -> Option<CodexResult<ResponseEvent>> {
         match self.accepted_output.pop_front() {
-            Some(item) => Some(Ok(ResponseEvent::OutputItemDone(item)).into()),
+            Some(item) => Some(Ok(ResponseEvent::OutputItemDone(item))),
             None => stream.next().await,
         }
     }
@@ -111,9 +113,9 @@ impl ResponseResampling {
     /// Called after the denied completion has been accounted for, with the unchanged request.
     pub(crate) async fn retry(
         &mut self,
-        request: impl Future<Output = CodexResult<SamplingStream>> + Send,
+        request: impl Future<Output = CodexResult<ResponseStream>> + Send,
         cancellation_token: &CancellationToken,
-    ) -> CodexResult<SamplingStream> {
+    ) -> CodexResult<ResponseStream> {
         self.retry_pending = false;
         self.buffered_output = Some(Vec::new());
         request.or_cancel(cancellation_token).await?

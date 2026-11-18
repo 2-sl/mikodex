@@ -37,7 +37,6 @@ use crate::terminal_hyperlinks::mark_buffer_hyperlinks;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use crate::terminal_hyperlinks::remap_wrapped_line;
 use crate::terminal_hyperlinks::visible_lines;
-use crate::thread_label::ThreadLabelStyle;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadActiveFlag;
@@ -46,6 +45,7 @@ use codex_protocol::ThreadId;
 use codex_protocol::openai_models::ReasoningEffort;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
@@ -109,8 +109,6 @@ fn is_subagent(thread: &Thread) -> bool {
 
 #[derive(Clone)]
 pub(super) struct AgentsOverviewRow {
-    pub(super) backend_id: Option<crate::backend_id::BackendId>,
-    pub(super) label_style: ThreadLabelStyle,
     pub(super) search_id: Option<uuid::Uuid>,
     pub(super) details: AgentsOverviewDetails,
     pub(super) thread: Thread,
@@ -185,8 +183,6 @@ pub(super) struct AgentsOverviewViewState {
     pub(super) rename_target: Option<ThreadId>,
     pub(super) docked_details_height: Option<u16>,
     pub(super) docked_details_resizing: bool,
-    pub(super) details_divider_area: Option<Rect>,
-    pub(super) docked_area_height: u16,
     // The picker can finish this retained view when it selects the already active session.
     pub(super) completion: Option<ViewCompletion>,
 }
@@ -232,11 +228,11 @@ impl AgentsOverviewViewState {
 
 pub(super) struct AgentsOverviewView {
     use_theme_colors: bool,
+    docked_focus: bool,
     pub(super) rows: Vec<AgentsOverviewRow>,
     project_groups: Vec<AgentsOverviewProjectGroup>,
     directory_group_keys: Vec<PathBuf>,
     pub(super) pinned_thread_ranks: Option<HashMap<ThreadId, usize>>,
-    pub(super) pin_action_supported: bool,
     pub(super) pin_action_pending: bool,
     pub(super) can_return_to_chat: bool,
     selected: usize,
@@ -311,11 +307,11 @@ impl AgentsOverviewView {
         let mut view = Self {
             editor_keymap: keymap.clone(),
             use_theme_colors,
+            docked_focus: true,
             rows,
             project_groups,
             directory_group_keys,
             pinned_thread_ranks: None,
-            pin_action_supported: true,
             pin_action_pending: false,
             can_return_to_chat: false,
             selected,
@@ -336,6 +332,44 @@ impl AgentsOverviewView {
 
     pub(super) fn thread_ids(&self) -> Vec<ThreadId> {
         self.rows.iter().map(|row| row.thread_id).collect()
+    }
+
+    pub(super) fn selected_thread_id(&self) -> Option<ThreadId> {
+        self.selected_row().map(|row| row.thread_id)
+    }
+
+    pub(super) fn set_docked_focus(&mut self, focused: bool) {
+        self.docked_focus = focused;
+    }
+
+    /// Handle a key while the view is docked beside the conversation.
+    /// Returns true when the command should move focus back to the conversation.
+    pub(super) fn handle_docked_key_event(
+        &mut self,
+        key: KeyEvent,
+        activation_key: Option<crate::key_hint::KeyBinding>,
+    ) -> bool {
+        if key.kind == KeyEventKind::Release {
+            self.handle_key_release(key);
+            return false;
+        }
+        let state = self.state();
+        let editing_metadata = state.editing_metadata();
+        let help = state.help;
+        let renaming = state.rename_target.is_some();
+        drop(state);
+
+        let action = self.keymap.action_for(key);
+        if action == Some(ListAction::Cancel) && !editing_metadata && !help {
+            return true;
+        }
+        let focus_conversation = !help
+            && !renaming
+            && self.selected != usize::MAX
+            && self.selected_row().is_some()
+            && matches!(action, Some(ListAction::Accept | ListAction::MoveRight));
+        self.handle_key_event_with_activation_key(key, activation_key);
+        focus_conversation
     }
 
     pub(super) fn selection_after_removal(
@@ -371,7 +405,6 @@ impl AgentsOverviewView {
 
     fn can_toggle_selected_pin(&self) -> bool {
         !self.pin_action_pending
-            && self.pin_action_supported
             && self.pinned_thread_ranks.is_some()
             && self
                 .selected_row()
@@ -523,14 +556,16 @@ impl AgentsOverviewView {
             ]),
             width,
         );
-        let title = Line::from(Span::styled(
-            display_title(&row.thread).to_owned(),
-            self.title_style(row.thread_id).bold(),
-        ));
         let mut lines = vec![
             Line::from("Task details".bold()),
             Line::default(),
-            row.label_style.render(title, width),
+            crate::line_truncation::truncate_line_with_ellipsis_if_overflow(
+                Line::from(Span::styled(
+                    display_title(&row.thread).to_owned(),
+                    self.title_style(row.thread_id).bold(),
+                )),
+                width,
+            ),
             Line::from(vec![dot, " ".into(), status.into()]),
             Line::default(),
             model,
@@ -795,7 +830,6 @@ impl BottomPaneView for AgentsOverviewView {
         }
         if self.agents_keymap.new_task.is_pressed(key) {
             self.app_event_tx.send(AppEvent::NewAgentsOverviewSession {
-                backend_id: self.selected_row().and_then(|row| row.backend_id),
                 cwd: self.selected_row().map(|row| row.thread.cwd.clone()),
             });
             return;
@@ -803,7 +837,6 @@ impl BottomPaneView for AgentsOverviewView {
         if self.agents_keymap.new_worktree.is_pressed(key) {
             if self.worktrees_enabled {
                 self.app_event_tx.send(AppEvent::NewAgentsOverviewWorktree {
-                    backend_id: self.selected_row().and_then(|row| row.backend_id),
                     cwd: self.selected_row().map(|row| row.thread.cwd.clone()),
                 });
             }

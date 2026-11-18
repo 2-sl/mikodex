@@ -2,7 +2,7 @@
 //! Reconnecting and auxiliary picker connections reuse the launch owner; a different
 //! backend gets a fresh identity. These process-local IDs never appear on the wire.
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct BackendId(uuid::Uuid);
 
 impl BackendId {

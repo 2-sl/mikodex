@@ -1,27 +1,18 @@
-//! Preserve startup terminal input while filtering replies to terminal probes.
+//! Preserve startup terminal input while filtering completed terminal-color replies.
 
 const MAX_REPLAYED_OSC_BYTES: usize = 1024;
 
-/// Return the input to replay and whether Herdr acknowledged the Kitty graphics query.
+/// Preserve input and bracketed paste while omitting completed terminal-color replies.
 ///
 /// Keep bounded incomplete OSC prefixes so unread continuations stay parser-framed.
-pub(super) fn parse_startup_input(input: &[u8], probe_herdr: bool) -> (Vec<u8>, bool) {
+pub(super) fn startup_replay_input(input: &[u8]) -> Vec<u8> {
     const PASTE_START: &[u8] = b"\x1b[200~";
     const PASTE_END: &[u8] = b"\x1b[201~";
-    const KITTY_REPLY: &[u8] = b"\x1b_Gi=31;";
 
     let mut replay = Vec::with_capacity(input.len());
-    let mut kitty_graphics = false;
     let mut cursor = 0;
     let mut inside_paste = false;
     while cursor < input.len() {
-        if input
-            .get(cursor..cursor + 11)
-            .is_some_and(|report| super::alternate_scroll_report(report).is_some())
-        {
-            cursor += 11;
-            continue;
-        }
         if inside_paste {
             if input[cursor..].starts_with(PASTE_END) {
                 replay.extend_from_slice(PASTE_END);
@@ -54,17 +45,6 @@ pub(super) fn parse_startup_input(input: &[u8], probe_herdr: bool) -> (Vec<u8>, 
             continue;
         }
 
-        // Only consume replies to our query. Bracketed paste above remains user input.
-        if probe_herdr
-            && let Some(message) = input[cursor..].strip_prefix(KITTY_REPLY)
-            && let Some(end) = message.iter().position(|b| !(0x20..=0x7e).contains(b))
-            && message[end..].starts_with(b"\x1b\\")
-        {
-            kitty_graphics = &message[..end] == b"OK";
-            cursor += KITTY_REPLY.len() + end + 2;
-            continue;
-        }
-
         if input[cursor..].starts_with(b"\x1b]") {
             if let Some((end, terminator_len)) = super::osc_payload_end(&input[cursor + 2..]) {
                 cursor += 2 + end + terminator_len;
@@ -78,7 +58,7 @@ pub(super) fn parse_startup_input(input: &[u8], probe_herdr: bool) -> (Vec<u8>, 
         replay.push(input[cursor]);
         cursor += 1;
     }
-    (replay, kitty_graphics)
+    replay
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 //! Assembles reviewer policy instructions from captured configuration and model messages.
-//! The host supplies guidance for the retrieval tools it installs.
+//! Typed host fragments supply optional historical-authorization instructions unchanged.
 
 use codex_context_fragments::ContextualUserFragment;
 use codex_prompts::GuardianPolicyInstructions;
@@ -30,14 +30,14 @@ pub const GUARDIAN_FOLLOWUP_REVIEW_REMINDER: &str = concat!(
     "overwrites in such cases."
 );
 
-/// Composes the shared reviewer policy and optional retrieval guidance.
+/// Composes the same base policy and optional history fragment used for every review.
 pub fn reviewer_instructions(
     transcript_format: TranscriptFormat,
     tenant_policy_config: &str,
     extra_policy: Option<&str>,
     policy_template: Option<&str>,
     model_messages: ResolvedModelMessages<'_>,
-    retrieval_guidance: Option<&str>,
+    conversation_history: Option<&str>,
 ) -> String {
     let auto_review = model_messages.auto_review();
     let extra_policy = extra_policy.unwrap_or_default();
@@ -52,9 +52,9 @@ pub fn reviewer_instructions(
     .render()
     .into_text()
     .unwrap_or_default();
-    if let Some(guidance) = retrieval_guidance {
+    if let Some(conversation_history) = conversation_history {
         instructions.push('\n');
-        instructions.push_str(guidance);
+        instructions.push_str(conversation_history);
     }
     instructions
 }

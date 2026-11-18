@@ -48,7 +48,6 @@ impl App {
         app_server: &AppServerSession,
         request_id: String,
         name: String,
-        environment_id: Option<String>,
         thread_id: ThreadId,
     ) {
         let request_handle = app_server.request_handle();
@@ -58,7 +57,6 @@ impl App {
                 .request_typed(ClientRequest::McpServerOauthLogin {
                     request_id: RequestId::String(request_id.clone()),
                     params: McpServerOauthLoginParams {
-                        environment_id,
                         name,
                         thread_id: Some(thread_id.to_string()),
                         client_registration: None,
@@ -161,14 +159,8 @@ impl App {
         &mut self,
         app_server: &AppServerSession,
         thread_id: ThreadId,
-        request_id: Uuid,
+        request_id: u64,
     ) {
-        if !self
-            .chat_widget
-            .is_pending_thread_usage(thread_id, request_id)
-        {
-            return;
-        }
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
@@ -220,11 +212,8 @@ impl App {
     pub(super) fn refresh_status_line_workspace_headline(
         &mut self,
         app_server: &AppServerSession,
-        request_id: Uuid,
+        request_id: u64,
     ) {
-        if !self.chat_widget.is_pending_workspace_headline(request_id) {
-            return;
-        }
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
@@ -832,7 +821,6 @@ pub(super) async fn fetch_all_mcp_server_statuses(
             .request_typed(ClientRequest::McpServerStatusList {
                 request_id,
                 params: ListMcpServerStatusParams {
-                    environment_id: None,
                     cursor: cursor.clone(),
                     limit: Some(100),
                     detail: Some(detail),
@@ -1073,13 +1061,13 @@ fn plugin_remote_section_error_next_step(label: &str, err: &str) -> &'static str
         || err.contains("plugin sharing is not enabled")
         || err.contains("feature disabled")
     {
-        "Ask a workspace admin to enable Codex plugins or plugin sharing"
+        "Ask a workspace admin to enable Mikodex plugins or plugin sharing"
     } else if err.contains("workspace") && (err.contains("access") || err.contains("mismatch")) {
         "Switch to the matching workspace or ask the sharer for access"
     } else if err.contains("not found") || err.contains("status 404") {
         "Check that you are signed in to the correct workspace and still have access"
     } else if err.contains("old build") || err.contains("update codex") || err.contains("stale") {
-        "Update Codex, then try opening the shared plugin again"
+        "Update Mikodex, then try opening the shared plugin again"
     } else if err.contains("service unavailable")
         || err.contains("temporarily unavailable")
         || err.contains("status 503")
@@ -1101,7 +1089,8 @@ fn plugin_sharing_disabled_remote_section_error() -> PluginRemoteSectionError {
     PluginRemoteSectionError {
         section_id: "shared-with-me".to_string(),
         label: "Shared with me".to_string(),
-        message: "Enable plugin sharing for this Codex session to load shared plugins".to_string(),
+        message: "Enable plugin sharing for this Mikodex session to load shared plugins"
+            .to_string(),
     }
 }
 
@@ -1597,7 +1586,7 @@ mod tests {
             (
                 "Shared with me",
                 "old build fallback",
-                "Update Codex, then try opening the shared plugin again",
+                "Update Mikodex, then try opening the shared plugin again",
             ),
             (
                 "Shared with me",
@@ -1612,7 +1601,7 @@ mod tests {
             (
                 "Shared with me",
                 "plugin sharing is not enabled",
-                "Ask a workspace admin to enable Codex plugins or plugin sharing",
+                "Ask a workspace admin to enable Mikodex plugins or plugin sharing",
             ),
         ];
 
@@ -1631,7 +1620,7 @@ mod tests {
             PluginRemoteSectionError {
                 section_id: "shared-with-me".to_string(),
                 label: "Shared with me".to_string(),
-                message: "Enable plugin sharing for this Codex session to load shared plugins"
+                message: "Enable plugin sharing for this Mikodex session to load shared plugins"
                     .to_string(),
             }
         );
@@ -1641,7 +1630,6 @@ mod tests {
     fn mcp_inventory_maps_prefix_tool_names_by_server() {
         let statuses = vec![
             McpServerStatus {
-                environment_id: None,
                 server_capabilities: None,
                 tool_list_meta: None,
                 tools_error: None,
@@ -1668,7 +1656,6 @@ mod tests {
                 auth_status: codex_app_server_protocol::McpAuthStatus::Unsupported,
             },
             McpServerStatus {
-                environment_id: None,
                 server_capabilities: None,
                 tool_list_meta: None,
                 tools_error: None,

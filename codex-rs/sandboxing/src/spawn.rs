@@ -1,8 +1,6 @@
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::path::Path;
 
-#[cfg(windows)]
 use anyhow::Context;
 use anyhow::Result;
 use codex_protocol::config_types::WindowsSandboxLevel;
@@ -15,13 +13,6 @@ use crate::SandboxType;
 use crate::WindowsSandboxFilesystemOverrides;
 use crate::WindowsSandboxProxySettingsMode;
 use crate::terminal_queries::respond_to_terminal_queries;
-
-/// Terminal and standard I/O options for a prepared command.
-pub struct SpawnOptions<'a> {
-    pub tty: bool,
-    pub stdin_open: bool,
-    pub inherited_fds: codex_utils_pty::ChildFds<'a>,
-}
 
 /// Windows-specific inputs for an executor-native process spawn.
 // TODO(anp): Reconcile the Windows backend copy with the supplied sandbox
@@ -38,8 +29,7 @@ pub struct WindowsSandboxSpawnRequest<'a> {
 
 /// Executor-native process launch request shared by local and exec-server execution.
 pub struct SpawnRequest<'a> {
-    pub program: &'a OsStr,
-    pub args: &'a [String],
+    pub command: &'a [String],
     pub cwd: &'a Path,
     pub env: &'a HashMap<String, String>,
     pub arg0: &'a Option<String>,
@@ -78,15 +68,7 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
                     permission_profile: windows.permission_profile,
                     workspace_roots: windows.workspace_roots,
                     codex_home: codex_home.as_path(),
-                    command: std::iter::once(
-                        request
-                            .program
-                            .to_str()
-                            .context("Windows sandbox program path is not UTF-8")?
-                            .to_owned(),
-                    )
-                    .chain(request.args.iter().cloned())
-                    .collect(),
+                    command: request.command.to_vec(),
                     cwd: request.cwd,
                     env_map: request.env.clone(),
                     windows_sandbox_level: windows.windows_sandbox_level,
@@ -120,10 +102,14 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
         anyhow::bail!("Windows sandbox process spawn is unavailable on this platform");
     }
 
+    let (program, args) = request
+        .command
+        .split_first()
+        .context("missing program for process spawn")?;
     let spawned = if tty {
         codex_utils_pty::pty::spawn_process(
-            request.program,
-            request.args,
+            program,
+            args,
             request.cwd,
             request.env,
             request.arg0,
@@ -133,8 +119,8 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
         .await
     } else if request.stdin_open {
         codex_utils_pty::pipe::spawn_process(
-            request.program,
-            request.args,
+            program,
+            args,
             request.cwd,
             request.env,
             request.arg0,
@@ -143,8 +129,8 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
         .await
     } else {
         codex_utils_pty::pipe::spawn_process_no_stdin(
-            request.program,
-            request.args,
+            program,
+            args,
             request.cwd,
             request.env,
             request.arg0,

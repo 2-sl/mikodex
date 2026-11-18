@@ -2,7 +2,6 @@
 use std::os::unix::process::ExitStatusExt;
 
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::io;
 #[cfg(target_os = "windows")]
 use std::path::Path;
@@ -38,7 +37,6 @@ use codex_protocol::protocol::ExecCommandOutputDeltaEvent;
 use codex_protocol::protocol::ExecOutputStream;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxManager;
-use codex_sandboxing::SandboxNetwork;
 use codex_sandboxing::SandboxSelection;
 use codex_sandboxing::SandboxTransformRequest;
 use codex_sandboxing::SandboxType;
@@ -412,13 +410,11 @@ pub async fn build_exec_request(
             command,
             permissions: permission_profile,
             workspace_roots: None,
-            runtime_readable_paths: None,
+            runtime_readable_paths: &[],
             selection: SandboxSelection::Explicit(sandbox_type),
-            network: SandboxNetwork::new(
-                enforce_managed_network,
-                network.as_ref(),
-                network_environment_id.as_deref(),
-            ),
+            enforce_managed_network,
+            environment_id: network_environment_id.as_deref(),
+            network: network.as_ref(),
             sandbox_policy_cwd: &sandbox_policy_cwd_uri,
             sandbox_exe: if cfg!(windows) {
                 codex_self_exe.as_deref()
@@ -428,7 +424,7 @@ pub async fn build_exec_request(
             use_legacy_landlock,
             windows_sandbox_level,
         })?
-        .into_command_request()?;
+        .into_command_request();
     // These hints belong to the native Windows backend. Other backends use
     // the materialized profile and must not project executor paths onto this host.
     let windows_sandbox_workspace_roots = if sandbox_type == SandboxType::WindowsRestrictedToken {
@@ -458,7 +454,6 @@ pub(crate) async fn execute_exec_request(
 ) -> Result<ExecToolCallOutput> {
     let ExecRequest {
         command,
-        native_program,
         cwd,
         env,
         exec_server_env_config: _,
@@ -507,7 +502,6 @@ pub(crate) async fn execute_exec_request(
     let start = Instant::now();
     let raw_output_result = get_raw_output_result(
         params,
-        native_program,
         network_sandbox_policy,
         stdout_stream,
         after_spawn,
@@ -525,7 +519,6 @@ pub(crate) async fn execute_exec_request(
 #[allow(clippy::too_many_arguments)]
 async fn get_raw_output_result(
     params: ExecParams,
-    native_program: Option<OsString>,
     network_sandbox_policy: NetworkSandboxPolicy,
     stdout_stream: Option<StdoutStream>,
     after_spawn: Option<Box<dyn FnOnce() + Send>>,
@@ -550,14 +543,7 @@ async fn get_raw_output_result(
         .await;
     }
 
-    exec(
-        params,
-        native_program,
-        network_sandbox_policy,
-        stdout_stream,
-        after_spawn,
-    )
-    .await
+    exec(params, network_sandbox_policy, stdout_stream, after_spawn).await
 }
 
 #[cfg(target_os = "windows")]
@@ -939,7 +925,6 @@ fn aggregate_output(
 /// wrapper args, as appropriate.
 async fn exec(
     params: ExecParams,
-    native_program: Option<OsString>,
     network_sandbox_policy: NetworkSandboxPolicy,
     stdout_stream: Option<StdoutStream>,
     after_spawn: Option<Box<dyn FnOnce() + Send>>,
@@ -977,7 +962,7 @@ async fn exec(
     })?;
     let arg0_ref = arg0.as_deref();
     let child = spawn_child_async(SpawnChildRequest {
-        program: native_program.map_or_else(|| PathBuf::from(program), PathBuf::from),
+        program: PathBuf::from(program),
         args: args.into(),
         arg0: arg0_ref,
         cwd,

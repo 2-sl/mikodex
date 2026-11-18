@@ -1,6 +1,4 @@
-use crate::async_scorer::conversation::ConversationBackend;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -11,18 +9,14 @@ use pretty_assertions::assert_eq;
 use super::GuardianV2ScoreProgress;
 
 pub(in crate::async_scorer) fn cached_score(store: &ExtensionData) -> Option<SecurityRiskScore> {
-    let progress = ConversationBackend::for_turn(store, store)
-        .map(|cache| Arc::clone(&cache.progress))
-        .or_else(|| store.get::<GuardianV2ScoreProgress>())?;
+    let progress = store.get::<GuardianV2ScoreProgress>()?;
     let state = progress.state.lock().unwrap();
     state.score.clone()
 }
 
 // Replace only the score so fixtures can exercise authorization and coverage independently.
 pub(in crate::async_scorer) fn set_cached_score(store: &ExtensionData, score: SecurityRiskScore) {
-    let progress = ConversationBackend::for_turn(store, store)
-        .map(|cache| Arc::clone(&cache.progress))
-        .unwrap_or_else(|| store.get_or_init(GuardianV2ScoreProgress::default));
+    let progress = store.get_or_init(GuardianV2ScoreProgress::default);
     progress.state.lock().unwrap().score = Some(score);
 }
 
@@ -40,12 +34,12 @@ fn fail_closed_score_preserves_classification_order() {
     };
     set_cached_score(&thread_store, newer_score.clone());
 
-    progress.fail_closed(SystemTime::UNIX_EPOCH, /*index*/ 0);
+    progress.fail_closed(SystemTime::UNIX_EPOCH);
     assert_eq!(cached_score(&thread_store).as_ref(), Some(&newer_score));
 
     for sampled_at in [newer_sampled_at, newest_sampled_at] {
         set_cached_score(&thread_store, newer_score.clone());
-        progress.fail_closed(sampled_at, /*index*/ 0);
+        progress.fail_closed(sampled_at);
         let fail_closed_score = SecurityRiskScore {
             scores: BTreeMap::from([("action_risk".to_owned(), 1.0)]),
             call_id: None,

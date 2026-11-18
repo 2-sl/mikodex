@@ -216,6 +216,26 @@ impl CommandPopup {
         self.filtered().into_iter().map(|(c, _)| c).collect()
     }
 
+    /// Return the same available command names and descriptions shown by the slash popup.
+    pub(crate) fn command_reference_items(&self) -> Vec<(String, String)> {
+        self.commands
+            .iter()
+            .filter(|command| {
+                !matches!(command, CommandItem::Builtin(cmd) if ALIAS_COMMANDS.contains(cmd))
+                    && !self.is_unavailable(command)
+            })
+            .map(|item| {
+                let description = if matches!(item, CommandItem::Builtin(SlashCommand::Daybreak)) {
+                    self.daybreak_command_description
+                        .unwrap_or(item.description())
+                } else {
+                    item.description()
+                };
+                (item.command().to_owned(), description.to_owned())
+            })
+            .collect()
+    }
+
     fn rows_from_matches(
         &self,
         matches: Vec<(CommandItem, Option<Vec<usize>>)>,

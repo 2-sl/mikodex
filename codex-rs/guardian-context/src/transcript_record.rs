@@ -61,10 +61,8 @@ impl TranscriptRecord {
             ConversationTranscriptEntryKind::Assistant
             | ConversationTranscriptEntryKind::ProtectedAssistant
             | ConversationTranscriptEntryKind::ToolCall(_)
-            | ConversationTranscriptEntryKind::EnclosingToolCall(_)
             | ConversationTranscriptEntryKind::Reasoning => "assistant",
-            ConversationTranscriptEntryKind::SelectedExecOutput
-            | ConversationTranscriptEntryKind::ToolOutput(_)
+            ConversationTranscriptEntryKind::ToolOutput(_)
             | ConversationTranscriptEntryKind::NodeReplToolOutput(_) => "tool",
         };
         let mut record = Self {

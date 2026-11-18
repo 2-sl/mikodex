@@ -6,7 +6,6 @@
 //! rather than reproducing the complete response's source spelling (available through `/copy`).
 
 use std::ops::Range;
-use std::ops::RangeInclusive;
 use std::sync::Arc;
 
 use pulldown_cmark::Event;
@@ -383,31 +382,21 @@ impl SelectedLine {
     }
 }
 
-pub(crate) fn selection(
-    lines: &[SelectedLine],
-    plain: &str,
-    rectangle_rows: Option<&RangeInclusive<usize>>,
-) -> (String, CopyFormat) {
-    render_selection(lines, plain, rectangle_rows, SelectionOutput::Markdown)
+pub(crate) fn selection(lines: &[SelectedLine], plain: &str) -> (String, CopyFormat) {
+    render_selection(lines, plain, SelectionOutput::Markdown)
 }
 
-pub(crate) fn literal_selection(
-    lines: &[SelectedLine],
-    plain: &str,
-    rectangle_rows: Option<&RangeInclusive<usize>>,
-) -> String {
-    render_selection(lines, plain, rectangle_rows, SelectionOutput::PlainText).0
+pub(crate) fn literal_selection(lines: &[SelectedLine], plain: &str) -> String {
+    render_selection(lines, plain, SelectionOutput::PlainText).0
 }
 
 fn render_selection(
     lines: &[SelectedLine],
     plain: &str,
-    rectangle_rows: Option<&RangeInclusive<usize>>,
     output: SelectionOutput,
 ) -> (String, CopyFormat) {
     // Soft wraps and streamed fragments of the same logical line are already coalesced.
-    if rectangle_rows.is_none()
-        && let [line] = lines
+    if let [line] = lines
         && line
             .source
             .copy
@@ -465,8 +454,8 @@ fn render_selection(
     } else {
         lines
     };
-    let rich = lines.iter().enumerate().any(|(index, line)| {
-        (!line.range.is_empty() || index == 0 && rectangle_rows.is_some())
+    let rich = lines.iter().any(|line| {
+        !line.range.is_empty()
             && line
                 .source
                 .copy
@@ -502,9 +491,7 @@ fn render_selection(
             indentation = Some(indentation.map_or(spaces, |previous| previous.min(spaces)));
         }
         let prefix = dedent(prefix, indentation.unwrap_or(/*default*/ 0));
-        // A rectangle is scoped to the table at the start of the selection.
-        let rectangle = rectangle_rows.filter(|_| first);
-        if line.range.is_empty() && rectangle.is_none() {
+        if line.range.is_empty() {
             if line.source.text.is_empty() {
                 out.push_str(prefix.trim_end());
             }
@@ -529,8 +516,7 @@ fn render_selection(
                 selected.extend(lines.next());
             }
             let entire_selection = first && lines.peek().is_none();
-            let (mut body, format) =
-                table::render(&selected, table, entire_selection, rectangle, output);
+            let (mut body, format) = table::render(&selected, table, entire_selection, output);
             if format == CopyFormat::PlainText {
                 body.retain(|ch| !ch.is_control() || matches!(ch, '\n' | '\t'));
                 return (body, format);

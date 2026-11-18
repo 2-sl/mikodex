@@ -104,7 +104,7 @@ impl ExperimentalFeaturesView {
             Paragraph::new(Line::from("Experimental features".bold())).wrap(Wrap { trim: false }),
         );
         for text in [
-            "Checked features are configured on. Some experimental features take effect only in new tasks or after restarting the Codex server.",
+            "Checked features are configured on. Some experimental features take effect only in new tasks or after restarting the Mikodex server.",
             self.discovery_status.as_str(),
         ].into_iter().filter(|text| !text.is_empty()) {
             for line in textwrap::wrap(text, usize::from(width.max(1))) {
@@ -314,7 +314,7 @@ impl BottomPaneView for ExperimentalFeaturesView {
             }
             Err(error) => {
                 tracing::warn!(%error, "experimental feature discovery failed");
-                self.discovery_status = "Server experiments unavailable. Reopen /experimental to retry; restart this Codex client if requests remain unanswered.".to_string();
+                self.discovery_status = "Server experiments unavailable. Reopen /experimental to retry; restart this Mikodex client if requests remain unanswered.".to_string();
             }
         }
         true
@@ -366,6 +366,13 @@ impl BottomPaneView for ExperimentalFeaturesView {
     }
 
     fn on_ctrl_c(&mut self) -> CancellationEvent {
+        // After an attempted save, cancellation must remain possible even if the
+        // server rejects retries immediately. Explicit accept retries dirty keys.
+        if !self.unconfirmed.is_empty() {
+            self.save_special_controls();
+        } else {
+            self.save_changes();
+        }
         self.complete = true;
         CancellationEvent::Handled
     }
@@ -450,7 +457,7 @@ fn experimental_popup_hint_line(keymap: &ListKeymap) -> Line<'static> {
     if let Some(cancel) = keymap.primary_hint(ListAction::Cancel) {
         spans.push(" · ".into());
         spans.extend(cancel.spans());
-        spans.push(" cancel".into());
+        spans.push(" save/close".into());
     }
     Line::from(spans)
 }
