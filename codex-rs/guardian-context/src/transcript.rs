@@ -337,6 +337,16 @@ fn collect_transcript_for_review(
                     continue;
                 }
                 let kind = match tool_names_by_call_id.get(call_id.as_str()) {
+                    // The recorder can still verify an exec result after its call leaves review history.
+                    None
+                    | Some((
+                        "exec",
+                        None | Some("" | codex_protocol::DEFAULT_FUNCTION_NAMESPACE),
+                    )) if matches!(item, ResponseItem::CustomToolCallOutput { .. })
+                        && is_selected_exec_output.is_some_and(|select| select(item)) =>
+                    {
+                        ConversationTranscriptEntryKind::SelectedExecOutput
+                    }
                     Some((name, namespace)) if is_node_repl_backed_tool(name, *namespace) => {
                         ConversationTranscriptEntryKind::NodeReplToolOutput(format!(
                             "tool {name} result"

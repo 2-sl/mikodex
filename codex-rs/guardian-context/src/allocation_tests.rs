@@ -2,7 +2,11 @@
 
 use super::*;
 use crate::ElasticSectionLimits;
+use crate::estimate_input_tokens;
 use codex_protocol::models::ImageReference;
+use codex_protocol::models::ResponseItem;
+use codex_protocol::models::input_text;
+use codex_protocol_test_support::uuid_v7_item_id_generator_for_test;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
@@ -102,6 +106,7 @@ fn groups_select_recent_whole_entries_and_redistribute_packing_gaps() {
         let limits = ElasticSectionLimits::new(minimum, minimum).unwrap();
         let mut config = ElasticBudgetConfig {
             sections: groups.map(|group| (group, limits)).into(),
+            ..Default::default()
         };
         config.sections.insert(
             groups[1],
@@ -258,8 +263,10 @@ fn whole_images_use_defaults_and_charge_shared_framing_once() {
             (ElasticSection::TranscriptImages, limits),
         ]),
     ] {
-        let config =
-            crate::budget::tests::complete_minimum_budget(ElasticBudgetConfig { sections });
+        let config = crate::budget::tests::complete_minimum_budget(ElasticBudgetConfig {
+            sections,
+            ..Default::default()
+        });
         let mut demand = collect_demand(&context).unwrap();
         let allowance = context.estimated_tokens() - demand.protected_tokens;
         let expected_selection = demand
@@ -346,6 +353,7 @@ fn whole_images_use_defaults_and_charge_shared_framing_once() {
                         .unwrap(),
                 ),
             ]),
+            ..Default::default()
         });
         let budget = RequestBudget {
             max_input_tokens: context.estimated_tokens() + HISTORY_TOKENS,

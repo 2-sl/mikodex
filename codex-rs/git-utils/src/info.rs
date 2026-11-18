@@ -1,4 +1,9 @@
-use std::collections::BTreeMap;
+mod remotes;
+
+pub use remotes::get_git_remote_urls;
+pub use remotes::get_git_remote_urls_assume_git_repo;
+pub use remotes::observe_git_remote_urls;
+
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::Path;
@@ -121,32 +126,6 @@ pub async fn collect_git_info(cwd: &Path) -> Option<GitInfo> {
     }
 
     Some(git_info)
-}
-
-/// Collect fetch remotes in a multi-root-friendly format: {"origin": "https://..."}.
-pub async fn get_git_remote_urls(cwd: &Path) -> Option<BTreeMap<String, SanitizedGitUrl>> {
-    let is_git_repo = run_git_command_with_timeout(&["rev-parse", "--git-dir"], cwd)
-        .await?
-        .status
-        .success();
-    if !is_git_repo {
-        return None;
-    }
-
-    get_git_remote_urls_assume_git_repo(cwd).await
-}
-
-/// Collect fetch remotes without checking whether `cwd` is in a git repo.
-pub async fn get_git_remote_urls_assume_git_repo(
-    cwd: &Path,
-) -> Option<BTreeMap<String, SanitizedGitUrl>> {
-    let output = run_git_command_with_timeout(&["remote", "-v"], cwd).await?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8(output.stdout).ok()?;
-    parse_git_remote_urls(stdout.as_str())
 }
 
 /// Return the current HEAD commit hash without checking whether `cwd` is in a git repo.
@@ -283,35 +262,6 @@ fn normalize_remote_host(host: &str, default_port: Option<&str>) -> String {
 
 fn trim_git_suffix(value: &str) -> &str {
     value.strip_suffix(".git").unwrap_or(value)
-}
-
-fn parse_git_remote_urls(stdout: &str) -> Option<BTreeMap<String, SanitizedGitUrl>> {
-    let mut remotes = BTreeMap::new();
-    for line in stdout.lines() {
-        let Some(fetch_line) = line.strip_suffix(" (fetch)") else {
-            continue;
-        };
-
-        let Some((name, url_part)) = fetch_line
-            .split_once('\t')
-            .or_else(|| fetch_line.split_once(' '))
-        else {
-            continue;
-        };
-
-        let url = url_part.trim_start();
-        if !url.is_empty()
-            && let Ok(url) = SanitizedGitUrl::try_from(url)
-        {
-            remotes.insert(name.to_string(), url);
-        }
-    }
-
-    if remotes.is_empty() {
-        None
-    } else {
-        Some(remotes)
-    }
 }
 
 /// A minimal commit summary entry used for pickers (subject + timestamp + sha).
@@ -456,7 +406,7 @@ pub(crate) fn local_git_command(
         .args(["-c", fsmonitor.git_config_arg()])
         .args(args)
         .current_dir(cwd);
-    run_git_command_with_timeout_output(&mut command, GIT_COMMAND_TIMEOUT).await
+    command
 }
 
 async fn get_git_remotes(cwd: &Path) -> Option<Vec<String>> {
@@ -876,6 +826,7 @@ pub async fn current_branch_name(cwd: &Path) -> Option<String> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+    use std::collections::BTreeMap;
     use std::process::Stdio;
 
     #[tokio::test]
@@ -965,50 +916,6 @@ mod tests {
         for remote in ["", "file:///tmp/repo", "github.com/openai", "/tmp/repo"] {
             assert_eq!(canonicalize_git_remote_url(remote), None);
         }
-    }
-
-    /// Fetch remotes must be sanitized before they enter workspace metadata.
-    #[test]
-    fn parse_git_remote_urls_sanitizes_fetch_credentials() {
-        let remotes = parse_git_remote_urls(
-            "origin\thttps://alice:secret@github.com/org/repo.git (fetch)\n\
-             origin\thttps://alice:secret@github.com/org/repo.git (push)\n\
-             upstream\tgit@github.com:org/upstream.git (fetch)\n",
-        );
-
-        assert_eq!(
-            remotes,
-            Some(BTreeMap::from([
-                (
-                    "origin".to_string(),
-                    SanitizedGitUrl::try_from("https://github.com/org/repo.git")
-                        .expect("parse expected remote URL"),
-                ),
-                (
-                    "upstream".to_string(),
-                    SanitizedGitUrl::try_from("git@github.com:org/upstream.git")
-                        .expect("parse expected remote URL"),
-                ),
-            ]))
-        );
-    }
-
-    /// Malformed remote entries are omitted instead of leaking their raw contents.
-    #[test]
-    fn parse_git_remote_urls_skips_malformed_entries() {
-        let remotes = parse_git_remote_urls(
-            "bad\thttps://alice:secret@[invalid (fetch)\n\
-             origin\thttps://github.com/org/repo.git (fetch)\n",
-        );
-
-        assert_eq!(
-            remotes,
-            Some(BTreeMap::from([(
-                "origin".to_string(),
-                SanitizedGitUrl::try_from("https://github.com/org/repo.git")
-                    .expect("parse expected remote URL"),
-            )]))
-        );
     }
 
     /// Both metadata collection paths must sanitize credentials introduced by `insteadOf`.
