@@ -4,7 +4,9 @@
 
 mod auth;
 mod events;
+mod idle;
 mod requests;
+mod thread_title;
 
 use crate::AppServerClient;
 use crate::AppServerEvent;
@@ -16,16 +18,33 @@ use codex_app_server_protocol as protocol;
 use codex_cloud_client as cloud;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::bail;
+
 use color_eyre::eyre::eyre;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use serde_json::Value;
+use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
 pub use auth::connect;
+pub(super) use thread_title::CloudTitleClient;
 
 type ReplyStream = BoxStream<'static, Result<cloud::Event, cloud::Error>>;
+type OpenReplyStream = (ReplyStream, Option<cloud::Event>);
+
+/// Separate an immediate EOF from a quiet, successfully attached stream.
+fn check_reply_stream(
+    stream: &mut ReplyStream,
+) -> Result<Option<cloud::Event>, Option<cloud::Error>> {
+    match tokio::task::unconstrained(stream.next()).now_or_never() {
+        Some(None) => Err(None),
+        Some(Some(Err(error))) => Err(Some(error)),
+        Some(Some(Ok(event))) => Ok(Some(event)),
+        None => Ok(None),
+    }
+}
 
 /// Rejected locally before an admission request can be sent.
 #[derive(Debug, thiserror::Error)]
@@ -49,7 +68,9 @@ struct Attachment {
 
 #[derive(Default)]
 struct Replies {
+    idle: Option<idle::Recovery>,
     active: Option<Attachment>,
+    generation: u64,
     stream_losses: CloudStreamLosses,
     // Keep the last observed status through EOF until this conversation is unloaded.
     latest_status: Option<(String, cloud::ThreadStatus)>,
@@ -91,21 +112,84 @@ impl Replies {
     }
 
     async fn forward_next(&mut self, output: &mpsc::UnboundedSender<AppServerEvent>) {
+        if self.active.is_none()
+            && let Some(recovery) = &mut self.idle
+            && let Some((root, open)) = &mut recovery.pending
+        {
+            let opened = open.await;
+            let root = Arc::clone(root);
+            recovery.pending = None;
+            match opened.and_then(|attachment| {
+                recovery.login.permit.check().map_err(|_| None)?;
+                Ok(attachment)
+            }) {
+                Ok((stream, first)) => {
+                    recovery.installed = Some(tokio::time::Instant::now());
+                    // A same-thread Attach can stay quiet. Keep the last observation until an
+                    // event or a dispatched mutation changes recovery eligibility.
+                    self.install(&root, stream, first, output);
+                    if let Some(recovery) = &self.idle
+                        && recovery.observed_idle != Some(false)
+                    {
+                        recovery.notify_connected(&root, output);
+                    }
+                }
+                Err(reason) => {
+                    recovery
+                        .state
+                        .send_replace(crate::cloud::IdleReconnect::Inactive);
+                    self.report_loss(&root, reason, output);
+                }
+            }
+            return;
+        }
         let Some(active) = &mut self.active else {
             return std::future::pending().await;
         };
         match active.stream.next().await {
-            Some(Ok(event)) => forward(&active.thread_id, event, output, &mut self.latest_status),
-            Some(Err(_)) | None => {
-                let error = cloud_error(
-                    &active.thread_id,
-                    "Cloud stream ended. Reopen the conversation to reconnect.",
-                );
+            Some(Ok(event)) => forward(
+                &active.thread_id,
+                event,
+                output,
+                &mut self.latest_status,
+                self.idle.as_mut(),
+            ),
+            ended => {
+                let id = active.thread_id.clone();
+                let error = ended.and_then(Result::err);
                 self.active = None;
-                self.stream_losses.record(&error.thread_id);
-                let _ = output.send(AppServerEvent::ThreadStreamDisconnected(Box::new(error)));
+                if let Some(recovery) = &mut self.idle {
+                    recovery
+                        .state
+                        .send_replace(crate::cloud::IdleReconnect::Inactive);
+                    let stable = recovery
+                        .installed
+                        .is_none_or(|start| start.elapsed() >= std::time::Duration::from_secs(15));
+                    if recovery.observed_idle == Some(true)
+                        && stable
+                        && idle::transient(error.as_ref())
+                    {
+                        recovery.offer(&id);
+                    }
+                }
+                self.report_loss(&id, error.as_ref().and_then(idle::blocked_recovery), output);
             }
         }
+    }
+
+    fn report_loss(
+        &self,
+        id: &str,
+        reason: Option<&str>,
+        output: &mpsc::UnboundedSender<AppServerEvent>,
+    ) {
+        self.stream_losses.record(id);
+        let _ = output.send(AppServerEvent::ThreadStreamDisconnected(Box::new(
+            cloud_error(
+                id,
+                reason.unwrap_or("Cloud stream ended. Reopen the conversation to reconnect."),
+            ),
+        )));
     }
 
     async fn while_listening<T>(
@@ -129,26 +213,61 @@ impl Replies {
         open: impl Future<Output = Result<ReplyStream, cloud::Error>>,
         output: &mpsc::UnboundedSender<AppServerEvent>,
     ) -> Result<()> {
+        if let Some(opened) = self.open_attachment(id, open, output).await? {
+            self.install_replacement(id, opened, output);
+        }
+        Ok(())
+    }
+
+    async fn open_attachment(
+        &mut self,
+        id: &str,
+        open: impl Future<Output = Result<ReplyStream, cloud::Error>>,
+        output: &mpsc::UnboundedSender<AppServerEvent>,
+    ) -> Result<Option<OpenReplyStream>> {
+        if self.admit_turn(id, output).is_ok() {
+            return Ok(None);
+        }
         let mut stream = self.while_listening(open, output).await?;
-        // A server can close Attach immediately after returning successful headers.
-        // A healthy idle stream needs no event to prove that it is ready.
-        let first_event = match tokio::task::unconstrained(stream.next()).now_or_never() {
-            Some(None | Some(Err(_))) => bail!(
-                "Cloud conversation activated but its stream did not connect. Reopen it before sending."
-            ),
-            Some(Some(Ok(event))) => Some(event),
-            None => None,
-        };
+        let first = probe_reply_stream(&mut stream)?;
+        Ok(Some((stream, first)))
+    }
+
+    fn install_replacement(
+        &mut self,
+        id: &str,
+        (stream, first): OpenReplyStream,
+        output: &mpsc::UnboundedSender<AppServerEvent>,
+    ) {
+        if let Some(idle) = &mut self.idle {
+            idle.reset();
+        }
+        self.stream_losses.supersede(id);
+        self.latest_status = None;
+        self.install(id, stream, first, output);
+    }
+
+    fn install(
+        &mut self,
+        id: &str,
+        stream: ReplyStream,
+        first_event: Option<cloud::Event>,
+        output: &mpsc::UnboundedSender<AppServerEvent>,
+    ) {
+        self.generation = self.generation.wrapping_add(1);
         self.active = Some(Attachment {
             thread_id: id.to_owned(),
             stream,
         });
-        self.stream_losses.supersede(id);
-        self.latest_status = None;
         if let Some(event) = first_event {
-            forward(id, event, output, &mut self.latest_status);
+            forward(
+                id,
+                event,
+                output,
+                &mut self.latest_status,
+                self.idle.as_mut(),
+            );
         }
-        Ok(())
     }
 
     fn thread_status(&self, id: &str) -> Option<&cloud::ThreadStatus> {
@@ -203,12 +322,26 @@ impl Replies {
     }
 }
 
+fn probe_reply_stream(stream: &mut ReplyStream) -> Result<Option<cloud::Event>> {
+    check_reply_stream(stream).map_err(|_| {
+        eyre!(
+            "Cloud conversation activated but its stream did not connect. Reopen it before sending."
+        )
+    })
+}
+
 /// Opens an app-server client backed by the authenticated native Cloud client.
-fn start_worker(client: cloud::Client, account: protocol::GetAccountResponse) -> AppServerClient {
+fn start_worker(
+    client: cloud::Client,
+    login: idle::Login,
+    account: protocol::GetAccountResponse,
+    title_client: Option<CloudTitleClient>,
+) -> AppServerClient {
     let (app_client, commands, output) =
-        CloudClient::channel_with_catalog(/*capacity*/ 32, Some(client.clone()));
+        CloudClient::channel_with_native(/*capacity*/ 32, Some(client.clone()), title_client);
+    let client = Arc::new(client);
     let mut requests = requests::Requests {
-        client,
+        client: Arc::clone(&client),
         account,
         loaded: None,
         warned_partial_history: None,
@@ -229,13 +362,23 @@ fn start_worker(client: cloud::Client, account: protocol::GetAccountResponse) ->
 }
 
 async fn run_worker(
-    mut commands: mpsc::Receiver<crate::CloudCommand>,
+    commands: mpsc::Receiver<crate::CloudCommand>,
     requests: &mut requests::Requests,
     replies: &mut Replies,
     output: &mpsc::UnboundedSender<AppServerEvent>,
 ) {
+    run_worker_with_prepared(commands, requests, replies, output, /*prepared*/ None).await;
+}
+
+async fn run_worker_with_prepared(
+    mut commands: mpsc::Receiver<crate::CloudCommand>,
+    requests: &mut requests::Requests,
+    replies: &mut Replies,
+    output: &mpsc::UnboundedSender<AppServerEvent>,
+    mut prepared: Option<PreparedResume>,
+) {
     loop {
-        let command = tokio::select! {
+        let mut command = tokio::select! {
             _ = output.closed() => return,
             () = replies.next_event(output) => continue,
             command = commands.recv() => match command { Some(command) => command, None => return },
@@ -280,12 +423,15 @@ async fn run_worker(
         } else {
             None
         };
-        let user_message_submission =
-            matches!(&command.operation, CloudOperation::SubmitUserMessage(_));
         let request = match command.operation {
             CloudOperation::Shutdown => {
                 let _ = command.response.send(Ok(Ok(Value::Null)));
                 return;
+            }
+            CloudOperation::ThreadNameSaved(params) => {
+                requests.thread_name_saved(params, output);
+                let _ = command.response.send(Ok(Ok(Value::Null)));
+                continue;
             }
             CloudOperation::Request(request) => {
                 Ok((*request, cloud::SubmissionMode::StartIfIdle, None))
@@ -640,6 +786,10 @@ async fn advance_prepared_resume(
             }
         }
     }
+    if let Some(root) = candidate.canceled_recovery {
+        replies.report_loss(&root, /*reason*/ None, output);
+    }
+    None
 }
 
 async fn handle_request(
@@ -734,6 +884,12 @@ async fn handle_request(
             replies
                 .replace(id, requests.client.attach(id), output)
                 .await?;
+            if let Some(idle) = &mut replies.idle {
+                idle.observed_idle.get_or_insert(matches!(
+                    settings.thread.status,
+                    protocol::ThreadStatus::Idle
+                ));
+            }
             requests.loaded = Some(settings);
             requests.warned_partial_history = None;
             Ok(result)
@@ -746,10 +902,30 @@ fn forward(
     event: cloud::Event,
     output: &mpsc::UnboundedSender<AppServerEvent>,
     latest_status: &mut Option<(String, cloud::ThreadStatus)>,
+    recovery: Option<&mut idle::Recovery>,
 ) {
     if let Some(status) = event.thread_status_for(id) {
+        if let Some(recovery) = recovery {
+            if matches!(status, cloud::ThreadStatus::Idle) {
+                recovery.observed_idle = Some(true);
+                recovery.notify_connected(id, output);
+            } else {
+                recovery.observe_busy();
+            }
+        }
         *latest_status = Some((id.to_owned(), status));
         return;
+    }
+    if let Some(recovery) = recovery
+        && let cloud::Event::Transcript(item) = &event
+        && item.thread_id == id
+    {
+        match &item.update {
+            cloud::TranscriptUpdate::TurnStarted(_) => recovery.observe_busy(),
+            // The ordinary StartIfIdle admission still decides if the next turn can start.
+            cloud::TranscriptUpdate::TurnCompleted(_) => recovery.notify_connected(id, output),
+            _ => {}
+        }
     }
     let notification = match event {
         cloud::Event::Transcript(event) => match events::transcript(event.thread_id, event.update) {

@@ -27,6 +27,7 @@ pub use codex_cloud_client::ProjectEnvironment;
 pub use codex_cloud_client::SavedEnvironment;
 mod path;
 mod remote;
+mod remote_addr;
 mod remote_websocket;
 pub use cloud::CLOUD_RECOVERY_NETWORK_BLOCKED;
 pub use cloud::CloudClient;
@@ -88,6 +89,8 @@ pub use crate::path::AppServerPath;
 pub use crate::remote::RemoteAppServerClient;
 pub use crate::remote::RemoteAppServerConnectArgs;
 pub use crate::remote::RemoteAppServerEndpoint;
+pub use crate::remote_addr::resolve_remote_addr;
+pub use crate::remote_addr::resolve_remote_endpoint;
 
 /// Transitional access to core-only embedded app-server types.
 ///
@@ -124,6 +127,8 @@ pub enum AppServerEvent {
     ServerRequest(Box<ServerRequest>),
     /// A native Cloud reply stream ended. The underlying thread can still be running.
     ThreadStreamDisconnected(Box<codex_app_server_protocol::ErrorNotification>),
+    /// The Cloud worker is listening again on the same conversation.
+    ThreadStreamReconnected(String),
     Disconnected {
         message: String,
     },
@@ -1080,7 +1085,7 @@ mod tests {
             websocket,
             serde_json::json!({
                 "userAgent": "codex_cli_rs/9.8.7-test (Test OS; x86_64) rust",
-                "codexHome": "/server/.mikodex",
+                "codexHome": "/server/.codex",
             }),
         )
         .await;
@@ -1529,7 +1534,7 @@ mod tests {
             .expect("remote client should connect");
 
         assert_eq!(client.server_version(), Some("9.8.7-test"));
-        assert_eq!(client.codex_home(), Some("/server/.mikodex"));
+        assert_eq!(client.codex_home(), Some("/server/.codex"));
         let client = AppServerClient::Remote(client);
         let response: GetAccountResponse = client
             .request_typed(ClientRequest::GetAccount {

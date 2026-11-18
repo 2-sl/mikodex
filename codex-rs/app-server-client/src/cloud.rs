@@ -4,6 +4,7 @@
 use crate::AppServerEvent;
 use crate::RequestResult;
 use crate::TypedRequestError;
+use crate::cloud_backend::CloudTitleClient;
 use codex_app_server_protocol::ClientNotification;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::JSONRPCErrorError;
@@ -119,8 +120,10 @@ pub(super) enum IdleReconnect {
 
 #[derive(Clone)]
 pub struct CloudRequestHandle {
+    pub(super) reconnect: tokio::sync::watch::Sender<IdleReconnect>,
     commands: mpsc::Sender<CloudCommand>,
-    catalog: Option<Arc<codex_cloud_client::Client>>,
+    native: Option<Arc<codex_cloud_client::Client>>,
+    title_client: Option<Arc<CloudTitleClient>>,
 }
 
 /// Tracks only losses queued for delivery. The worker remains the sole owner
@@ -186,12 +189,13 @@ impl CloudClient {
         mpsc::Receiver<CloudCommand>,
         mpsc::UnboundedSender<AppServerEvent>,
     ) {
-        Self::channel_with_catalog(capacity, /*catalog*/ None)
+        Self::channel_with_native(capacity, /*native*/ None, /*title_client*/ None)
     }
 
-    pub(super) fn channel_with_catalog(
+    pub(super) fn channel_with_native(
         capacity: usize,
-        catalog: Option<codex_cloud_client::Client>,
+        native: Option<codex_cloud_client::Client>,
+        title_client: Option<CloudTitleClient>,
     ) -> (
         Self,
         mpsc::Receiver<CloudCommand>,
@@ -204,7 +208,9 @@ impl CloudClient {
                 stream_losses: CloudStreamLosses::default(),
                 handle: CloudRequestHandle {
                     commands,
-                    catalog: catalog.map(Arc::new),
+                    reconnect: Default::default(),
+                    native: native.map(Arc::new),
+                    title_client: title_client.map(Arc::new),
                 },
                 events: event_receiver,
             },
@@ -221,6 +227,17 @@ impl CloudClient {
         while let Some(event) = self.events.recv().await {
             if let AppServerEvent::ThreadStreamDisconnected(error) = &event
                 && !self.stream_losses.should_deliver(&error.thread_id)
+            {
+                continue;
+            }
+            if let AppServerEvent::ThreadStreamReconnected(id) = &event
+                && !self.handle.reconnect.send_if_modified(|state| {
+                    if matches!(state, IdleReconnect::Connected(root) if root.as_ref() == id) {
+                        *state = IdleReconnect::Inactive;
+                        return true;
+                    }
+                    false
+                })
             {
                 continue;
             }
@@ -344,7 +361,7 @@ impl CloudRequestHandle {
 
     /// Whether a completed model read still belongs to the bound Cloud account.
     pub fn model_catalog_is_current(&self) -> bool {
-        self.catalog
+        self.native
             .as_ref()
             .is_none_or(|catalog| catalog.model_catalog_is_current())
     }
@@ -424,6 +441,39 @@ impl CloudRequestHandle {
         crate::decode_typed_response("cloud/submitUserMessage", response)
     }
 
+    /// Returns the activation snapshot and a handle restricted to this resume's history.
+    /// Dropping the scoped handle without committing discards the new attachment.
+    pub async fn prepare_thread_resume(
+        &self,
+        request_id: RequestId,
+        params: codex_app_server_protocol::ThreadResumeParams,
+    ) -> Result<(codex_app_server_protocol::ThreadResumeResponse, Self), TypedRequestError> {
+        let (commands, history) = mpsc::channel(/*capacity*/ 1);
+        let response = self
+            .send(CloudOperation::PrepareThreadResume {
+                request_id,
+                params: Box::new(params),
+                history,
+            })
+            .await;
+        let snapshot = crate::decode_typed_response("thread/resume", response)?;
+        Ok((
+            snapshot,
+            Self {
+                commands,
+                reconnect: self.reconnect.clone(),
+                native: None,
+                title_client: None,
+            },
+        ))
+    }
+
+    /// Installs the prepared attachment on the worker before its next ordinary command.
+    pub async fn commit_prepared_resume(&self) -> Result<(), TypedRequestError> {
+        let response = self.send(CloudOperation::CommitPreparedResume).await;
+        crate::decode_typed_response("thread/resume", response)
+    }
+
     async fn send(&self, operation: CloudOperation) -> io::Result<RequestResult> {
         let (response, result) = oneshot::channel();
         self.commands
@@ -450,8 +500,7 @@ impl CloudRequestHandle {
 
     pub(crate) async fn request(&self, request: ClientRequest) -> io::Result<RequestResult> {
         // Catalog reads must not occupy the serialized send and attachment lane.
-        if let (Some(catalog), ClientRequest::ModelList { params, .. }) = (&self.catalog, &request)
-        {
+        if let (Some(catalog), ClientRequest::ModelList { params, .. }) = (&self.native, &request) {
             // Keep the catalog HTTP state out of the shared request future.
             return Ok(Box::pin(Self::model_list(catalog, params)).await);
         }
