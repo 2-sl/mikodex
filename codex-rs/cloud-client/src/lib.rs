@@ -51,6 +51,7 @@ pub use history::HistoryQuery;
 pub use history::HistoryTurn;
 pub use history::ListItemsRequest;
 pub use history::ListTurnsRequest;
+pub use items::AgentMessagePhase;
 pub use items::AgentQuestion;
 pub use items::CommandAction;
 pub use items::CommandExecutionSource;
@@ -107,6 +108,8 @@ use tower::util::BoxCloneSyncService;
 use url::Url;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(150);
+const HTTP2_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
+const HTTP2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 const MODEL_CATALOG_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_MODEL_CATALOG_BYTES: usize = 1024 * 1024;
@@ -182,6 +185,7 @@ impl Client {
             .without_redirects()
             .without_request_logging()
             .http2_prior_knowledge()
+            .http2_keep_alive(HTTP2_KEEP_ALIVE_INTERVAL, HTTP2_KEEP_ALIVE_TIMEOUT)
             .connect_timeout(Duration::from_secs(30));
         let http = if local_http {
             // Plaintext credentials must never leave loopback through an outbound proxy.
@@ -295,6 +299,43 @@ impl Client {
         .await
         .map_err(|_| Error::Timeout)?
         .map_err(Error::from)?;
+        Ok(())
+    }
+
+    /// Reads the saved name without opening or replacing an attachment.
+    pub async fn read_thread_name(&self, thread_id: &str) -> Result<Option<String>, Error> {
+        let payload = self
+            .raw_unary(
+                wire::ThreadIdRequest {
+                    thread_id: thread_id.to_owned(),
+                },
+                "/oaiproto.codex_app_server_backend.ThreadService/ReadThread",
+            )
+            .await?;
+        let thread = wire::ReadThreadResponse::decode(payload)
+            .map_err(|_| Error::InvalidResponse)?
+            .thread
+            .filter(|thread| thread.id.as_deref() == Some(thread_id))
+            .ok_or(Error::InvalidResponse)?;
+        Ok(thread.name)
+    }
+
+    /// Saves a conversation name without opening an attachment.
+    pub async fn set_thread_name(&self, thread_id: &str, name: &str) -> Result<(), MutationError> {
+        if thread_id.trim().is_empty() || name.trim().is_empty() {
+            return Err(MutationError::InvalidRequest);
+        }
+        let payload = self
+            .mutate(
+                wire::SetThreadNameRequest {
+                    thread_id: thread_id.to_owned(),
+                    name: name.to_owned(),
+                },
+                "/oaiproto.codex_app_server_backend.ThreadService/SetThreadName",
+            )
+            .await?;
+        wire::EmptyResponse::decode(payload)
+            .map_err(|_| MutationError::OutcomeUnknown(Error::InvalidResponse))?;
         Ok(())
     }
 
