@@ -2156,6 +2156,7 @@ dependencies = [
  "codex-queue-extension",
  "codex-rmcp-client",
  "codex-rollout",
+ "codex-rollout-trace",
  "codex-runtime-agent-instance",
  "codex-sandboxing",
  "codex-shell-command",
@@ -2220,16 +2221,20 @@ dependencies = [
 name = "codex-app-server-client"
 version = "0.169.0"
 dependencies = [
+ "codex-api",
  "codex-app-server",
  "codex-app-server-protocol",
  "codex-app-server-transport",
  "codex-arg0",
+ "codex-backend-client",
  "codex-cloud-client",
  "codex-config",
  "codex-core",
  "codex-exec-server",
  "codex-feedback",
+ "codex-http-client",
  "codex-login",
+ "codex-model-provider",
  "codex-protocol",
  "codex-uds",
  "codex-utils-absolute-path",
@@ -3818,6 +3823,7 @@ dependencies = [
  "pretty_assertions",
  "serde_json",
  "tempfile",
+ "test-case",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -5250,6 +5256,7 @@ dependencies = [
  "chrono",
  "clap",
  "codex-ansi-escape",
+ "codex-api",
  "codex-app-server-client",
  "codex-app-server-daemon",
  "codex-app-server-protocol",
@@ -5278,6 +5285,7 @@ dependencies = [
  "codex-models-manager",
  "codex-otel",
  "codex-plugin",
+ "codex-prompts",
  "codex-protocol",
  "codex-protocol-test-support",
  "codex-realtime-webrtc",
@@ -5356,6 +5364,7 @@ dependencies = [
  "tracing-subscriber",
  "ts-rs",
  "two-face",
+ "unicode-bidi",
  "unicode-linebreak",
  "unicode-segmentation",
  "unicode-width 0.2.1",
@@ -5880,13 +5889,20 @@ dependencies = [
 name = "codex-workload-identity"
 version = "0.169.0"
 dependencies = [
+ "base64 0.22.1",
  "codex-http-client",
+ "hyper",
+ "hyper-util",
  "pretty_assertions",
+ "prost",
  "serde",
  "serde_json",
+ "spiffe",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tonic",
+ "tonic-prost",
  "url",
  "wiremock",
 ]
@@ -14924,6 +14940,20 @@ checksum = "94bf565ee1681b4473aa5a9d71d807347c28021bd1d8947cb626b02f42a0141f"
 dependencies = [
  "itertools 0.14.0",
  "quickcheck",
+]
+
+[[package]]
+name = "spiffe"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "539d8f20779006e7e078d8ac7f30a7d7d77fdbbf1f343e1d4416c22772850fbf"
+dependencies = [
+ "hyper-util",
+ "thiserror 2.0.18",
+ "tokio",
+ "tonic",
+ "tower",
+ "url",
 ]
 
 [[package]]
