@@ -150,6 +150,7 @@ client_id = "enterprise-client""#
     assert_eq!(
         account,
         AccountUpdatedNotification {
+            reason: None,
             auth_mode: None,
             plan_type: None,
         }
@@ -185,7 +186,7 @@ async fn enterprise_login_attempt_lifecycle() -> Result<()> {
                 "--nocapture",
             ])
             .env(CHILD, "1")
-            .env("MIKODEX_HOME", home.path())
+            .env("CODEX_HOME", home.path())
             .env(
                 REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
                 format!("{}/oauth/token", oauth_server.uri()),
@@ -1602,7 +1603,7 @@ async fn enterprise_login_setup_is_cancelled_by_account_changes() -> Result<()> 
                 "--nocapture",
             ])
             .env(CHILD, "1")
-            .env("MIKODEX_HOME", home.path())
+            .env("CODEX_HOME", home.path())
             .env(
                 REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
                 format!("{}/oauth/token", oauth_server.uri()),

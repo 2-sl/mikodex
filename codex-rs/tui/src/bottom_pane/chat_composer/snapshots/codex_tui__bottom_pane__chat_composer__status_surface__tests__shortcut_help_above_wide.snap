@@ -10,7 +10,7 @@ expression: text
 
 
 
-  Keyboard shortcuts
+  Keyboard shortcuts  ·  Tab: Keyboard
 
   Compose                       Session                              Transcript (open first)
   /        Commands             tab      Send message                ⌃t            Open transcript
@@ -24,7 +24,7 @@ expression: text
 
   /keymap customize
 
-› Ask Mikodex
+› Ask Codex
 
   MODEL · ~/project · Context 20% used
   ? / esc close

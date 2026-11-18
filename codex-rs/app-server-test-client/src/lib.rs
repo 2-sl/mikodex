@@ -108,14 +108,14 @@ const APP_SERVER_GRACEFUL_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_mill
 const DEFAULT_ANALYTICS_ENABLED: bool = true;
 const OTEL_SERVICE_NAME: &str = "codex-app-server-test-client";
 const TRACE_DISABLED_MESSAGE: &str =
-    "Not enabled - enable tracing in $MIKODEX_HOME/config.toml to get a trace URL!";
+    "Not enabled - enable tracing in $CODEX_HOME/config.toml to get a trace URL!";
 
 /// Minimal launcher that initializes the Codex app-server and logs the handshake.
 #[derive(Parser)]
 #[command(author = "Codex", version, about = "Bootstrap Codex app-server", long_about = None)]
 struct Cli {
     /// Path to the `codex` CLI binary. When set, requests use stdio by
-    /// spawning `mikodex app-server` as a child process.
+    /// spawning `codex app-server` as a child process.
     #[arg(long, env = "CODEX_BIN", global = true)]
     codex_bin: Option<PathBuf>,
 
@@ -154,12 +154,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum CliCommand {
-    /// Start `mikodex app-server` on a websocket endpoint in the background.
+    /// Start `codex app-server` on a websocket endpoint in the background.
     ///
     /// Logs are written to:
     ///   `/tmp/codex-app-server-test-client/`
     Serve {
-        /// WebSocket listen URL passed to `mikodex app-server --listen`.
+        /// WebSocket listen URL passed to `codex app-server --listen`.
         #[arg(long, default_value = "ws://127.0.0.1:4222")]
         listen: String,
         /// Kill any process listening on the same port before starting.
@@ -648,7 +648,7 @@ fn serve(codex_bin: &Path, config_overrides: &[String], listen: &str, kill: bool
 
     let pid = child.id();
 
-    println!("started mikodex app-server");
+    println!("started codex app-server");
     println!("listen: {listen}");
     println!("pid: {pid} (launcher process)");
     println!("log: {}", log_path.display());
@@ -1169,6 +1169,7 @@ async fn thread_list(endpoint: &Endpoint, config_overrides: &[String], limit: u3
         let response = client.thread_list(ThreadListParams {
             include_attached_threads: false,
             current_account_only: false,
+            included_thread_ids: None,
             excluded_thread_ids: None,
             attached_to_thread_id: None,
             originators: None,
@@ -1518,11 +1519,11 @@ impl CodexClient {
         let stdin = codex_app_server
             .stdin
             .take()
-            .context("mikodex app-server stdin unavailable")?;
+            .context("codex app-server stdin unavailable")?;
         let stdout = codex_app_server
             .stdout
             .take()
-            .context("mikodex app-server stdout unavailable")?;
+            .context("codex app-server stdout unavailable")?;
 
         Ok(Self {
             transport: ClientTransport::Stdio {
@@ -2156,10 +2157,10 @@ impl CodexClient {
                     writeln!(stdin, "{payload}")?;
                     stdin
                         .flush()
-                        .context("failed to flush payload to mikodex app-server")?;
+                        .context("failed to flush payload to codex app-server")?;
                     return Ok(());
                 }
-                bail!("mikodex app-server stdin closed")
+                bail!("codex app-server stdin closed")
             }
             ClientTransport::WebSocket { socket, url } => {
                 socket
@@ -2176,9 +2177,9 @@ impl CodexClient {
                 let mut response_line = String::new();
                 let bytes = stdout
                     .read_line(&mut response_line)
-                    .context("failed to read from mikodex app-server")?;
+                    .context("failed to read from codex app-server")?;
                 if bytes == 0 {
-                    bail!("mikodex app-server closed stdout");
+                    bail!("codex app-server closed stdout");
                 }
                 Ok(response_line)
             }
@@ -2293,14 +2294,14 @@ impl Drop for CodexClient {
         let _ = stdin.take();
 
         if let Ok(Some(status)) = child.try_wait() {
-            println!("[mikodex app-server exited: {status}]");
+            println!("[codex app-server exited: {status}]");
             return;
         }
 
         let deadline = SystemTime::now() + APP_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT;
         loop {
             if let Ok(Some(status)) = child.try_wait() {
-                println!("[mikodex app-server exited: {status}]");
+                println!("[codex app-server exited: {status}]");
                 return;
             }
 

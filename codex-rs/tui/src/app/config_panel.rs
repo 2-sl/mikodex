@@ -100,6 +100,9 @@ impl App {
                 setting.enabled(&resolved.tui) == enabled
             }
             ConfigPreference::CopyOnSelect(mode) => resolved.tui.copy_on_select == mode,
+            ConfigPreference::MouseScrollSpeed(speed) => {
+                resolved.tui.mouse_scroll_speed == Some(speed)
+            }
             ConfigPreference::NotificationCondition(condition) => {
                 resolved.tui.notification_settings.condition == condition
             }
@@ -161,7 +164,7 @@ impl App {
             return;
         }
         self.config_notification_test_pending = None;
-        let notice = if !tui.notify_test("Mikodex notification test") {
+        let notice = if !tui.notify_test("Codex notification test") {
             "Could not send test · check terminal connection"
         } else if codex_terminal_detection::terminal_info().name
             == codex_terminal_detection::TerminalName::Ghostty

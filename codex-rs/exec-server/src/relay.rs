@@ -565,7 +565,7 @@ where
             MAX_HANDSHAKE_DIAGNOSTICS_PER_MINUTE => {
                 let span = tracing::info_span!(
                     parent: None,
-                    "mikodex.exec_server.noise_handshake_diagnostics_rate_limited",
+                    "codex.exec_server.noise_handshake_diagnostics_rate_limited",
                     noise_event = "handshake_diagnostics",
                     noise_outcome = "rate_limited",
                     noise_side = "executor",
@@ -993,7 +993,7 @@ fn record_handshake_diagnostic(
     // A separate span ends promptly even if the physical relay stays connected.
     let span = tracing::info_span!(
         parent: None,
-        "mikodex.exec_server.noise_handshake_diagnostic",
+        "codex.exec_server.noise_handshake_diagnostic",
         noise_event = "handshake",
         noise_outcome,
         noise_side = "executor",

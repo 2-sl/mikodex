@@ -71,16 +71,16 @@ impl PetImageUnsupportedReason {
     fn message(self) -> &'static str {
         match self {
             Self::Tmux => {
-                "Pets are unavailable in this tmux pane. Use fullscreen Codex with allow-passthrough all, or run Mikodex outside tmux."
+                "Pets are unavailable in this tmux pane. Use fullscreen Codex with allow-passthrough all, or run Codex outside tmux."
             }
             Self::Zellij => {
-                "Pets are disabled in Zellij. Terminal images don’t stay reliably pane-local in Zellij. Run Mikodex outside Zellij to use pets."
+                "Pets are disabled in Zellij. Terminal images don’t stay reliably pane-local in Zellij. Run Codex outside Zellij to use pets."
             }
             Self::Iterm2TooOld => {
                 "Pets require iTerm2 3.6 or newer. Upgrade iTerm2 to use terminal pets."
             }
             Self::Terminal => {
-                "Pets aren’t available in this terminal. Terminal pets need image support, and this terminal environment doesn’t expose a supported image protocol. Try a terminal with Kitty graphics or Sixel support, or run Mikodex outside tmux."
+                "Pets aren’t available in this terminal. Terminal pets need image support, and this terminal environment doesn’t expose a supported image protocol. Try a terminal with Kitty graphics or Sixel support, or run Codex outside tmux."
             }
         }
     }
@@ -257,6 +257,14 @@ impl KittyPlacement {
         }
         Ok(())
     }
+}
+
+pub(crate) fn kitty_move_image(id: u32, area: ratatui::layout::Rect) -> String {
+    let (columns, rows) = (area.width, area.height);
+    // Lowercase i removes placements but keeps the uploaded pixel data.
+    wrap_for_tmux_if_needed(&format!(
+        "{ESC}_Ga=d,d=i,i={id},q=2;{ST}{ESC}_Ga=p,i={id},c={columns},r={rows},C=1,q=2;{ST}"
+    ))
 }
 
 pub fn kitty_transmit_png_with_id(

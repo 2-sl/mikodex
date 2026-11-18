@@ -180,7 +180,7 @@ impl RouteAwareHttpRequestRunner {
         }
 
         let request_span = tracing::info_span!(
-            "mikodex.exec_server.http_request",
+            "codex.exec_server.http_request",
             otel.kind = "client",
             http.request.method = method.as_str(),
             server.address = url.host_str().unwrap_or_default(),

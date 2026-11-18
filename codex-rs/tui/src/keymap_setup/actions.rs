@@ -130,7 +130,7 @@ define_keymap_actions! {
         minimize_pane_width [Workspace] => "Minimize the focused pane width.",
         maximize_pane_width [Workspace] => "Maximize the focused pane width.",
         equalize_pane_widths [Workspace] => "Equalize visible pane widths.",
-        resize_panes [Workspace] => "Enter keyboard resize mode for visible pane and dock dividers.",
+        resize_panes [Workspace] => "Enter keyboard resize mode for visible dividers.",
         move_divider_left [Workspace] => "Move the divider left when the side pane has focus.",
         move_divider_right [Workspace] => "Move the divider right when the side pane has focus.",
         toggle_pane_zoom [Workspace] => "Zoom or restore the focused pane.",
@@ -168,6 +168,8 @@ define_keymap_actions! {
         toggle_shortcuts => "Show or hide the composer shortcut overlay.",
         history_search_previous => "Open history search or move to the previous match.",
         history_search_next => "Move to the next history search match.",
+        undo => "Undo the last composer edit.",
+        redo => "Redo the last composer edit.",
     }
     editor "Editor" {
         insert_newline => "Insert a newline in the editor.",
@@ -277,6 +279,7 @@ define_keymap_actions! {
         close => "Close the pager overlay.",
         close_transcript => "Close the transcript overlay.",
         find => "Find text in a transcript pager.",
+        mark_markdown => "Mark table cells in transcript selection mode.",
     }
     list "List" {
         move_up => "Move list selection up.",

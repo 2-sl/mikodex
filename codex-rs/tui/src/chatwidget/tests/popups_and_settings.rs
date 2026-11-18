@@ -3109,7 +3109,7 @@ async fn experimental_features_popup_snapshot() {
             key: "voice_conversations".to_string(),
             writable: true,
             name: "Voice conversations".to_string(),
-            description: "Talk with Mikodex using /voice.".to_string(),
+            description: "Talk with Codex using /voice.".to_string(),
             enabled: false,
         },
     ];
@@ -3150,7 +3150,7 @@ async fn experimental_features_popup_snapshot() {
 }
 
 #[tokio::test]
-async fn experimental_features_toggle_saves_on_exit() {
+async fn experimental_features_cancel_discards_toggle() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     let mut keymap = crate::keymap::RuntimeKeymap::defaults().list;
@@ -3179,25 +3179,8 @@ async fn experimental_features_toggle_saves_on_exit() {
     );
 
     chat.handle_key_event(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
-    assert!(
-        !chat.has_active_view(),
-        "remapped cancel must save and close"
-    );
-
-    let mut updates = None;
-    while let Ok(event) = rx.try_recv() {
-        if let AppEvent::SaveExperimentalFeatures {
-            updates: event_updates,
-            ..
-        } = event
-        {
-            updates = Some(event_updates);
-            break;
-        }
-    }
-
-    let updates = updates.expect("expected SaveExperimentalFeatures event");
-    assert_eq!(updates, vec![(expected_feature.key().to_string(), true)]);
+    assert!(!chat.has_active_view(), "remapped cancel must close");
+    assert!(rx.try_recv().is_err(), "cancel must discard the toggle");
 }
 
 #[tokio::test]
@@ -3236,7 +3219,7 @@ async fn experimental_popup_available_snapshot() {
     };
     let features = [
         ("network_proxy", "Network proxy", "Apply network proxy restrictions to sandboxed sessions that already have network access."),
-        ("prevent_idle_sleep", "Prevent sleep while running", "Keep your computer awake while Mikodex is running a thread."),
+        ("prevent_idle_sleep", "Prevent sleep while running", "Keep your computer awake while Codex is running a thread."),
     ]
     .into_iter()
     .map(|(name, display_name, description)| codex_app_server_protocol::ExperimentalFeature {

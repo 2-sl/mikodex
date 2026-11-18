@@ -2,8 +2,8 @@
 //!
 //! The TUI treats built-in and custom pets differently on purpose:
 //! built-in pets are versioned application assets fetched on demand into a
-//! managed MIKODEX_HOME cache, while custom pets remain entirely user-owned data
-//! under `$MIKODEX_HOME/pets/<pet-id>/pet.json` or legacy avatar directories.
+//! managed CODEX_HOME cache, while custom pets remain entirely user-owned data
+//! under `$CODEX_HOME/pets/<pet-id>/pet.json` or legacy avatar directories.
 //!
 //! This module owns the TUI-facing contracts around that split:
 //! resolving a selected pet id, preparing frames for terminal image protocols,
@@ -48,6 +48,7 @@ pub(crate) use image_protocol::PetImageUnsupportedReason;
 #[cfg(not(test))]
 pub(crate) use image_protocol::detect_pet_image_support;
 pub(crate) use image_protocol::kitty_delete_image;
+pub(crate) use image_protocol::kitty_move_image;
 pub(crate) use image_protocol::kitty_transmit_png_file_with_id;
 pub(crate) use image_protocol::kitty_transmit_png_with_id;
 pub(crate) use picker::PET_PICKER_VIEW_ID;

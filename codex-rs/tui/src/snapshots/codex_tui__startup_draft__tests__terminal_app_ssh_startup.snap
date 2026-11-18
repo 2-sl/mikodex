@@ -4,7 +4,7 @@ expression: "frames.join(\"\\n---\\n\").replace(crate::version::CODEX_CLI_VERSIO
 ---
 terminal_app_over_ssh=false, owned=true
 
-  >_ OpenAI Mikodex (v<VERSION>)
+  >_ OpenAI Codex (v<VERSION>)
      loading
 
 
@@ -16,16 +16,16 @@ terminal_app_over_ssh=false, owned=true
 
 
 
-› Ask Mikodex to do anything
+› Ask Codex to do anything
 
   ? for shortcuts
 ---
 terminal_app_over_ssh=true, owned=false
 
-  >_ OpenAI Mikodex (v<VERSION>)
+  >_ OpenAI Codex (v<VERSION>)
      loading
 
 
-› Ask Mikodex to do anything
+› Ask Codex to do anything
 
   ? for shortcuts

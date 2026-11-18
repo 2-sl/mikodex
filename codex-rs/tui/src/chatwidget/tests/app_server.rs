@@ -45,8 +45,13 @@ fn thread_settings_for_test(
     }
 }
 
-fn configured_thread_session(thread_id: ThreadId) -> crate::session_state::ThreadSessionState {
+pub(super) fn configured_thread_session(
+    thread_id: ThreadId,
+) -> crate::session_state::ThreadSessionState {
     crate::session_state::ThreadSessionState {
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -589,6 +594,7 @@ async fn tool_suggestion_install_url_is_validated_before_opening() {
         chat.handle_elicitation_request_now(
             codex_app_server_protocol::RequestId::Integer(9),
             codex_app_server_protocol::McpServerElicitationRequestParams {
+                environment_id: None,
                 thread_id: request_thread_id.to_string(),
                 turn_id: Some("turn-install".to_string()),
                 server_name: "connector-server".to_string(),
@@ -653,6 +659,7 @@ async fn invalid_url_elicitation_is_declined() {
     chat.handle_elicitation_request_now(
         codex_app_server_protocol::RequestId::Integer(9),
         codex_app_server_protocol::McpServerElicitationRequestParams {
+            environment_id: Some("env-a".to_string()),
             thread_id: request_thread_id.to_string(),
             turn_id: Some("turn-auth".to_string()),
             server_name: "payments".to_string(),
@@ -681,6 +688,74 @@ async fn invalid_url_elicitation_is_declined() {
 }
 
 #[tokio::test]
+async fn statusline_workspace_follows_primary_executor_and_legacy_settings() {
+    let (mut chat, _events, _ops) = make_chatwidget_manual(Some("gpt-5.2")).await;
+    let id = ThreadId::new();
+    chat.handle_thread_session(configured_thread_session(id));
+    let mut update = thread_settings_for_test("gpt-5.2", id);
+    let host = update.thread_settings.cwd.to_string_lossy().into_owned();
+    let remote = r"C:\executor\checkout";
+    let primary = codex_app_server_protocol::ThreadEnvironment {
+        environment_id: "remote".into(),
+        cwd: codex_utils_path_uri::LegacyAppPathString::from_string(remote),
+        runtime_workspace_roots: Vec::new(),
+    };
+    for (environments, expected) in [
+        (Some(vec![primary]), remote),
+        (None, remote),
+        (Some(vec![]), host.as_str()),
+    ] {
+        update.thread_settings.environments = environments;
+        chat.handle_server_notification(
+            ServerNotification::ThreadSettingsUpdated(update.clone()),
+            /*replay_kind*/ None,
+        );
+        let state = serde_json::to_value(chat.statusline_state()).unwrap();
+        assert_eq!(state["thread"]["workspace"]["cwd"], expected);
+    }
+}
+
+#[tokio::test]
+async fn statusline_and_title_abbreviate_only_the_local_workspace() {
+    let (mut chat, _events, _ops) = make_chatwidget_manual(Some("gpt-5.2")).await;
+    let id = ThreadId::new();
+    chat.handle_thread_session(configured_thread_session(id));
+    let mut update = thread_settings_for_test("gpt-5.2", id);
+    let path = dirs::home_dir()
+        .unwrap()
+        .join("a-checkout-with-a-long-directory-name");
+    let raw = path.display().to_string();
+    let local = format_directory_display(&path, /*max_width*/ None);
+    for (environment_id, expected) in [
+        ("remote", raw.as_str()),
+        (codex_exec_server::LOCAL_ENVIRONMENT_ID, local.as_str()),
+    ] {
+        update.thread_settings.environments =
+            Some(vec![codex_app_server_protocol::ThreadEnvironment {
+                environment_id: environment_id.into(),
+                cwd: codex_utils_path_uri::LegacyAppPathString::from_path(&path),
+                runtime_workspace_roots: Vec::new(),
+            }]);
+        chat.handle_server_notification(
+            ServerNotification::ThreadSettingsUpdated(update.clone()),
+            /*replay_kind*/ None,
+        );
+        assert_eq!(
+            chat.status_line_value_for_item(StatusLineItem::CurrentDir)
+                .as_deref(),
+            Some(expected)
+        );
+        assert_eq!(
+            chat.terminal_title_value_for_item(TerminalTitleItem::CurrentDir, Instant::now()),
+            Some(ChatWidget::truncate_terminal_title_part(
+                expected.into(),
+                /*max_chars*/ 32
+            ))
+        );
+    }
+}
+
+#[tokio::test]
 async fn thread_settings_updated_updates_visible_state_without_transcript() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2")).await;
     set_chatgpt_auth(&mut chat);
@@ -689,6 +764,7 @@ async fn thread_settings_updated_updates_visible_state_without_transcript() {
     let thread_id = ThreadId::new();
     let mut session = configured_thread_session(thread_id);
     session.cwd = test_path_buf("/tmp/original-workspace").abs();
+    session.thread_settings_confirmed = false;
     chat.handle_thread_session(session);
     chat.config.permissions.approval_policy =
         Constrained::allow_only(AskForApproval::Never.to_core());
@@ -709,6 +785,9 @@ async fn thread_settings_updated_updates_visible_state_without_transcript() {
     assert!(chat.connectors_for_mentions().is_none());
     assert!(chat.connectors.mention_refresh_in_flight);
     assert_eq!(chat.current_model(), "gpt-5.4");
+    let state = serde_json::to_value(chat.statusline_state()).unwrap();
+    assert_eq!(state["thread"]["approval"]["policy"], "on-request");
+    assert_eq!(state["thread"]["model"]["service_tier"], "fast");
     assert_eq!(
         chat.current_reasoning_effort(),
         Some(ReasoningEffortConfig::High)
@@ -1201,7 +1280,7 @@ async fn sqlite_recovery_warning_shows_backup_and_metadata_limitations() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.handle_server_notification(
         ServerNotification::ConfigWarning(ConfigWarningNotification {
-            summary: "Mikodex rebuilt its local database".into(),
+            summary: "Codex rebuilt its local database".into(),
             details: Some("Damaged local databases were rebuilt. Saved conversations remain in rollout files and can restore the thread list and history. Some database-only metadata may be unavailable. The original database files were preserved at the backup locations below.\n\nDatabase path: /codex/state_5.sqlite\nBackup folder: /codex/db-backups/recovery".into()),
             path: None,
             range: None,
@@ -1232,7 +1311,7 @@ async fn startup_config_warning_is_not_repeated_by_thread() {
                     is_managed_daemon: managed_daemon,
                 });
         }
-        let message = "Mikodex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.";
+        let message = "Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.";
         for notification in [
             ServerNotification::ConfigWarning(ConfigWarningNotification {
                 summary: message.to_string(),
@@ -2027,7 +2106,7 @@ async fn live_app_server_server_overloaded_error_renders_error() {
         let rendered = lines_to_single_string(&cells[0]);
         insta::allow_duplicates! {
             if message.is_empty() {
-                insta::assert_snapshot!(rendered, @"■ Mikodex is currently experiencing high load.");
+                insta::assert_snapshot!(rendered, @"■ Codex is currently experiencing high load.");
             } else {
                 insta::assert_snapshot!(rendered, @"■ server overloaded");
             }
@@ -2176,7 +2255,7 @@ async fn live_app_server_manual_thread_name_updates_status_surfaces() {
         ThreadId::from_string("123e4567-e89b-12d3-a456-426614174000").expect("thread id");
     chat.thread_id = Some(thread_id);
 
-    chat.expect_manual_thread_name(thread_id, "review-fix".to_string());
+    chat.display_thread_name(thread_id, "review-fix".to_string());
 
     chat.handle_server_notification(
         ServerNotification::ThreadNameUpdated(
@@ -2245,7 +2324,7 @@ async fn live_app_server_manual_thread_name_is_visible_before_notification() {
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
 
-    chat.expect_manual_thread_name(thread_id, "Manual title".to_string());
+    chat.display_thread_name(thread_id, "Manual title".to_string());
 
     assert_eq!(chat.thread_name(), Some("Manual title".to_string()));
     assert!(drain_insert_history(&mut rx).is_empty());
@@ -2340,7 +2419,7 @@ async fn sqlite_log_write_warning_is_visible_in_warnings() {
     chat.handle_server_notification(
         ServerNotification::Warning(WarningNotification {
             thread_id: None,
-            message: "Mikodex couldn't save diagnostic logs to its local database. Use /feedback with logs included before closing Mikodex, or run `mikodex doctor` for diagnostics.".to_string(),
+            message: "Codex couldn't save diagnostic logs to its local database. Use /feedback with logs included before closing Codex, or run `codex doctor` for diagnostics.".to_string(),
         }),
         /*replay_kind*/ None,
     );

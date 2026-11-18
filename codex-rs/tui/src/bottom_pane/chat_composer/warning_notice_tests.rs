@@ -10,7 +10,7 @@ fn composer() -> ChatComposer {
         /*has_input_focus*/ true,
         AppEventSender::new(tx),
         /*enhanced_keys_supported*/ false,
-        "Ask Mikodex".into(),
+        "Ask Codex".into(),
         /*disable_paste_burst*/ true,
     );
     // Keep layout fixtures independent of platform-specific default shortcuts.

@@ -10,120 +10,6 @@ use codex_utils_fuzzy_match::fuzzy_match;
 use crate::slash_command::SlashCommand;
 use crate::slash_command::built_in_slash_commands;
 
-const DUBEOLSIK_CHO_KEYS: [&str; 19] = [
-    "r", "R", "s", "e", "E", "f", "a", "q", "Q", "t", "T", "d", "w", "W", "c", "z", "x", "v", "g",
-];
-const DUBEOLSIK_JUNG_KEYS: [&str; 21] = [
-    "k", "o", "i", "O", "j", "p", "u", "P", "h", "hk", "ho", "hl", "y", "n", "nj", "np", "nl", "b",
-    "m", "ml", "l",
-];
-const DUBEOLSIK_JONG_KEYS: [&str; 28] = [
-    "", "r", "R", "rt", "s", "sw", "sg", "e", "f", "fr", "fa", "fq", "ft", "fx", "fv", "fg", "a",
-    "q", "qt", "t", "T", "d", "w", "c", "z", "x", "v", "g",
-];
-
-/// Convert Korean 2-set keyboard input back to the Latin keys that produced it.
-/// This lets the normal slash-command parser handle Hangul-IME input for every command.
-fn korean_keyboard_input_as_qwerty(input: &str) -> Option<String> {
-    const SYLLABLE_BASE: u32 = 0xAC00;
-    const SYLLABLE_END: u32 = 0xD7A3;
-    const CHOSEONG_BASE: u32 = 0x1100;
-    const JUNGSEONG_BASE: u32 = 0x1161;
-    const JONGSEONG_BASE: u32 = 0x11A7;
-
-    let mut keys = String::with_capacity(input.len());
-    let mut saw_hangul = false;
-
-    for character in input.chars() {
-        let codepoint = u32::from(character);
-        if (SYLLABLE_BASE..=SYLLABLE_END).contains(&codepoint) {
-            let syllable = codepoint - SYLLABLE_BASE;
-            let choseong = (syllable / 588) as usize;
-            let jungseong = ((syllable % 588) / 28) as usize;
-            let jongseong = (syllable % 28) as usize;
-            keys.push_str(DUBEOLSIK_CHO_KEYS.get(choseong)?);
-            keys.push_str(DUBEOLSIK_JUNG_KEYS.get(jungseong)?);
-            keys.push_str(DUBEOLSIK_JONG_KEYS.get(jongseong)?);
-            saw_hangul = true;
-        } else if (CHOSEONG_BASE..CHOSEONG_BASE + 19).contains(&codepoint) {
-            keys.push_str(DUBEOLSIK_CHO_KEYS.get((codepoint - CHOSEONG_BASE) as usize)?);
-            saw_hangul = true;
-        } else if (JUNGSEONG_BASE..JUNGSEONG_BASE + 21).contains(&codepoint) {
-            keys.push_str(DUBEOLSIK_JUNG_KEYS.get((codepoint - JUNGSEONG_BASE) as usize)?);
-            saw_hangul = true;
-        } else if (JONGSEONG_BASE + 1..JONGSEONG_BASE + 28).contains(&codepoint) {
-            keys.push_str(DUBEOLSIK_JONG_KEYS.get((codepoint - JONGSEONG_BASE) as usize)?);
-            saw_hangul = true;
-        } else if let Some(jamo_keys) = compatibility_jamo_keys(character) {
-            keys.push_str(jamo_keys);
-            saw_hangul = true;
-        } else if character.is_ascii() {
-            keys.push(character);
-        } else {
-            return None;
-        }
-    }
-
-    saw_hangul.then_some(keys)
-}
-
-fn compatibility_jamo_keys(character: char) -> Option<&'static str> {
-    Some(match character {
-        'ㄱ' => "r",
-        'ㄲ' => "R",
-        'ㄳ' => "rt",
-        'ㄴ' => "s",
-        'ㄵ' => "sw",
-        'ㄶ' => "sg",
-        'ㄷ' => "e",
-        'ㄸ' => "E",
-        'ㄹ' => "f",
-        'ㄺ' => "fr",
-        'ㄻ' => "fa",
-        'ㄼ' => "fq",
-        'ㄽ' => "ft",
-        'ㄾ' => "fx",
-        'ㄿ' => "fv",
-        'ㅀ' => "fg",
-        'ㅁ' => "a",
-        'ㅂ' => "q",
-        'ㅃ' => "Q",
-        'ㅄ' => "qt",
-        'ㅅ' => "t",
-        'ㅆ' => "T",
-        'ㅇ' => "d",
-        'ㅈ' => "w",
-        'ㅉ' => "W",
-        'ㅊ' => "c",
-        'ㅋ' => "z",
-        'ㅌ' => "x",
-        'ㅍ' => "v",
-        'ㅎ' => "g",
-        'ㅏ' => "k",
-        'ㅐ' => "o",
-        'ㅑ' => "i",
-        'ㅒ' => "O",
-        'ㅓ' => "j",
-        'ㅔ' => "p",
-        'ㅕ' => "u",
-        'ㅖ' => "P",
-        'ㅗ' => "h",
-        'ㅘ' => "hk",
-        'ㅙ' => "ho",
-        'ㅚ' => "hl",
-        'ㅛ' => "y",
-        'ㅜ' => "n",
-        'ㅝ' => "nj",
-        'ㅞ' => "np",
-        'ㅟ' => "nl",
-        'ㅠ' => "b",
-        'ㅡ' => "m",
-        'ㅢ' => "ml",
-        'ㅣ' => "l",
-        _ => return None,
-    })
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ServiceTierCommand {
     pub(crate) id: String,
@@ -230,21 +116,11 @@ pub(crate) fn commands_for_input(
 /// command lookup so a typed command can produce a specific unavailable message while the popup
 /// still hides it.
 pub(crate) fn find_builtin_command(name: &str, flags: BuiltinCommandFlags) -> Option<SlashCommand> {
-    let qwerty_name = korean_keyboard_input_as_qwerty(name);
-    let extra_o_goal = |candidate: &str| {
-        let repeated_os = candidate.strip_prefix('g')?.strip_suffix("al")?;
+    let cmd = SlashCommand::from_str(name).ok().or_else(|| {
+        let repeated_os = name.strip_prefix('g')?.strip_suffix("al")?;
         (!repeated_os.is_empty() && repeated_os.bytes().all(|byte| byte == b'o'))
             .then_some(SlashCommand::Goal)
-    };
-    let cmd = SlashCommand::from_str(name)
-        .ok()
-        .or_else(|| {
-            qwerty_name
-                .as_deref()
-                .and_then(|candidate| SlashCommand::from_str(candidate).ok())
-        })
-        .or_else(|| extra_o_goal(name))
-        .or_else(|| qwerty_name.as_deref().and_then(extra_o_goal))?;
+    })?;
     builtins_for_input(BuiltinCommandFlags {
         token_activity_command_enabled: true,
         daybreak_command_description: Some(""),
@@ -266,17 +142,11 @@ pub(crate) fn find_slash_command(
     }
 
     let tiers_enabled = flags.service_tier_commands_enabled;
-    let qwerty_name = korean_keyboard_input_as_qwerty(name);
     tiers_enabled
         .then(|| {
             service_tier_commands
                 .iter()
-                .find(|command| {
-                    command.name == name
-                        || qwerty_name
-                            .as_deref()
-                            .is_some_and(|candidate| command.name == candidate)
-                })
+                .find(|command| command.name == name)
                 .cloned()
                 .map(SlashCommandItem::ServiceTier)
         })
@@ -290,7 +160,6 @@ pub(crate) fn has_slash_command_prefix(
 ) -> bool {
     // A side conversation can describe a known command as unavailable in the
     // popup, even though dispatch must continue to reject it.
-    let qwerty_name = korean_keyboard_input_as_qwerty(name);
     commands_for_input(
         BuiltinCommandFlags {
             side_conversation_active: false,
@@ -299,12 +168,7 @@ pub(crate) fn has_slash_command_prefix(
         service_tier_commands,
     )
     .into_iter()
-    .any(|command| {
-        fuzzy_match(command.command(), name).is_some()
-            || qwerty_name
-                .as_deref()
-                .is_some_and(|candidate| fuzzy_match(command.command(), candidate).is_some())
-    })
+    .any(|command| fuzzy_match(command.command(), name).is_some())
 }
 
 #[cfg(test)]
@@ -484,6 +348,7 @@ mod tests {
                 SlashCommand::Mention,
                 SlashCommand::Status,
                 SlashCommand::Daemon,
+                SlashCommand::Rc,
                 SlashCommand::Warnings,
                 SlashCommand::Pwd,
                 SlashCommand::Usage,

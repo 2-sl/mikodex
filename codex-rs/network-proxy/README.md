@@ -39,7 +39,7 @@ dangerously_allow_non_loopback_proxy = false
 mode = "full" # default when unset; use "limited" for read-only mode
 # HTTPS MITM is enabled automatically when `mode = "limited"` or when MITM hooks are configured.
 # The CA private key remains in proxy memory. When MITM is active, spawned commands receive CA
-# bundle env vars pointing at immutable public files under $MIKODEX_HOME/proxy/ so common HTTPS
+# bundle env vars pointing at immutable public files under $CODEX_HOME/proxy/ so common HTTPS
 # clients trust the managed CA.
 
 # If false, local/private networking is rejected. Explicit allowlisting of local IP literals
@@ -154,6 +154,14 @@ they are blocked. SOCKS5 UDP and non-HTTPS SOCKS5 TCP remain blocked in limited 
 
 Websocket clients typically tunnel `wss://` through HTTPS `CONNECT`; those CONNECT targets still go
 through the same host allowlist/denylist checks.
+
+### Tool-call attribution on upstream requests
+
+A managed executor can set `CODEX_TOOL_CALL_ATTRIBUTION_PROXY` to the HTTP(S) URL of an upstream
+proxy that consumes and strips `x-openai-internal-tool-call-id`. When that endpoint is selected,
+the execution-scoped proxy attaches the controller's tool-call ID to plaintext HTTP requests or
+the outer HTTPS CONNECT. Set this option in the executor process environment. Leaving it unset
+disables attribution. Direct destinations and other upstream proxies receive no attribution header.
 
 ## Library API
 

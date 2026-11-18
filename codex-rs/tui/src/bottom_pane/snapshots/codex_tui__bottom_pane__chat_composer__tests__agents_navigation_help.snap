@@ -2,7 +2,7 @@
 source: tui/src/bottom_pane/chat_composer.rs
 expression: terminal.backend()
 ---
-"  Keyboard shortcuts                                                            "
+"  Keyboard shortcuts  ·  Tab: Keyboard                                          "
 "                                                                                "
 "  Compose                       Session                                         "
 "  /        Commands             tab      Send message                           "
@@ -23,7 +23,7 @@ expression: terminal.backend()
 "                                                                                "
 "  /keymap customize                                                             "
 "                                                                                "
-"› Ask Mikodex to do anything                                                      "
+"› Ask Codex to do anything                                                      "
 "                                                                                "
 "                                                                                "
 "                                                                                "

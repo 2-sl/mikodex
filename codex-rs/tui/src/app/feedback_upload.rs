@@ -43,7 +43,7 @@ pub(super) async fn deliver_feedback(
     if params.include_logs {
         let staged = async {
             let directory = staging_dir.as_ref().ok_or_else(|| {
-                eyre!("App server did not report $MIKODEX_HOME; cannot stage feedback logs")
+                eyre!("App server did not report $CODEX_HOME; cannot stage feedback logs")
             })?;
             // These RPCs use the app-server's local filesystem, where both feedback methods
             // read extraLogFiles, independently of the thread's executor environment.
