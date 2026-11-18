@@ -438,6 +438,7 @@ impl HostState {
                             output_truncation: output_truncation
                                 .map(CodeModeOutputTruncation::from)
                                 .unwrap_or_default(),
+                            ..Default::default()
                         },
                     )
                 })
