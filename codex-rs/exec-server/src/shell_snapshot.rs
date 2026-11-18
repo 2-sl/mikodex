@@ -110,7 +110,7 @@ pub(crate) fn validate_scope(scope_id: &str) -> Result<(), JSONRPCErrorError> {
 
 impl ShellSnapshotCache {
     #[tracing::instrument(
-        name = "codex.exec_server.process_prepare_shell_snapshot",
+        name = "mikodex.exec_server.process_prepare_shell_snapshot",
         skip_all,
         fields(
             process.id = crate::process_telemetry::trace_process_id(params.process_id.as_str()),
@@ -400,7 +400,7 @@ impl ShellSnapshotCache {
 }
 
 #[tracing::instrument(
-    name = "codex.exec_server.process_capture_shell_snapshot",
+    name = "mikodex.exec_server.process_capture_shell_snapshot",
     skip_all,
     fields(process.id = crate::process_telemetry::trace_process_id(params.process_id.as_str())),
 )]

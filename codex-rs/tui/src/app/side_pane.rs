@@ -210,7 +210,10 @@ impl App {
     }
 
     pub(super) fn begin_pane_resize(&mut self, tui: &mut Tui) -> Result<()> {
-        let screen = tui.prepare_draw_size()?.into();
+        let screen = super::agents_overview_dock::conversation_viewport(
+            self,
+            tui.prepare_draw_size()?.into(),
+        );
         if split_layout(self, tui, screen).is_some() {
             self.divider_drag = None;
             self.passive_link_drag = None;
@@ -234,6 +237,7 @@ impl App {
             _ => tui.terminal.last_known_screen_size,
         }
         .into();
+        let screen = super::agents_overview_dock::conversation_viewport(self, screen);
         let divider = visible_split(self, tui, screen).and_then(|layout| layout.divider_area());
         let Some(divider) = divider.filter(|_| {
             !matches!(event, TuiEvent::FocusLost)
@@ -291,7 +295,10 @@ impl App {
         tui: &mut Tui,
         focused_percent: u8,
     ) -> Result<()> {
-        let screen: Rect = tui.prepare_draw_size()?.into();
+        let screen = super::agents_overview_dock::conversation_viewport(
+            self,
+            tui.prepare_draw_size()?.into(),
+        );
         if split_layout(self, tui, screen).is_none() {
             return Ok(());
         }
@@ -315,22 +322,33 @@ impl App {
     }
 
     pub(super) fn can_resize_sidebar(&self, tui: &Tui) -> bool {
-        split_layout(self, tui, tui.terminal.last_known_screen_size.into()).is_some()
+        let screen = super::agents_overview_dock::conversation_viewport(
+            self,
+            tui.terminal.last_known_screen_size.into(),
+        );
+        split_layout(self, tui, screen).is_some()
     }
 
     pub(super) fn divider_is_settled(&self, tui: &Tui, screen: Rect) -> bool {
+        let screen = super::agents_overview_dock::conversation_viewport(self, screen);
         self.conversation_frame.sidebar.is_some()
             && visible_split(self, tui, screen) == self.conversation_frame.sidebar
     }
 
     pub(super) fn can_nudge_side_width(&self, tui: &Tui) -> bool {
-        self.sidebar_has_focus()
-            && visible_split(self, tui, tui.terminal.last_known_screen_size.into()).is_some()
+        let screen = super::agents_overview_dock::conversation_viewport(
+            self,
+            tui.terminal.last_known_screen_size.into(),
+        );
+        self.sidebar_has_focus() && visible_split(self, tui, screen).is_some()
     }
 
     pub(super) async fn nudge_side_width(&mut self, tui: &mut Tui, percent: i32) -> Result<()> {
         if self.sidebar_has_focus() {
-            let screen: Rect = tui.prepare_draw_size()?.into();
+            let screen = super::agents_overview_dock::conversation_viewport(
+                self,
+                tui.prepare_draw_size()?.into(),
+            );
             if let Some(divider) =
                 visible_split(self, tui, screen).and_then(|layout| layout.divider_area())
             {
@@ -399,6 +417,8 @@ impl App {
                     // The painted divider still owns this press while it moves.
                     return Ok(true);
                 }
+                let screen =
+                    super::agents_overview_dock::conversation_viewport(self, screen);
                 let Some(target) = self.sidebar_resize_target() else {
                     return Ok(false);
                 };
@@ -419,7 +439,10 @@ impl App {
                 let Some(mut drag) = self.divider_drag.take() else {
                     return Ok(false);
                 };
-                let screen = tui.terminal.last_known_screen_size.into();
+                let screen = super::agents_overview_dock::conversation_viewport(
+                    self,
+                    tui.terminal.last_known_screen_size.into(),
+                );
                 if drag.matches(screen, self) && visible_split(self, tui, screen).is_some() {
                     let width = i32::from(drag.initial_width) + i32::from(drag.press)
                         - i32::from(mouse.column);

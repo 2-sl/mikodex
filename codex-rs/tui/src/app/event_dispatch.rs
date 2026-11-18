@@ -627,6 +627,7 @@ impl App {
                 crate::boxed_future!(self.implement_plan_in_fresh_session(tui, app_server, plan)).await?;
             }
             AppEvent::OpenResumePicker => {
+                self.agents_overview.sidebar_focused = false;
                 self.pending_open_resume_picker = true;
             }
             AppEvent::OpenExternalAgentConfigMigration => {
@@ -1158,7 +1159,11 @@ impl App {
                     && self.conversation_focus_available(tui)
                 {
                     let size = tui.prepare_draw_size()?;
-                    if side_pane::layout(self, tui, size.into()).is_some_and(|panes| panes.passive_thread == peer) {
+                    let conversation =
+                        agents_overview_dock::conversation_viewport(self, size.into());
+                    if side_pane::layout(self, tui, conversation)
+                        .is_some_and(|panes| panes.passive_thread == peer)
+                    {
                         if let Some(cursor) = draft_cursor {
                             // The editor can reflow during the slide. Keep the original text position.
                             self.chat_widget.set_composer_cursor(cursor);
@@ -1303,6 +1308,7 @@ impl App {
                     && (self.agents_overview.threads.iter().any(|(id, thread)| {
                         (mode == ExitMode::Immediate
                             || Some(*id) != self.current_displayed_thread_id()
+                            || self.agents_overview.sidebar_focused
                             || self.chat_widget.active_view_is(AGENTS_OVERVIEW_VIEW_ID))
                             && matches!(thread.as_ref().map(|t| &t.status), Some(ThreadStatus::Active { .. }))
                     }) || self.running_side_thread_id().await.is_some()) =>
@@ -1312,7 +1318,7 @@ impl App {
                     subtitle: Some("Quitting this TUI will stop its running sessions.".into()),
                     items: vec![
                         SelectionItem {
-                            name: "Stay in Codex".into(),
+                            name: "Stay in Mikodex".into(),
                             dismiss_on_select: true,
                             ..Default::default()
                         },
@@ -3031,7 +3037,7 @@ impl App {
                                     Line::from(vec!["• ".dim(), "Sandbox ready".into()]),
                                     Line::from(vec![
                                         "  ".into(),
-                                        "Codex can now safely edit files and execute commands in your computer"
+                                        "Mikodex can now safely edit files and execute commands in your computer"
                                             .dark_gray(),
                                     ]),
                                 ]);
@@ -3401,7 +3407,10 @@ impl App {
                     ));
                 }
             }
-            AppEvent::OpenAgentsOverview => self.open_agents_overview(app_server),
+            AppEvent::OpenAgentsOverview => {
+                self.open_agents_overview(app_server);
+                tui.frame_requester().schedule_frame();
+            }
             AppEvent::SearchAgentsOverview(id, limit) => {
                 self.search_agents_overview(app_server, id, limit);
             }
@@ -3425,6 +3434,7 @@ impl App {
             AppEvent::SelectAgentsOverviewThread { thread_id }
                 if self.agents_overview.pending_archives.contains_key(&thread_id) => {}
             AppEvent::SelectAgentsOverviewThread { thread_id } => {
+                self.agents_overview.sidebar_focused = false;
                 match self
                     .select_agents_overview_thread(tui, app_server, thread_id)
                     .await?
@@ -3456,6 +3466,7 @@ impl App {
                 if matches!(&control, Ok(AppRunControl::Continue))
                     && self.current_displayed_thread_id() == Some(thread_id)
                 {
+                    self.agents_overview.sidebar_focused = false;
                     if let Some(input) = self.chat_widget.capture_thread_input_state() {
                         self.agents_overview.input_states.insert(thread_id, input);
                     }

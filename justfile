@@ -15,11 +15,11 @@ help:
 # `codex`
 alias c := codex
 codex *args:
-    cargo run --bin codex -- {args}
+    cargo run --bin mikodex -- {args}
 
 # `codex exec`
 exec *args:
-    cargo run --bin codex -- exec {args}
+    cargo run --bin mikodex -- exec {args}
 
 # Start `codex exec-server` and run codex-tui.
 [no-cd]
@@ -30,11 +30,11 @@ tui-with-exec-server *args:
 
 # Run the CLI version of the file-search crate.
 file-search *args:
-    cargo run --bin codex-file-search -- {args}
+    cargo run --bin mikodex-file-search -- {args}
 
 # Run the standalone code-mode host from source.
 code-mode-host *args:
-    cargo run --bin codex-code-mode-host -- {args}
+    cargo run --bin mikodex-code-mode-host -- {args}
 
 # Assemble a local Codex package.
 [no-cd]
@@ -44,7 +44,7 @@ assemble-codex-package *args:
 # Build the CLI and run the app-server test client
 app-server-test-client *args:
     cargo build -p codex-cli
-    cargo run -p codex-app-server-test-client -- --codex-bin ./target/debug/codex {args}
+    cargo run -p codex-app-server-test-client -- --codex-bin ./target/debug/mikodex {args}
 
 # Format the justfile, Rust, Bazel/Starlark, Python SDK code, and Python scripts.
 fmt:
@@ -171,7 +171,7 @@ build-for-release:
 
 # Regenerate the json schema for config.toml from the current config types.
 write-config-schema:
-    cargo run -p codex-config-schema --bin codex-write-config-schema
+    cargo run -p codex-config-schema --bin mikodex-write-config-schema
 
 # Regenerate app-server protocol schemas and the Python SDK derived from them.
 write-app-server-schema *args:

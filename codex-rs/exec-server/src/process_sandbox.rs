@@ -36,7 +36,7 @@ use crate::rpc::invalid_params;
 use crate::sandbox_selection::sandbox_selection;
 
 #[tracing::instrument(
-    name = "codex.exec_server.process_prepare_sandbox",
+    name = "mikodex.exec_server.process_prepare_sandbox",
     skip_all,
     fields(process.id = trace_process_id(params.process_id.as_str())),
 )]

@@ -163,7 +163,7 @@ async fn worktree_start_and_fork(backend: &str) -> anyhow::Result<()> {
         fs::create_dir(path)?;
     }
     // Forking without --cd must select the daemon using the resolved project, not this launcher.
-    fs::create_dir(launcher.join(".codex"))?;
+    fs::create_dir(launcher.join(".mikodex"))?;
     fs::write(
         launcher.join(".codex/config.toml"),
         "features.auth_elicitation = false\n",
@@ -173,7 +173,7 @@ async fn worktree_start_and_fork(backend: &str) -> anyhow::Result<()> {
         "committed destination instructions",
     )?;
     let server = MockServer::start().await;
-    fs::create_dir(source.join(".codex"))?;
+    fs::create_dir(source.join(".mikodex"))?;
     fs::write(
         source.join(".codex/config.toml"),
         "model = \"destination-model\"\nanalytics.enabled = false\ncli_auth_credentials_store = \"file\"\n",
@@ -234,12 +234,12 @@ trust_level = "trusted"
             .plan_type("enterprise"),
         codex_config::types::AuthCredentialsStoreMode::File,
     )?;
-    let program = codex_utils_cargo_bin::cargo_bin("codex")?;
+    let program = codex_utils_cargo_bin::cargo_bin("mikodex")?;
     // Keep cold Rosetta translation outside the timed startup assertions.
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
     anyhow::ensure!(
         Command::new(&program)
-            .env("CODEX_HOME", &home)
+            .env("MIKODEX_HOME", &home)
             .arg("--version")
             .output()?
             .status
@@ -247,8 +247,8 @@ trust_level = "trusted"
         "failed to prepare CLI test executable"
     );
     let mut env: HashMap<String, String> = std::env::vars().collect();
-    env.insert("CODEX_HOME".into(), home.display().to_string());
-    env.insert("CODEX_SQLITE_HOME".into(), home.display().to_string());
+    env.insert("MIKODEX_HOME".into(), home.display().to_string());
+    env.insert("MIKODEX_SQLITE_HOME".into(), home.display().to_string());
     env.insert("NO_PROXY".into(), "127.0.0.1,localhost".into());
     env.insert("no_proxy".into(), "127.0.0.1,localhost".into());
     env.insert("TERM".into(), "xterm-256color".into());
@@ -281,7 +281,7 @@ trust_level = "trusted"
     let _daemon = if backend == "daemon" {
         let bin = home.join("packages/app-server-daemon/current/bin");
         fs::create_dir_all(&bin)?;
-        let managed = bin.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        let managed = bin.join(if cfg!(windows) { "mikodex.exe" } else { "codex" });
         // Hard links change the executable's ctime and invalidate Rosetta's translation cache.
         #[cfg(unix)]
         std::os::unix::fs::symlink(program.canonicalize()?, &managed)?;
@@ -408,7 +408,7 @@ trust_level = "trusted"
             args.extend(["--cd".into(), source.display().to_string()]);
         }
         if explicit_cd {
-            args.extend(["--cd".into(), source.join(".codex").display().to_string()]);
+            args.extend(["--cd".into(), source.join(".mikodex").display().to_string()]);
         }
         if analytics {
             args.extend([
@@ -798,7 +798,7 @@ trust_level = "trusted"
             .collect::<Vec<_>>()
             .join("\n");
         if explicit_cd {
-            let expected = format!("{checkout}/.codex").replace('\\', "/");
+            let expected = format!("{checkout}/.mikodex").replace('\\', "/");
             assert!(context.replace('\\', "/").contains(&expected), "{context}");
         }
         assert!(
@@ -883,7 +883,7 @@ trust_level = "trusted"
             Mock::given(wiremock::matchers::path("/source/backend-api/wham/config/bundle"))
                 .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                     "config_toml": {"enterprise_managed": [{"id":"distrust-source", "name":"distrust-source",
-                        "contents": format!("[projects.{}]\ntrust_level = \"untrusted\"\n", serde_json::to_string(&codex_config::loader::project_trust_key(&source.join(".codex")))?)}]}
+                        "contents": format!("[projects.{}]\ntrust_level = \"untrusted\"\n", serde_json::to_string(&codex_config::loader::project_trust_key(&source.join(".mikodex")))?)}]}
                 }))).mount(&server).await;
             let output = rejected_start(
                 &program,
@@ -893,7 +893,7 @@ trust_level = "trusted"
                     "worktrees".into(),
                     "--no-alt-screen".into(),
                     "--cd".into(),
-                    source.join(".codex").display().to_string(),
+                    source.join(".mikodex").display().to_string(),
                 ],
                 &launcher,
                 &env,

@@ -35,13 +35,13 @@ def main(configuration: bundle.ProfileConfiguration | None = None):
         else:
             bundle.verify(package, reports, os.environ["TARGET"], configuration)
 
-    for relative in ("bin/codex", *bundle.HELPERS):
+    for relative in ("bin/mikodex", *bundle.HELPERS):
         binary = package / relative
         name = binary.name
         target = binary
         identifier = name
         entitlements = bundle.SIGNING / f"{name}.entitlements.plist"
-        if provisioned and relative == "bin/codex":
+        if provisioned and relative == "bin/mikodex":
             binary = package / bundle.EXECUTABLE
             target = package / bundle.APP
             identifier = bundle.CODE_SIGNING_ID
@@ -108,7 +108,7 @@ def main(configuration: bundle.ProfileConfiguration | None = None):
             requirement += (
                 f' and certificate leaf[subject.OU] = "{configuration.team_id}"'
             )
-            if provisioned and relative == "bin/codex":
+            if provisioned and relative == "bin/mikodex":
                 requirement += f' and identifier "{bundle.CODE_SIGNING_ID}"'
             subprocess.run(
                 [

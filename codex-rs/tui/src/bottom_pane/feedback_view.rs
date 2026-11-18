@@ -307,7 +307,10 @@ pub(crate) fn feedback_consent_params(
         items: vec![
             super::SelectionItem {
                 name: "Yes".to_string(),
-                description: Some("Include session logs and diagnostics in the report".to_string()),
+                description: Some(
+                    "Share the current Mikodex session logs and diagnostics with the team for troubleshooting"
+                        .to_string(),
+                ),
                 actions: vec![yes_action],
                 dismiss_on_select: true,
                 ..Default::default()

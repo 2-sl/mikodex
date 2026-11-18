@@ -5,14 +5,14 @@ expression: stdout
 Codex Doctor v0.0.0
 
 Notes
-   [XX] config       config could not be loaded - Fix the reported config error, then rerun codex doctor.
+   [XX] config       config could not be loaded - Fix the reported config error, then rerun mikodex doctor.
 -------------------------------------------------------------
 
 Configuration
-  [XX] config       config could not be loaded - Fix the reported config error, then rerun codex doctor.
+  [XX] config       config could not be loaded - Fix the reported config error, then rerun mikodex doctor.
       feature flags            0 enabled · 0 overridden
       error                    invalid configuration
-      file                     <CODEX_HOME>/config.toml
+      file                     <MIKODEX_HOME>/config.toml
       line                     1
       column                   18
       network diagnostics      effective network configuration is unavailable

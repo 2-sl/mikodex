@@ -62,7 +62,7 @@ impl WelcomeWidget {
         request_frame: FrameRequester,
         animations_enabled: bool,
     ) -> Self {
-        let mut animation = EmptyStateAnimation::default();
+        let mut animation = EmptyStateAnimation::for_current_home();
         animation.start_fresh();
         Self {
             is_logged_in,
@@ -126,7 +126,7 @@ impl WidgetRef for &WelcomeWidget {
         lines.push(Line::from(vec![
             "  ".into(),
             "Welcome to ".into(),
-            "Codex".bold(),
+            "Mikodex".bold(),
             ", OpenAI's command-line coding agent".into(),
         ]));
 

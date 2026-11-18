@@ -200,7 +200,7 @@ impl StartupDraftPump {
         session_action: StartupDraftSessionAction,
     ) -> Self {
         let (app_event_tx, app_event_rx) = unbounded_channel();
-        let mut blossom = crate::empty_state_animation::EmptyStateAnimation::default();
+        let mut blossom = crate::empty_state_animation::EmptyStateAnimation::for_current_home();
         if matches!(
             session_action,
             StartupDraftSessionAction::New | StartupDraftSessionAction::NewWhileRunning
@@ -626,7 +626,7 @@ fn startup_draft_bottom_pane(
             frame_requester,
             has_input_focus: true,
             enhanced_keys_supported,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: "Ask Mikodex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: crate::system_motion::mode() == crate::motion::MotionMode::Animated,
             effects: Default::default(),

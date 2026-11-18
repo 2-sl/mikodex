@@ -1216,7 +1216,7 @@ pub fn run_elevated_provisioning_setup_with_retained_handles(
         return Err(failure(
             SetupErrorCode::OrchestratorSandboxDirCreateFailed,
             format!(
-                "sandbox provisioning CODEX_HOME must be an absolute local disk path: {}",
+                "sandbox provisioning MIKODEX_HOME must be an absolute local disk path: {}",
                 codex_home.display()
             ),
         ));
@@ -1452,8 +1452,8 @@ fn user_profile_child_name(path: &Path, user_profile: &Path) -> Option<String> {
 }
 
 fn filter_sensitive_write_roots(mut roots: Vec<PathBuf>, codex_home: &Path) -> Vec<PathBuf> {
-    // Never grant capability write access to CODEX_HOME or anything under CODEX_HOME/.sandbox,
-    // CODEX_HOME/.sandbox-bin, or CODEX_HOME/.sandbox-secrets. These locations contain sandbox
+    // Never grant capability write access to MIKODEX_HOME or anything under MIKODEX_HOME/.sandbox,
+    // MIKODEX_HOME/.sandbox-bin, or MIKODEX_HOME/.sandbox-secrets. These locations contain sandbox
     // control/state and helper binaries and must remain tamper-resistant.
     let codex_home_key = canonical_path_key(codex_home);
     let sbx_dir_key = canonical_path_key(&sandbox_dir(codex_home));
@@ -1966,7 +1966,7 @@ mod tests {
         let resources_dir = package_dir.join(RESOURCES_DIRNAME);
         fs::create_dir_all(&bin_dir).expect("create bin dir");
         fs::create_dir_all(&resources_dir).expect("create resources dir");
-        let exe = bin_dir.join("codex.exe");
+        let exe = bin_dir.join("mikodex.exe");
         let setup_exe = resources_dir.join("codex-windows-sandbox-setup.exe");
         fs::write(&exe, b"codex").expect("write exe");
         fs::write(&setup_exe, b"setup").expect("write setup");
@@ -2680,7 +2680,7 @@ mod tests {
         let command_cwd = tmp.path().join("workspace");
         let extra_write_root = tmp.path().join("extra-write-root");
         let command_git = command_cwd.join(".git");
-        let extra_codex = extra_write_root.join(".codex");
+        let extra_codex = extra_write_root.join(".mikodex");
         let explicit_deny = tmp.path().join("explicit-deny");
         fs::create_dir_all(&command_git).expect("create command .git");
         fs::create_dir_all(&extra_codex).expect("create extra .codex");

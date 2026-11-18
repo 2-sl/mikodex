@@ -5,7 +5,6 @@
 //! Discovery merges into retained membership without evicting rows.
 
 use super::App;
-use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
 use super::agents_overview_details::preview_agent_message;
 use super::agents_overview_discovery::AgentsOverviewDiscovery;
 use super::agents_overview_discovery::is_overview_root;
@@ -281,7 +280,8 @@ impl App {
         &mut self,
         app_server: &AppServerSession,
     ) {
-        if self
+        if !self.agents_overview.sidebar_focused
+            && self
             .chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
             .is_none()
@@ -323,7 +323,8 @@ impl App {
             .discovery
             .get(&backend_id)
             .is_none_or(AgentsOverviewDiscovery::has_more);
-        let visible = self
+        let visible = self.agents_overview.sidebar_focused
+            || self
             .chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
             .is_some();

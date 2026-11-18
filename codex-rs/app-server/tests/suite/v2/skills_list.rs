@@ -228,7 +228,7 @@ async fn skills_list_uses_each_cwds_bundled_skills_configuration() -> Result<()>
 
     for (cwd, enabled) in [(disabled_cwd.path(), false), (enabled_cwd.path(), true)] {
         std::fs::create_dir_all(cwd.join(".git"))?;
-        std::fs::create_dir_all(cwd.join(".codex"))?;
+        std::fs::create_dir_all(cwd.join(".mikodex"))?;
         std::fs::write(
             cwd.join(".codex/config.toml"),
             format!("[skills.bundled]\nenabled = {enabled}\n"),
@@ -832,7 +832,7 @@ enabled = false
         (third_cwd.path(), true, false),
     ] {
         std::fs::create_dir_all(cwd.join(".git"))?;
-        std::fs::create_dir_all(cwd.join(".codex"))?;
+        std::fs::create_dir_all(cwd.join(".mikodex"))?;
         std::fs::write(
             cwd.join(".codex/config.toml"),
             format!(

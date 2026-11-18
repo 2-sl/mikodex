@@ -36,7 +36,7 @@ async fn cloud_list_respects_the_credential_store_and_trusted_destinations() -> 
         let mut command = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?);
         command
             .current_dir(codex_home.path())
-            .env("CODEX_HOME", codex_home.path())
+            .env("MIKODEX_HOME", codex_home.path())
             .env_remove("CODEX_ACCESS_TOKEN")
             .env_remove("OPENAI_API_KEY")
             .env_remove("CODEX_CLOUD_TASKS_MODE")
@@ -107,7 +107,7 @@ async fn cloud_list_respects_the_credential_store_and_trusted_destinations() -> 
         .args(["cloud", "list", "--limit", "1", "--json"])
         .assert()
         .failure()
-        .stderr(contains("Not signed in. Please run 'codex login'"));
+        .stderr(contains("Not signed in. Please run 'mikodex login'"));
     auth_server.verify().await;
     Ok(())
 }

@@ -52,7 +52,7 @@ async fn forged_worktree_project_config_cannot_start_host_mcp() -> Result<()> {
             tmp.path().join(scenario)
         };
         let marker = tmp.path().join(format!("{scenario}-mcp-started"));
-        fs::create_dir_all(checkout.join(".codex"))?;
+        fs::create_dir_all(checkout.join(".mikodex"))?;
         match scenario {
             "missing" => fs::write(
                 checkout.join(".git"),

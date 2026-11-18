@@ -126,7 +126,7 @@ fn protected_metadata_contents_remain_read_only() -> io::Result<()> {
     let directory = tempfile::tempdir()?;
     let root = AbsolutePathBuf::from_absolute_path(directory.path())?.canonicalize()?;
     let target = root.join(".codex/config.toml");
-    fs::create_dir(root.join(".codex"))?;
+    fs::create_dir(root.join(".mikodex"))?;
     fs::write(&target, "fixture")?;
     let checker = FileContentsChecker::new(&policy(&[(&root, Write)]), &root)?;
     assert_eq!(checker.check(&target)?, None);

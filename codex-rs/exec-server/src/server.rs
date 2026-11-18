@@ -42,7 +42,7 @@ pub async fn run_main(
 }
 
 #[tracing::instrument(
-    name = "codex.exec_server",
+    name = "mikodex.exec_server",
     skip_all,
     fields(otel.kind = "internal")
 )]
@@ -112,7 +112,7 @@ mod tests {
         provider.force_flush().expect("flush traces");
         let spans = exporter.get_finished_spans().expect("span export");
         assert!(
-            spans.iter().any(|span| span.name == "codex.exec_server"),
+            spans.iter().any(|span| span.name == "mikodex.exec_server"),
             "root exec-server span missing: {spans:?}"
         );
     }

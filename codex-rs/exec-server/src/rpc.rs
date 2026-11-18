@@ -619,7 +619,7 @@ impl RpcClient {
 
     /// Uses the supplied carrier only when this process cannot create an active W3C span.
     #[tracing::instrument(
-        name = "codex.exec_server.request",
+        name = "mikodex.exec_server.request",
         level = "info",
         skip_all,
         fields(
@@ -690,7 +690,7 @@ impl RpcClient {
     }
 
     #[tracing::instrument(
-        name = "codex.exec_server.request",
+        name = "mikodex.exec_server.request",
         level = "info",
         skip_all,
         fields(
@@ -800,10 +800,10 @@ impl RpcClient {
             return Err(RpcCallError::Closed);
         }
         tracing::event!(
-            name: "codex.exec_server.request_enqueued",
+            name: "mikodex.exec_server.request_enqueued",
             target: "codex_otel.trace_safe",
             tracing::Level::INFO,
-            event.name = "codex.exec_server.request_enqueued",
+            event.name = "mikodex.exec_server.request_enqueued",
             rpc.method = method,
             enqueue_wait_ms = enqueue_started.elapsed().as_millis() as u64,
             outgoing_queue_depth = self.write_tx.max_capacity() - self.write_tx.capacity(),

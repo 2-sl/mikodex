@@ -65,7 +65,9 @@ impl ChatWidget {
             settings: fallback_default,
         };
 
-        let empty_state_animation = crate::empty_state_animation::EmptyStateAnimation::default();
+        let empty_state_animation = crate::empty_state_animation::EmptyStateAnimation::for_home(
+            config.codex_home.as_path(),
+        );
         let header = Self::placeholder_session_header_cell(&config);
         let active_cell = Some(header);
 

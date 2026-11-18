@@ -4,20 +4,26 @@
 
 | Requirement                 | Details                                                         |
 | --------------------------- | --------------------------------------------------------------- |
-| Operating systems           | macOS 12+, Ubuntu 20.04+/Debian 10+, or Windows 11 **via WSL2** |
+| Operating systems           | macOS 12+, Ubuntu 20.04+/Debian 10+, or Windows 11 (native x64/MSVC or WSL2) |
 | Git (optional, recommended) | 2.23+ for built-in PR helpers                                   |
 | RAM                         | 4-GB minimum (8-GB recommended)                                 |
 
-### DotSlash
-
-The GitHub Release also contains a [DotSlash](https://dotslash-cli.com/) file for the Codex CLI named `codex`. Using a DotSlash file makes it possible to make a lightweight commit to source control to ensure all contributors use the same version of an executable, regardless of what platform they use for development.
-
 ### Build from source
 
+Native Windows x64 builds use the `x86_64-pc-windows-msvc` Rust toolchain and
+Visual Studio 2022 Build Tools with the **Desktop development with C++**
+workload and a Windows SDK. Run Cargo commands from an x64 Native Tools Command
+Prompt or Developer PowerShell so the MSVC environment is configured. Install
+Rust with the [Windows rustup installer](https://rust-lang.org/tools/install/)
+and select the MSVC toolchain. See Microsoft's guide to [MSVC command-line
+builds](https://learn.microsoft.com/en-us/cpp/build/building-on-the-command-line?view=msvc-170).
+
+On Windows, install Rust with rustup-init.exe and run the Rust and Cargo
+commands from the block below in the Developer shell; skip the `curl` and
+`source` lines. The shell installer lines are for macOS, Linux, and WSL2.
+
 ```bash
-# Clone the repository and navigate to the root of the Cargo workspace.
-git clone https://github.com/openai/codex.git
-cd codex/codex-rs
+# Run these commands from the repository root.
 
 # Install the Rust toolchain, if necessary.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -31,11 +37,14 @@ cargo install --locked dotslash
 # Install nextest for the `just test` helper.
 cargo install --locked cargo-nextest
 
-# Build Codex.
-cargo build
+# Build the complete local package, including platform helper binaries.
+just assemble-codex-package --variant codex --cargo-profile release --package-dir codex-rs/target/mikodex-package --force
 
-# Launch the TUI with a sample prompt.
-cargo run --bin codex -- "explain this codebase to me"
+# Launch the packaged TUI with a sample prompt (Windows path shown).
+./codex-rs/target/mikodex-package/bin/mikodex.exe "explain this codebase to me"
+
+# For quick source iteration only (does not create a complete CLI package).
+cargo run --manifest-path codex-rs/Cargo.toml -p codex-cli --bin mikodex -- "explain this codebase to me"
 
 # After making changes, use the root justfile helpers (they default to codex-rs):
 just fmt
@@ -51,15 +60,15 @@ just test
 
 ## Tracing / verbose logging
 
-Codex is written in Rust, so it honors the `RUST_LOG` environment variable to configure its logging behavior.
+Mikodex is written in Rust, so it honors the `RUST_LOG` environment variable to configure its logging behavior.
 
 The TUI records diagnostics in bounded local stores by default. Set `log_dir` explicitly to enable a plaintext TUI log for a run:
 
 ```bash
-codex -c log_dir=./.codex-log
-tail -F ./.codex-log/codex-tui.log
+mikodex -c log_dir=./.mikodex-log
+tail -F ./.mikodex-log/codex-tui.log
 ```
 
-The non-interactive mode (`codex exec`) defaults to `RUST_LOG=error`, but messages are printed inline, so there is no need to monitor a separate file.
+The non-interactive mode (`mikodex exec`) defaults to `RUST_LOG=error`, but messages are printed inline, so there is no need to monitor a separate file.
 
 See the Rust documentation on [`RUST_LOG`](https://docs.rs/env_logger/latest/env_logger/#enabling-logging) for more information on the configuration options.

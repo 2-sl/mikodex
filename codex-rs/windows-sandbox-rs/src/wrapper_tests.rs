@@ -7,7 +7,7 @@ use codex_protocol::models::PermissionProfile;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 
-use super::CODEX_HOME_FLAG;
+use super::MIKODEX_HOME_FLAG;
 use super::CODEX_WINDOWS_SANDBOX_ARG1;
 use super::COMMAND_CWD_FLAG;
 use super::DENY_READ_PATHS_JSON_FLAG;
@@ -41,7 +41,7 @@ fn large_deny_list_uses_environment_without_changing_the_request() {
     crate::environment_transport::encode("must not reach workload", &mut env).unwrap();
     let profile = PermissionProfile::read_only();
     let command = vec![
-        "codex.exe".to_string(),
+        "mikodex.exe".to_string(),
         "--codex-run-as-fs-helper".to_string(),
     ];
     let args = create_windows_sandbox_command_args_for_permission_profile(
@@ -116,7 +116,7 @@ fn windows_wrapper_args_round_trip() {
 
     let args = create_windows_sandbox_command_args_for_permission_profile(
         vec![
-            "codex.exe".to_string(),
+            "mikodex.exe".to_string(),
             "--codex-run-as-fs-helper".to_string(),
         ],
         &command_cwd,
@@ -137,7 +137,7 @@ fn windows_wrapper_args_round_trip() {
     .expect("build wrapper args");
 
     assert_eq!(args[0], CODEX_WINDOWS_SANDBOX_ARG1);
-    assert!(args.contains(&CODEX_HOME_FLAG.to_string()));
+    assert!(args.contains(&MIKODEX_HOME_FLAG.to_string()));
     assert!(args.contains(&COMMAND_CWD_FLAG.to_string()));
     assert!(args.contains(&WORKSPACE_ROOT_FLAG.to_string()));
     assert!(args.contains(&PERMISSION_PROFILE_FLAG.to_string()));
@@ -157,7 +157,7 @@ fn windows_wrapper_args_round_trip() {
 
     assert_eq!(
         parsed.command,
-        vec!["codex.exe", "--codex-run-as-fs-helper"]
+        vec!["mikodex.exe", "--codex-run-as-fs-helper"]
     );
     assert_eq!(parsed.command_cwd, command_cwd);
     assert_eq!(parsed.workspace_roots, workspace_roots);
