@@ -268,7 +268,7 @@ async fn external_writer_view_shows_notice_instead_of_composer() {
 async fn external_writer_fork_progress_restores_the_previous_view() {
     let (mut widget, _sender, _events, _operations) = make_chatwidget_manual_with_sender().await;
     for locked in [false, true] {
-        widget.external_writer_view = locked;
+        widget.read_only_thread = locked.then_some(ReadOnlyThread::ExternalWriter);
         let previous = render_frame(&widget, /*width*/ 60);
         widget.fork_in_progress = true;
         let frame = render_frame(&widget, /*width*/ 60);
@@ -401,7 +401,7 @@ async fn initial_session_header_starts_at_the_top_of_the_viewport() {
     let cwd = widget.config.cwd.as_path().display().to_string();
 
     insta::assert_snapshot!(header.replace(&cwd, "/tmp/project"), @r"
-      >_ OpenAI Mikodex (v<VERSION>)
+      >_ OpenAI Codex (v<VERSION>)
          /tmp/project
     ");
 }

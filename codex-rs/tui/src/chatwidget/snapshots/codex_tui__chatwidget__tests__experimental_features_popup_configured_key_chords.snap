@@ -4,10 +4,10 @@ expression: popup
 ---
   Experimental features
   Checked features are configured on. Some experimental features take effect
-  only in new tasks or after restarting the Mikodex server.
+  only in new tasks or after restarting the Codex server.
 
 
 › [x] Shell tool  Allow the model to run shell commands.
 
 
-  space toggle · ⌃x enter save · esc save/close
+  space toggle · ⌃x enter save · esc cancel

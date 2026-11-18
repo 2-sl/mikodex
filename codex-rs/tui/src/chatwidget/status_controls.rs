@@ -85,7 +85,7 @@ impl ChatWidget {
     }
 
     /// Sets the currently rendered footer status-line value.
-    pub(crate) fn set_status_line(&mut self, status_line: Option<FooterContent>) {
+    pub(crate) fn set_status_line(&mut self, status_line: Option<StatusLine>) {
         self.bottom_pane.set_status_line(status_line);
     }
 
@@ -221,7 +221,7 @@ impl ChatWidget {
             .map(|ti| &ti.total_token_usage)
             .unwrap_or(&default_usage);
         let collaboration_mode = self.collaboration_mode_label();
-        let model = self.current_model().to_string();
+        let model = self.selected_model().to_string();
         let model_default_reasoning_effort =
             self.model_catalog
                 .try_list_models()
@@ -232,9 +232,14 @@ impl ChatWidget {
                         .find(|preset| preset.model == model)
                         .map(|preset| preset.default_reasoning_effort)
                 });
+        let configured_reasoning_effort = if self.cloud_picker_selection.is_none() {
+            self.config.model_reasoning_effort.clone()
+        } else {
+            None
+        };
         let reasoning_effort_override = Some(
-            self.effective_reasoning_effort()
-                .or_else(|| self.config.model_reasoning_effort.clone())
+            self.status_reasoning_effort()
+                .or(configured_reasoning_effort)
                 .or(model_default_reasoning_effort),
         );
         let rate_limit_snapshots: Vec<RateLimitSnapshotDisplay> = self
@@ -259,7 +264,7 @@ impl ChatWidget {
             rate_limit_snapshots.as_slice(),
             self.plan_type,
             Local::now(),
-            self.model_display_name(),
+            self.status_model_display_name(),
             collaboration_mode,
             reasoning_effort_override,
             agents_summary,

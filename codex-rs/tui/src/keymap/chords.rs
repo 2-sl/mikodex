@@ -121,6 +121,11 @@ impl KeymapContextSet {
         )
     }
 
+    /// Enable Markdown marking while the transcript owns the selection caret.
+    pub(crate) const fn with_transcript_select(self) -> Self {
+        Self(self.0 | TRANSCRIPT_SELECT)
+    }
+
     /// Warning pages admit navigation plus their own toggle and copy.
     pub(crate) const fn warnings() -> Self {
         Self(context_bit(KeymapContext::List) | context_bit(KeymapContext::Global) | WARNINGS_FOCUS)
@@ -333,15 +338,18 @@ impl RuntimeChordBinding {
 
     /// Transcript selection remains active beside pager actions on native transcript surfaces.
     fn overlaps(&self, action: KeymapActionId) -> bool {
-        self.action.overlaps(action)
-            || (matches!(
-                (self.action.context, self.action.action),
-                (KeymapContext::Global, "select_transcript")
-            ) || matches!(
+        let transcript = KeymapContextSet::transcript().with_transcript_select();
+        let selection_action = |action: KeymapActionId| {
+            matches!(
                 (action.context, action.action),
                 (KeymapContext::Global, "select_transcript")
-            )) && KeymapContextSet::transcript().contains_action(self.action)
-                && KeymapContextSet::transcript().contains_action(action)
+                    | (KeymapContext::Pager, "mark_markdown")
+            )
+        };
+        self.action.overlaps(action)
+            || (selection_action(self.action) || selection_action(action))
+                && transcript.contains_action(self.action)
+                && transcript.contains_action(action)
             || self.is_leader()
                 && [
                     KeymapContextSet::browsing(),

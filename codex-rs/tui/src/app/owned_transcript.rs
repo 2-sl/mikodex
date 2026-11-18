@@ -61,20 +61,20 @@ impl ConversationFrame {
         }
     }
 
-    pub(super) fn chooser_covers_transcript(&self) -> bool {
-        matches!(self.sidebar, Some(sidebar::SidebarLayout::Chooser { main, .. }) if main.is_empty())
+    pub(super) fn panel_covers_transcript(&self) -> bool {
+        matches!(self.sidebar, Some(sidebar::SidebarLayout::Panel { main, .. }) if main.is_empty())
     }
 
-    pub(super) fn chooser_area(&self) -> Option<Rect> {
+    pub(super) fn panel_area(&self) -> Option<Rect> {
         match self.sidebar {
-            Some(sidebar::SidebarLayout::Chooser { sidebar, .. }) => Some(sidebar),
+            Some(sidebar::SidebarLayout::Panel { sidebar, .. }) => Some(sidebar),
             _ => None,
         }
     }
 
     pub(super) fn sidebar_tab_strip(&self) -> Option<Rect> {
         self.chat_strip.or_else(|| {
-            self.chooser_area()
+            self.panel_area()
                 .map(|area| side_pane::tab_and_body(area)[0])
         })
     }
@@ -257,32 +257,6 @@ impl App {
             self.conversation_frame = ConversationFrame::default();
         }
         let caller_inset = self.conversation_frame.inset;
-        let full_viewport = Rect::new(0, 0, screen_size.width, screen_size.height);
-        let agents_overview_present = self
-            .chat_widget
-            .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
-            .is_some();
-        if caller_inset.is_some() || agents_overview_present {
-            self.agents_overview.command_reference_focused = false;
-        }
-        let agents_dock = (caller_inset.is_none() && !agents_overview_present)
-            .then(|| agents_overview_dock::layout(self, full_viewport))
-            .flatten();
-        if agents_dock
-            .as_ref()
-            .is_none_or(|dock| dock.command_reference.is_empty())
-        {
-            self.agents_overview.command_reference_focused = false;
-        }
-        let conversation_viewport = agents_dock
-            .as_ref()
-            .map_or(full_viewport, |dock| dock.conversation);
-        let command_items = agents_dock
-            .as_ref()
-            .filter(|dock| !dock.command_reference.is_empty())
-            .map(|_| self.chat_widget.command_reference_items())
-            .unwrap_or_default();
-        let command_scroll = self.agents_overview.command_reference_scroll;
         let parent = self.sidebar_parent();
         if !self.conversation_focus_available(tui)
             && let Some(pane) = self.sidebars.get_mut(&parent)
@@ -305,20 +279,20 @@ impl App {
             Some(sidebar::SidebarLayout::Chat(panes)) => {
                 (Some(panes.focused), Some(panes.tab_strip))
             }
-            Some(sidebar::SidebarLayout::Chooser { main, .. }) => {
+            Some(sidebar::SidebarLayout::Panel { main, .. }) => {
                 ((!main.is_empty()).then_some(*main), None)
             }
             None if chat == TabState::Active
                 && caller_inset.is_none()
                 && self.side_retention_enabled(tui) =>
             {
-                let [strip, body] = side_pane::tab_and_body(conversation_viewport);
+                let [strip, body] = side_pane::tab_and_body(screen_size.into());
                 (Some(body), Some(strip))
             }
             None => (None, None),
         };
         let mut prepared =
-            self.prepare_conversation(conversation_viewport, caller_inset.or(live), &frames);
+            self.prepare_conversation(screen_size.into(), caller_inset.or(live), &frames);
         self.conversation_frame.sidebar = layout;
         self.conversation_frame.chat_strip = strip;
         self.conversation_frame.sidebar_input =
@@ -405,7 +379,7 @@ impl App {
                         );
                     }
                 }
-                Some(sidebar::SidebarLayout::Chooser { sidebar, focus, .. }) => {
+                Some(sidebar::SidebarLayout::Panel { sidebar, focus, .. }) => {
                     let focused = *focus == PaneFocus::Sidebar;
                     frame
                         .image_placements
@@ -524,7 +498,7 @@ impl App {
                             *sidebar,
                             frame.buffer,
                             footer,
-                            pane.chat_tabs(),
+                            tabs,
                             pane.choice,
                             &crate::sidebar_chooser::SidebarStyle {
                                 new_chat,
@@ -627,7 +601,7 @@ impl App {
                 let viewport = frame.area();
                 let column = self
                     .conversation_frame
-                    .chooser_area()
+                    .panel_area()
                     .or(strip)
                     .unwrap_or(viewport);
                 let area = Rect {
@@ -641,21 +615,6 @@ impl App {
                     .retain(|image| !area.intersects(image.area));
                 frame.cursor_position = None;
                 self.conversation_frame.close_buttons = buttons;
-            }
-            if let Some(dock) = agents_dock {
-                if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
-                    view.render_docked(dock.sidebar, frame.buffer);
-                }
-                dock.render_divider(frame.buffer, self);
-                if !dock.command_reference.is_empty() {
-                    command_reference::render(
-                        dock.command_reference,
-                        frame.buffer,
-                        &command_items,
-                        command_scroll,
-                        self.agents_overview.command_reference_focused,
-                    );
-                }
             }
             self.paint_centered_dialog(frame);
         })?;
@@ -747,15 +706,9 @@ impl App {
             None => (None, None),
         };
         let mut composer_gap = (!self.chat_widget.has_active_view()
-            && !self.chat_widget.is_external_writer_view())
+            && !self.chat_widget.is_read_only_view())
         .then(crate::bottom_pane::ComposerGap::default);
-        let prompt_footer = if self.agents_overview_dock_resize.is_some() {
-            Some(crate::bottom_pane::TranscriptFooter {
-                text: agents_overview_dock::RESIZE_HINT.into(),
-                cursor_column: None,
-                is_interactive: true,
-            })
-        } else if self.pane_resize.is_some() {
+        let prompt_footer = if self.pane_resize.is_some() {
             Some(crate::bottom_pane::TranscriptFooter {
                 text: side_pane::RESIZE_HINT.into(),
                 cursor_column: None,
@@ -772,19 +725,14 @@ impl App {
         // Painting those rows tells us whether newer activity is still hidden,
         // which can change the footer hint and the composer's measured height.
         let footer = view.footer_with_navigation(footer_width, motion, latest_navigation);
-        // Allow up to two-thirds of the pane, or eight rows on short panes when they fit.
-        let max_composer_height = ((u32::from(area.height) * 2 / 3) as u16)
-            .max(8)
-            .min(area.height);
-        let unfocused = self.agents_overview.sidebar_focused
-            || self.agents_overview.command_reference_focused
-            || matches!(
-                self.conversation_frame.sidebar,
-                Some(sidebar::SidebarLayout::Chooser {
-                    focus: PaneFocus::Sidebar,
-                    ..
-                })
-            );
+        let max_composer_height = side_pane::composer_height_limit(area.height);
+        let unfocused = matches!(
+            self.conversation_frame.sidebar,
+            Some(sidebar::SidebarLayout::Panel {
+                focus: PaneFocus::Sidebar,
+                ..
+            })
+        );
         let options = |interacting| ComposerRenderOptions {
             unfocused,
             max_height: Some(max_composer_height),
@@ -869,10 +817,7 @@ impl App {
             );
             needs_redraw = false;
         }
-        let background_tick = chat_widget
-            .empty_state_animation
-            .borrow_mut()
-            .render_chat_background(area, frame.buffer);
+        view.finish_collapse_layout(&self.transcript_cells);
         let blossom_tick = chat_widget
             .empty_state_animation
             .borrow_mut()
@@ -886,7 +831,6 @@ impl App {
                 composer,
                 MotionMode::from_animations_enabled(self.local_settings.tui.animations),
             );
-        let blossom_tick = background_tick.or(blossom_tick);
         bottom.render(bottom_area, frame.buffer);
         if let (Some(tip), Some(area)) = (completion_tip, completion_tip_area) {
             tip.render(area, frame.buffer);
@@ -1015,9 +959,6 @@ impl App {
         app_server: &mut AppServerSession,
         event: &TuiEvent,
     ) -> Result<bool> {
-        if self.agents_overview.sidebar_focused && self.overlay.is_none() {
-            return Ok(false);
-        }
         let has_modal = self.chat_widget.has_active_modal();
         let is_vertical_wheel = matches!(event, TuiEvent::Mouse(mouse)
             if matches!(mouse.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown));
@@ -1095,7 +1036,7 @@ impl App {
             }
             if self
                 .conversation_frame
-                .chooser_area()
+                .panel_area()
                 .is_some_and(|area| area.contains((mouse.column, mouse.row).into()))
             {
                 return Ok(true);
@@ -1207,7 +1148,7 @@ impl App {
         // Search and selection still consume Escape first to dismiss their interaction.
         if let TuiEvent::Key(key) = event
             && !self.transcript_view.has_active_interaction()
-            && (self.chat_widget.is_external_writer_view() || self.chat_widget.has_provider_error())
+            && (self.chat_widget.is_read_only_view() || self.chat_widget.has_provider_error())
             && crate::key_hint::plain(KeyCode::Esc).is_press(*key)
         {
             return Ok(false);

@@ -100,7 +100,11 @@ impl ChatComposer {
         }
         self.cancel_history_search();
         self.attachments.clear_remote_image_selection();
-        self.popups.active = ActivePopup::None;
+        if mode != RestrictedInputMode::UnavailableThread
+            || !matches!(self.popups.active, ActivePopup::Command(_))
+        {
+            self.popups.active = ActivePopup::None;
+        }
         self.set_disable_paste_burst(/*disabled*/ true);
         let history_handled = matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
             && self.handle_edit_history_key(key);
@@ -108,6 +112,7 @@ impl ChatComposer {
         // preserves the cursor and other elements, including images and mentions.
         let pending_pastes = std::mem::take(&mut self.draft.pending_pastes);
         if !pending_pastes.is_empty() {
+            self.popups.active = ActivePopup::None;
             for element in self.draft.textarea.text_elements().into_iter().rev() {
                 if let Some((_, text)) = pending_pastes.iter().find(|(placeholder, _)| {
                     element.placeholder(self.draft.textarea.text()) == Some(placeholder.as_str())
@@ -212,6 +217,13 @@ impl ChatComposer {
             && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
         {
             self.edit_restricted_draft(key);
+            if mode == RestrictedInputMode::UnavailableThread {
+                self.sync_command_popup(
+                    self.slash_commands_enabled()
+                        && !self.draft.is_bash_mode
+                        && self.draft.textarea.vim_query().is_none(),
+                );
+            }
         }
         InputResult::None
     }

@@ -1321,7 +1321,7 @@ mod tests {
                         Line::from(vec![
                             "›".bold(),
                             " ".into(),
-                            "Ask Mikodex to do anything".dim(),
+                            "Ask Codex to do anything".dim(),
                         ]),
                     ])
                     .render(frame.area(), frame.buffer_mut());
@@ -1344,7 +1344,7 @@ mod tests {
 
 
 
-        › Ask Mikodex to do anything
+        › Ask Codex to do anything
         ");
     }
 

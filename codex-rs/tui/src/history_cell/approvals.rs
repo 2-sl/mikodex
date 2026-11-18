@@ -141,7 +141,7 @@ pub fn new_approval_decision_cell(
                     vec![
                         actor.subject().into(),
                         "persisted".bold(),
-                        " Mikodex network access to ".into(),
+                        " Codex network access to ".into(),
                         Span::from(target).dim(),
                     ],
                 ),

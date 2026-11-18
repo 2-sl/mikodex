@@ -122,7 +122,7 @@ impl MemoriesSettingsView {
         header.push(Paragraph::new(Line::from("Memories".bold())).wrap(Wrap { trim: false }));
         header.push(
             Paragraph::new(Line::from(
-                "Choose how Mikodex uses and creates memories. Changes are saved to config.toml"
+                "Choose how Codex uses and creates memories. Changes are saved to config.toml"
                     .dim(),
             ))
             .wrap(Wrap { trim: false }),
@@ -137,7 +137,7 @@ impl MemoriesSettingsView {
         );
         header.push(
             Paragraph::new(Line::from(
-                "This clears local memory files and rollout summaries for the current Mikodex home."
+                "This clears local memory files and rollout summaries for the current Codex home."
                     .dim(),
             ))
             .wrap(Wrap { trim: false }),

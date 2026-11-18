@@ -247,7 +247,7 @@ impl AppServerSession {
         cursor: &str,
         page: ThreadItemsListResponse,
         turns: &mut Vec<Turn>,
-    ) -> Result<Vec<ThreadItemPayload>> {
+    ) -> Result<Vec<(String, ThreadItemPayload)>> {
         if !self.is_older_history_page_pending(thread_id, cursor) {
             return Ok(Vec::new());
         }
@@ -308,7 +308,7 @@ impl AppServerSession {
         page: ThreadItemsListResponse,
         state: &mut ThreadHistoryPagination,
         turns: &mut Vec<Turn>,
-    ) -> Result<Vec<ThreadItemPayload>> {
+    ) -> Result<Vec<(String, ThreadItemPayload)>> {
         state.next_item_cursor = advancing_cursor(
             state.next_item_cursor.as_deref(),
             page.next_cursor,
@@ -495,7 +495,7 @@ impl AppServerSession {
 fn rendered_history_rows(
     thread_id: ThreadId,
     thread: &Thread,
-    items: Vec<ThreadItemPayload>,
+    items: Vec<(String, ThreadItemPayload)>,
     config: &Config,
     local_settings: &crate::local_settings::LocalSettings,
     width: u16,
@@ -514,7 +514,7 @@ fn rendered_history_rows(
     thread_items_to_transcript_cells(
         Some(thread_id),
         &thread.cwd,
-        items,
+        items.into_iter().map(|(_, item)| item),
         visibility,
         Some(config),
     )

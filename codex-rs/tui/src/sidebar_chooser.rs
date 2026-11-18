@@ -14,6 +14,7 @@ use crate::sidebar_tab_strip::SidebarTab;
 use crate::sidebar_tab_strip::TabState;
 use crate::sidebar_tab_strip::TabStrip;
 use crate::sidebar_tab_strip::TabTarget;
+use crate::thread_label::ThreadLabelStyle;
 use codex_protocol::ThreadId;
 use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathUri;
@@ -209,6 +210,7 @@ pub(crate) struct AgentRow {
 
 #[derive(Clone, Copy)]
 pub(crate) struct ChatTabs<'a> {
+    pub(crate) label_style: ThreadLabelStyle,
     pub(crate) discovery: &'a Discovery,
     pub(crate) opening: Option<&'a Opening>,
     pub(crate) ids: &'a [SidebarTab],
@@ -850,7 +852,8 @@ pub(crate) fn paint(
         let ordinal = index - 1;
         let chat = &tabs.choices[ordinal];
         let selected = index == choice && focused;
-        let title = if let Some(label) = side_chat_label(chat) {
+        let label = side_chat_label(chat);
+        let title = if let Some(label) = label {
             label.to_owned()
         } else if tabs.choices.len() == 1 {
             "Side chat".to_string()
@@ -877,6 +880,7 @@ pub(crate) fn paint(
             Span::styled("○", if selected { style } else { secondary })
         };
         let mut spans = vec![format!("{marker} ").into(), symbol, " ".into()];
+        let label_style = label.map_or(ThreadLabelStyle::Plain, |_| tabs.label_style);
         if let Some(opening) = opening {
             let status = match &opening.state {
                 OpenState::Waiting => "Waiting to open…".dim(),
@@ -891,7 +895,11 @@ pub(crate) fn paint(
             spans.extend(title.spans);
             spans.extend(["  ".into(), status]);
         } else {
-            spans.push(title);
+            spans.extend(
+                label_style
+                    .render(Line::from(title), width.saturating_sub(4))
+                    .spans,
+            );
         }
         let line = Line::from(spans).style(fill);
         paint(

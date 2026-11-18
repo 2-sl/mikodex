@@ -4,6 +4,6 @@ assertion_line: 1885
 expression: rendered
 ---
 
-  >_ OpenAI Mikodex (vtest)
+  >_ OpenAI Codex (vtest)
      /tmp/project
   permissions: YOLO mode

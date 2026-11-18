@@ -11,7 +11,7 @@ fn composer() -> ChatComposer {
         /*has_input_focus*/ true,
         AppEventSender::new(tx),
         /*enhanced_keys_supported*/ false,
-        "Ask Mikodex".to_string(),
+        "Ask Codex".to_string(),
         /*disable_paste_burst*/ true,
     );
     composer.set_status_line_enabled(/*enabled*/ true);

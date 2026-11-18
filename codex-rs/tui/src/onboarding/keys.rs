@@ -1,4 +1,4 @@
-//! Fixed shortcuts used before users have had a chance to configure Mikodex.
+//! Fixed shortcuts used before users have had a chance to configure Codex.
 
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;

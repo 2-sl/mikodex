@@ -65,9 +65,7 @@ impl ChatWidget {
             settings: fallback_default,
         };
 
-        let empty_state_animation = crate::empty_state_animation::EmptyStateAnimation::for_home(
-            config.codex_home.as_path(),
-        );
+        let empty_state_animation = crate::empty_state_animation::EmptyStateAnimation::default();
         let header = Self::placeholder_session_header_cell(&config);
         let active_cell = Some(header);
 
@@ -137,6 +135,7 @@ impl ChatWidget {
             model_catalog,
             model_popup_request_id: None,
             cloud_picker_selection: None,
+            pending_cloud_turn_settings: None,
             permission_popup_pending: false,
             permission_popup_request_id: None,
             permission_discovery: None,
@@ -152,6 +151,7 @@ impl ChatWidget {
             statusline_read: None,
             statusline_disconnected: false,
             snapshot_local_images: false,
+            thread_params_mode: crate::app_server_session::ThreadParamsMode::Embedded,
             pending_image_submission: None,
             local_worktree_operations: true,
             windows_sandbox_local_server: false,
@@ -250,7 +250,9 @@ impl ChatWidget {
             thread_rename_block_message: None,
             active_side_conversation: false,
             blocks_direct_input: false,
-            external_writer_view: false,
+            read_only_thread: None,
+            read_only_history: false,
+            thread_settings_confirmed: false,
             provider_error: None,
             fork_in_progress: false,
             misalignment_policy_violation: None,
@@ -259,6 +261,7 @@ impl ChatWidget {
             forked_from: None,
             interrupted_turn_notice_mode: InterruptedTurnNoticeMode::Default,
             input_queue: InputQueueState::default(),
+            thread_stream_disconnected: false,
             safety_buffering_prompt: None,
             safety_buffering_source: UserMessageSource::Prompt,
             chat_keymap,
@@ -279,6 +282,7 @@ impl ChatWidget {
             feedback,
             current_rollout_path: None,
             current_cwd,
+            primary_environment_cwd: None,
             workspace_command_runner,
             instruction_source_paths: Vec::new(),
             session_network_proxy: None,
@@ -301,7 +305,6 @@ impl ChatWidget {
             status_line_git_summary_lookup_complete: false,
             status_line_workspace_headline: None,
             status_line_workspace_headline_pending_request_id: None,
-            next_status_line_workspace_headline_request_id: 0,
             status_line_workspace_headline_last_requested_at: None,
             status_line_workspace_messages_disabled: false,
             thread_usage: thread_usage::ThreadUsageState::default(),

@@ -65,6 +65,123 @@ pub(crate) fn startup_test_pump_with_input(text: &str) -> StartupDraftPump {
     pump
 }
 
+#[tokio::test]
+async fn new_session_composer_renders_edits_before_thread_start_finishes() {
+    let (finish_start, started) = tokio::sync::oneshot::channel();
+    let mut pump = startup_test_pump(
+        [
+            TuiEvent::Paste("draft while opening".into()),
+            TuiEvent::Key(KeyCode::Enter.into()),
+        ]
+        .into_iter(),
+    );
+    pump.session_action = StartupDraftSessionAction::NewWhileRunning;
+    pump.events = Box::pin(
+        pump.events
+            .chain(futures::stream::once(async move {
+                finish_start.send(()).expect("release thread start");
+                TuiEvent::Draw
+            }))
+            .chain(futures::stream::pending()),
+    );
+    let mut tui = crate::tui::test_support::make_test_tui().expect("create test terminal");
+
+    StartupDraftPump::run_during_navigation(Some(&mut pump), &mut tui, started)
+        .await
+        .expect("finish thread start");
+
+    let frame = tui.terminal.previous_buffer();
+    let draft_line = frame
+        .content()
+        .chunks(usize::from(frame.area.width))
+        .map(|row| {
+            row.iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+        })
+        .find(|row| row.contains("draft while opening"))
+        .expect("the typed draft was visible while thread start was pending");
+    insta::assert_snapshot!(draft_line.trim(), @"› draft while opening");
+    assert_eq!(pump.take_draft().text, "draft while opening");
+    assert!(!pump.take_submission_intent());
+}
+
+#[tokio::test]
+async fn failed_new_session_drains_queued_enter_before_returning_the_draft() {
+    let mut pump = quiet_startup_test_pump();
+    pump.session_action = StartupDraftSessionAction::NewWhileRunning;
+    pump.bottom_pane.insert_str("draft for the new thread");
+    let (enter_polled, mut enter_was_polled) = tokio::sync::oneshot::channel();
+    pump.events = Box::pin(futures::stream::once(async move {
+        enter_polled.send(()).expect("observe the queued Enter");
+        TuiEvent::Key(KeyCode::Enter.into())
+    }));
+    let (mut old_chat, _events, _rx, _ops) =
+        crate::chatwidget::tests::make_chatwidget_manual_with_sender().await;
+    let mut tui = crate::tui::test_support::make_test_tui().expect("create test terminal");
+
+    pump.handoff_after_navigation(&mut tui, &mut old_chat, /*opened_new_session*/ false)
+        .await;
+
+    assert_eq!(enter_was_polled.try_recv(), Ok(()));
+    let frame = tui.terminal.previous_buffer();
+    let failure_hint = frame
+        .content()
+        .chunks(usize::from(frame.area.width))
+        .map(|row| {
+            row.iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+        })
+        .find(|row| row.contains("New conversation did not open"))
+        .expect("the failure frame was painted before the handoff returned");
+    insta::assert_snapshot!(failure_hint.trim(), @"New conversation did not open draft kept");
+    assert_eq!(
+        old_chat.composer_text_with_pending(),
+        "draft for the new thread"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn new_session_handoff_keeps_delayed_raw_paste_newline() {
+    let mut tui = crate::tui::test_support::make_test_tui().expect("create test terminal");
+    for draw_before_newline in [false, true] {
+        let mut pump = quiet_startup_test_pump();
+        pump.session_action = StartupDraftSessionAction::NewWhileRunning;
+        for character in "first line".chars() {
+            pump.handle_event(&mut tui, TuiEvent::Key(KeyCode::Char(character).into()))
+                .expect("buffer the first paste line");
+        }
+        pump.events = Box::pin(
+            futures::stream::once(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(/*millis*/ 70)).await;
+                if draw_before_newline {
+                    TuiEvent::Draw
+                } else {
+                    TuiEvent::Key(KeyCode::Enter.into())
+                }
+            })
+            .chain(futures::stream::iter(
+                draw_before_newline
+                    .then_some(TuiEvent::Key(KeyCode::Enter.into()))
+                    .into_iter()
+                    .chain(
+                        "second line"
+                            .chars()
+                            .map(|c| TuiEvent::Key(KeyCode::Char(c).into())),
+                    ),
+            )),
+        );
+        let (mut chat, _events, _rx, _ops) =
+            crate::chatwidget::tests::make_chatwidget_manual_with_sender().await;
+
+        pump.handoff_after_navigation(&mut tui, &mut chat, /*opened_new_session*/ true)
+            .await;
+
+        assert_eq!(chat.composer_text_with_pending(), "first line\nsecond line");
+    }
+}
+
 #[test]
 fn startup_draft_renders_full_empty_and_multiline_composer_frames() {
     let mut snapshots = Vec::new();
@@ -292,7 +409,7 @@ async fn startup_draft_clears_loading_status_when_starting_fresh() {
 
 #[tokio::test]
 async fn startup_draft_hydrates_its_header_without_moving_the_composer() {
-    let codex_home = tempfile::tempdir().expect("create temporary Mikodex home");
+    let codex_home = tempfile::tempdir().expect("create temporary Codex home");
     let config = ConfigBuilder::default()
         .codex_home(codex_home.path().to_path_buf())
         .build()
@@ -639,7 +756,7 @@ async fn startup_draft_preserves_windows_altgr_text_input() {
 
 #[tokio::test]
 async fn startup_draft_applies_paste_burst_preferences_without_losing_buffered_input() {
-    let codex_home = tempfile::tempdir().expect("create temporary Mikodex home");
+    let codex_home = tempfile::tempdir().expect("create temporary Codex home");
     let config = ConfigBuilder::default()
         .codex_home(codex_home.path().to_path_buf())
         .build()
@@ -688,7 +805,7 @@ async fn startup_draft_applies_paste_burst_preferences_without_losing_buffered_i
 
 #[tokio::test]
 async fn startup_draft_applies_super_editor_keymap_without_inserting_pending_newline() {
-    let codex_home = tempfile::tempdir().expect("create temporary Mikodex home");
+    let codex_home = tempfile::tempdir().expect("create temporary Codex home");
     let config = ConfigBuilder::default()
         .codex_home(codex_home.path().to_path_buf())
         .build()
@@ -785,7 +902,7 @@ async fn startup_draft_waits_for_onboarding_before_accepting_input() {
         ]
         .into_iter(),
     );
-    let codex_home = tempfile::tempdir().expect("create an existing custom Mikodex home");
+    let codex_home = tempfile::tempdir().expect("create an existing custom Codex home");
     std::fs::write(codex_home.path().join("history.jsonl"), "")
         .expect("create existing startup history");
     let system_config_path = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(
@@ -799,7 +916,7 @@ async fn startup_draft_waits_for_onboarding_before_accepting_input() {
                 codex_home.path(),
                 Ok(system_config_path),
                 || Ok(false),
-                |name| (name == "MIKODEX_HOME").then(|| codex_home.path().as_os_str().to_os_string()),
+                |name| (name == "CODEX_HOME").then(|| codex_home.path().as_os_str().to_os_string()),
             )
         {
             StartupDraftInitialScreen::Onboarding

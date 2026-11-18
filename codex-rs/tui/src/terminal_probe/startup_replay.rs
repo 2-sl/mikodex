@@ -15,6 +15,13 @@ pub(super) fn parse_startup_input(input: &[u8], probe_herdr: bool) -> (Vec<u8>, 
     let mut cursor = 0;
     let mut inside_paste = false;
     while cursor < input.len() {
+        if input
+            .get(cursor..cursor + 11)
+            .is_some_and(|report| super::alternate_scroll_report(report).is_some())
+        {
+            cursor += 11;
+            continue;
+        }
         if inside_paste {
             if input[cursor..].starts_with(PASTE_END) {
                 replay.extend_from_slice(PASTE_END);

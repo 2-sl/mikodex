@@ -130,7 +130,7 @@ define_keymap_actions! {
         minimize_pane_width [Workspace] => "Minimize the focused pane width.",
         maximize_pane_width [Workspace] => "Maximize the focused pane width.",
         equalize_pane_widths [Workspace] => "Equalize visible pane widths.",
-        resize_panes [Workspace] => "Enter keyboard resize mode for visible pane and dock dividers.",
+        resize_panes [Workspace] => "Enter keyboard resize mode for visible dividers.",
         move_divider_left [Workspace] => "Move the divider left when the side pane has focus.",
         move_divider_right [Workspace] => "Move the divider right when the side pane has focus.",
         toggle_pane_zoom [Workspace] => "Zoom or restore the focused pane.",
@@ -279,6 +279,7 @@ define_keymap_actions! {
         close => "Close the pager overlay.",
         close_transcript => "Close the transcript overlay.",
         find => "Find text in a transcript pager.",
+        mark_markdown => "Mark table cells in transcript selection mode.",
     }
     list "List" {
         move_up => "Move list selection up.",

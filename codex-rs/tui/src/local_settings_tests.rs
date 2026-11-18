@@ -2,8 +2,10 @@ use super::*;
 use crate::legacy_core::config::ConfigBuilder;
 use crate::legacy_core::config::edit::ConfigEditsBuilder;
 use codex_config::LoaderOverrides;
+use codex_config::types::BuiltinStatusLine;
 use codex_config::types::RightClickPaste;
 use codex_config::types::SessionPickerViewMode;
+use codex_config::types::StatusLineSelection;
 use codex_terminal_detection::Multiplexer;
 use pretty_assertions::assert_eq;
 
@@ -136,6 +138,7 @@ right_click_paste = "off"
 vim_mode_default = true
 terminal_resize_reflow_max_rows = 0
 session_picker_view = "comfortable"
+status_line_provider = { server = "remote.work", tool = "usage" }
 [tui.default_hosts.project_a]
 user_a = "remote.work"
 [tui.effects]
@@ -161,7 +164,7 @@ fast_default_opt_out = true
         std::fs::create_dir(project.path().join(".codex"))?;
         std::fs::write(
             project.path().join(".codex/config.toml"),
-            "[tui]\ntheme = 'project-theme'\n[tui.default_hosts.project_a]\nuser_a = 'project-override'\nuser_b = 'project-only'\n",
+            "[tui]\ntheme = 'project-theme'\nstatus_line_provider = { server = 'project', tool = 'usage' }\n[tui.default_hosts.project_a]\nuser_a = 'project-override'\nuser_b = 'project-only'\n",
         )?;
         crate::legacy_core::config::set_project_trust_level(
             home.path(),
@@ -170,6 +173,7 @@ fast_default_opt_out = true
         )?;
         let cli_overrides = vec![
             ("tui.disable_paste_burst".into(), true.into()),
+            ("tui.status_line_provider".into(), "default".into()),
             ("tui.right_click_paste".into(), "on".into()),
             ("tui.mouse_scroll_speed".into(), 1.5.into()),
             // The removed flag must not override the TUI preference.
@@ -206,6 +210,10 @@ fast_default_opt_out = true
         );
         assert_eq!(config.features.legacy_feature_usages().count(), 1);
         assert_eq!(config.tui_theme.as_deref(), Some("project-theme"));
+        assert_eq!(
+            config.tui_status_line_provider.as_deref(),
+            Some(&StatusLineSelection::Builtin(BuiltinStatusLine::Default)),
+        );
         assert!(
             LocalSettings::from(&config)
                 .tui

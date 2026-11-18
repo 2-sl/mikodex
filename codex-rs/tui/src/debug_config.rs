@@ -672,7 +672,6 @@ mod tests {
     use codex_config::ConfigLayerStack;
     use codex_config::ConfigRequirements;
     use codex_config::ConfigRequirementsToml;
-    use codex_config::ConfigRequirementsWithSources;
     use codex_config::Constrained;
     use codex_config::ConstrainedWithSource;
     use codex_config::ConstraintError;
@@ -690,11 +689,13 @@ mod tests {
     use codex_config::NetworkUnixSocketPermissionToml;
     use codex_config::NetworkUnixSocketPermissionsToml;
     use codex_config::RequirementSource;
+    use codex_config::RequirementsLayerEntry;
     use codex_config::ResidencyRequirement;
     use codex_config::SandboxModeRequirement;
     use codex_config::Sourced;
     use codex_config::WebSearchModeRequirement;
     use codex_config::WindowsRequirementsToml;
+    use codex_config::compose_requirements;
     use codex_config::sandbox_mode_requirement_for_permission_profile;
     use codex_config::types::FeedbackConfigToml;
     use codex_protocol::config_types::ApprovalsReviewer;
@@ -774,9 +775,9 @@ interrupt_message = false
             absolute_path("/etc/codex/config.toml")
         };
         let project_folder = if cfg!(windows) {
-            absolute_path("C:\\repo\\.mikodex")
+            absolute_path("C:\\repo\\.codex")
         } else {
-            absolute_path("/repo/.mikodex")
+            absolute_path("/repo/.codex")
         };
 
         let layers = vec![
@@ -810,7 +811,7 @@ interrupt_message = false
     #[test]
     fn debug_config_output_lists_requirement_sources() {
         let requirements_file = if cfg!(windows) {
-            absolute_path("C:\\ProgramData\\OpenAI\\Mikodex\\requirements.toml")
+            absolute_path("C:\\ProgramData\\OpenAI\\Codex\\requirements.toml")
         } else {
             absolute_path("/etc/codex/requirements.toml")
         };
@@ -820,19 +821,19 @@ interrupt_message = false
             absolute_path("/home/alice/.gitconfig")
         };
         let sqlite_home = if cfg!(windows) {
-            absolute_path("C:\\Users\\alice\\.mikodex\\state")
+            absolute_path("C:\\Users\\alice\\.codex\\state")
         } else {
-            absolute_path("/home/alice/.mikodex/state")
+            absolute_path("/home/alice/.codex/state")
         };
         let log_dir = if cfg!(windows) {
-            absolute_path("C:\\Users\\alice\\.mikodex\\logs")
+            absolute_path("C:\\Users\\alice\\.codex\\logs")
         } else {
-            absolute_path("/home/alice/.mikodex/logs")
+            absolute_path("/home/alice/.codex/logs")
         };
         let model_catalog_json = if cfg!(windows) {
-            absolute_path("C:\\Users\\alice\\.mikodex\\models.json")
+            absolute_path("C:\\Users\\alice\\.codex\\models.json")
         } else {
-            absolute_path("/home/alice/.mikodex/models.json")
+            absolute_path("/home/alice/.codex/models.json")
         };
 
         let requirements = ConfigRequirements {
@@ -998,9 +999,9 @@ interrupt_message = false
         };
 
         let user_file = if cfg!(windows) {
-            absolute_path("C:\\users\\alice\\.mikodex\\config.toml")
+            absolute_path("C:\\users\\alice\\.codex\\config.toml")
         } else {
-            absolute_path("/home/alice/.mikodex/config.toml")
+            absolute_path("/home/alice/.codex/config.toml")
         };
         let stack = ConfigLayerStack::new(
             vec![ConfigLayerEntry::new(
@@ -1075,7 +1076,7 @@ interrupt_message = false
     #[test]
     fn debug_config_output_filters_sandbox_modes_blocked_by_deny_read_requirements() {
         let requirements_file = if cfg!(windows) {
-            absolute_path("C:\\ProgramData\\OpenAI\\Mikodex\\requirements.toml")
+            absolute_path("C:\\ProgramData\\OpenAI\\Codex\\requirements.toml")
         } else {
             absolute_path("/etc/codex/requirements.toml")
         };
@@ -1225,13 +1226,20 @@ interrupt_message = false
             "experimental_network",
             "permissions.network",
         ] {
-            let toml: ConfigRequirementsToml =
-                toml::from_str(&format!("[{table}]\nenabled = true")).expect("requirements");
-            let mut sourced = ConfigRequirementsWithSources::default();
-            sourced.merge_unset_fields(RequirementSource::Unknown, toml.clone());
-            let requirements = ConfigRequirements::try_from(sourced).expect("valid requirements");
-            let stack =
-                ConfigLayerStack::new(Vec::new(), requirements, toml).expect("config layer stack");
+            let layer = RequirementsLayerEntry::from_toml(
+                RequirementSource::EnterpriseManaged {
+                    id: "network".to_string(),
+                    name: "Network policy".to_string(),
+                },
+                format!("[{table}]\nenabled = true"),
+            );
+            let sourced = compose_requirements([layer])
+                .expect("compose requirements")
+                .expect("managed network requirements");
+            let requirements =
+                ConfigRequirements::try_from(sourced.clone()).expect("valid requirements");
+            let stack = ConfigLayerStack::new(Vec::new(), requirements, sourced.into_toml())
+                .expect("config layer stack");
             outputs.push(format!("{table}:\n{}", render_stack_to_text(&stack)));
         }
 

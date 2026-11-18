@@ -392,7 +392,8 @@ use super::skill_popup::SkillPopup;
 use super::slash_commands::ServiceTierCommand;
 use super::slash_commands::SlashCommandItem;
 use super::voice_strip::VoiceStrip;
-use crate::bottom_pane::footer_content::FooterContent;
+use crate::bottom_pane::StatusLine;
+use crate::bottom_pane::StatusLineFocus;
 use crate::history_cell::sanitize_user_text;
 use crate::key_hint::KeyBindingListExt;
 use crate::keymap::EditorKeymap;
@@ -414,7 +415,7 @@ use codex_protocol::user_input::TextElement;
 mod agents_navigation;
 mod attachment_state;
 mod completion_target;
-mod composer_layout;
+pub(super) mod composer_layout;
 mod draft_state;
 mod footer_state;
 mod history_search;
@@ -756,12 +757,6 @@ impl ChatComposer {
         )
     }
 
-    pub(crate) fn command_reference_items(&self) -> Vec<(String, String)> {
-        self.slash_input()
-            .command_popup("/")
-            .command_reference_items()
-    }
-
     pub fn new(
         has_input_focus: bool,
         app_event_tx: AppEventSender,
@@ -813,13 +808,12 @@ impl ChatComposer {
                 flash: None,
                 context_window_percent: None,
                 context_window_used_tokens: None,
-                context_window_pending: false,
+                context_window_hidden: false,
                 collaboration_mode_indicator: None,
                 goal_status_indicator: None,
                 ide_context_active: false,
                 status_line_value: None,
-                measured_status_line: Default::default(),
-                wrapped_native_status: Default::default(),
+                labeled_status_line: Default::default(),
                 status_line_enabled: false,
                 side_conversation_context_label: None,
                 active_agent_label: None,
@@ -937,13 +931,12 @@ impl ChatComposer {
             let style = IgnitionStyle::random(self.effort_animation_style);
             self.effort_ignition = Some(EffortIgnition::new(tier, style));
             self.effort_animation_style = Some(style);
-            if let Some(previous) = self.status_surface_content()
-                && !matches!(previous.as_ref(), FooterContent::Extension { .. })
-            {
-                self.effort_status_line_transition = Some(EffortStatusLineTransition::new(
-                    tier,
-                    previous.into_owned().into_hyperlink_line(),
-                ));
+            let previous = self.with_status_surface_content(StatusLineFocus::Focused, |status| {
+                status.and_then(StatusLine::as_native).cloned()
+            });
+            if let Some(previous) = previous {
+                self.effort_status_line_transition =
+                    Some(EffortStatusLineTransition::new(tier, previous));
             }
             if let Some(frame_requester) = &self.frame_requester {
                 frame_requester.schedule_frame();
@@ -1548,7 +1541,7 @@ impl ChatComposer {
     }
 
     fn right_footer_line_with_context(&self) -> Line<'static> {
-        let mut line = if self.footer.context_window_pending {
+        let mut line = if self.footer.context_window_hidden {
             Line::default()
         } else {
             context_window_line(
@@ -1557,7 +1550,9 @@ impl ChatComposer {
             )
         };
         if let Some(vim_mode) = self.vim_mode_indicator_span() {
-            line.spans.push(" | ".dim());
+            if !line.spans.is_empty() {
+                line.spans.push(" | ".dim());
+            }
             line.spans.push(vim_mode);
         }
         line
@@ -1952,7 +1947,7 @@ impl ChatComposer {
         self.attachments.local_image_paths()
     }
 
-    pub(crate) fn status_line_content(&self) -> Option<&FooterContent> {
+    pub(crate) fn status_line_content(&self) -> Option<&StatusLine> {
         self.footer.status_line_value.as_ref()
     }
 
@@ -2154,7 +2149,10 @@ impl ChatComposer {
         }
 
         let result = match &mut self.popups.active {
-            ActivePopup::Command(_) => self.handle_key_event_with_slash_popup(key_event),
+            ActivePopup::Command(_) => self.handle_key_event_with_slash_popup(
+                key_event,
+                slash_input::SlashPopupInputMode::Normal,
+            ),
             ActivePopup::File(_) => self.handle_key_event_with_file_popup(key_event),
             ActivePopup::Skill(_) => self.handle_key_event_with_skill_popup(key_event),
             ActivePopup::MentionV2(_) => self.handle_key_event_with_mentions_v2_popup(key_event),
@@ -4554,8 +4552,8 @@ impl ChatComposer {
         self.footer.context_window_used_tokens = used_tokens;
     }
 
-    pub(crate) fn set_context_window_pending(&mut self, pending: bool) {
-        self.footer.context_window_pending = pending;
+    pub(crate) fn set_context_window_hidden(&mut self, hidden: bool) {
+        self.footer.context_window_hidden = hidden;
     }
 
     pub(crate) fn set_esc_backtrack_hint(&mut self, show: bool) {
@@ -4577,6 +4575,7 @@ impl ChatComposer {
             return false;
         }
         self.footer.active_agent_label = active_agent_label;
+        *self.footer.labeled_status_line.get_mut() = None;
         true
     }
 }
@@ -5157,7 +5156,7 @@ mod tests {
                 /*has_input_focus*/ true,
                 sender,
                 /*enhanced_keys_supported*/ false,
-                "Ask Mikodex to do anything".to_string(),
+                "Ask Codex to do anything".to_string(),
                 /*disable_paste_burst*/ false,
             ),
             rx,
@@ -5204,7 +5203,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -5258,7 +5257,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_footer_hint_override(Some(vec![("K".to_string(), "label".to_string())]));
@@ -5296,7 +5295,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_footer_hint_override(Some(vec![("K".to_string(), "label".to_string())]));
@@ -5345,7 +5344,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             enhanced_keys_supported,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         setup(&mut composer);
@@ -5520,7 +5519,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         let area = Rect::new(0, 0, 40, 5);
@@ -5542,7 +5541,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_status_line_enabled(/*enabled*/ true);
@@ -5601,7 +5600,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_text_content_with_mention_bindings(
@@ -5629,7 +5628,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_text_content_with_mention_bindings(
@@ -5680,7 +5679,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_text_content_with_mention_bindings(
@@ -5716,7 +5715,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         let url = "https://github.com/openai/codex/pull/20252";
@@ -5822,7 +5821,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -5851,7 +5850,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -6120,7 +6119,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -6149,7 +6148,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_vim_enabled(/*enabled*/ true);
@@ -6212,7 +6211,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ true,
         );
         composer.set_vim_enabled(/*enabled*/ true);
@@ -6244,7 +6243,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ true,
         );
         composer.set_vim_enabled(/*enabled*/ true);
@@ -6279,7 +6278,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ true,
         );
         composer.set_collaboration_modes_enabled(/*enabled*/ true);
@@ -6325,7 +6324,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ true,
         );
         composer.set_vim_enabled(/*enabled*/ true);
@@ -6356,7 +6355,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ true,
         );
         composer.set_vim_enabled(/*enabled*/ true);
@@ -6381,7 +6380,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -6405,7 +6404,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -6431,7 +6430,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -6499,7 +6498,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -6532,7 +6531,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_steer_enabled(/*enabled*/ true);
@@ -6573,7 +6572,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_steer_enabled(/*enabled*/ true);
@@ -6607,7 +6606,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_steer_enabled(/*enabled*/ true);
@@ -6638,7 +6637,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_vim_enabled(/*enabled*/ true);
@@ -6678,7 +6677,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ true,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         let area = Rect::new(0, 0, 80, 10);
@@ -6714,7 +6713,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -6760,7 +6759,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         let remote_image_url = "https://example.com/one.png".to_string();
@@ -6802,7 +6801,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -6845,7 +6844,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -6885,7 +6884,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_steer_enabled(true);
@@ -6911,7 +6910,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -6941,7 +6940,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_connectors_enabled(/*enabled*/ true);
@@ -6985,7 +6984,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_connectors_enabled(/*enabled*/ true);
@@ -7025,7 +7024,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_text_content("$".to_string(), Vec::new(), Vec::new());
@@ -7764,7 +7763,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_text_content("$".to_string(), Vec::new(), Vec::new());
@@ -7773,7 +7772,7 @@ mod tests {
         let skill_path = test_path_buf("/tmp/skill/SKILL.md").abs();
         composer.set_skill_mentions(Some(vec![SkillMetadata {
             name: "codex".to_string(),
-            description: "Primary personal Mikodex repo skill.".to_string(),
+            description: "Primary personal Codex repo skill.".to_string(),
             short_description: None,
             interface: None,
             dependencies: None,
@@ -7802,7 +7801,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_connectors_enabled(/*enabled*/ true);
@@ -7935,12 +7934,14 @@ mod tests {
                             crate::task_mentions::TaskMention {
                                 thread_id: "task-123".to_string(),
                                 title: "Review database migration".to_string(),
+                                label_style: crate::thread_label::ThreadLabelStyle::Cloud,
                                 cwd: "/workspace/project".to_string(),
                                 snippet: "database migration".to_string(),
                             },
                             crate::task_mentions::TaskMention {
                                 thread_id: "task-456".to_string(),
                                 title: "migration".to_string(),
+                                label_style: crate::thread_label::ThreadLabelStyle::Plain,
                                 cwd: "/another/project".to_string(),
                                 snippet: "migration".to_string(),
                             },
@@ -7973,6 +7974,7 @@ mod tests {
         let task = crate::task_mentions::TaskMention {
             thread_id: "task-123".to_string(),
             title: format!("task\n\t{}é{}", "a".repeat(154), "é".repeat(200)),
+            label_style: crate::thread_label::ThreadLabelStyle::Plain,
             cwd: "/workspace/project".to_string(),
             snippet: String::new(),
         };
@@ -8168,7 +8170,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_connectors_enabled(/*enabled*/ true);
@@ -8208,7 +8210,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -8453,7 +8455,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -8480,7 +8482,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -8513,7 +8515,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -8556,7 +8558,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -8597,7 +8599,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -8641,7 +8643,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -8690,7 +8692,7 @@ mod tests {
                 /*has_input_focus*/ true,
                 sender,
                 /*enhanced_keys_supported*/ false,
-                "Ask Mikodex to do anything".to_string(),
+                "Ask Codex to do anything".to_string(),
                 /*disable_paste_burst*/ false,
             );
             composer.set_plugin_mentions(Some(vec![PluginCapabilitySummary {
@@ -8743,7 +8745,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -8775,7 +8777,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_mentions_v2_enabled(/*enabled*/ true);
@@ -8811,7 +8813,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -8842,7 +8844,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -8866,7 +8868,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -8900,7 +8902,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -8949,7 +8951,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -9037,7 +9039,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -9082,7 +9084,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -9112,7 +9114,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -9148,7 +9150,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -9181,7 +9183,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -9212,7 +9214,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -9241,7 +9243,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -9275,7 +9277,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_steer_enabled(true);
@@ -9303,7 +9305,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_steer_enabled(true);
@@ -9345,7 +9347,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_steer_enabled(false);
@@ -9390,7 +9392,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -9431,7 +9433,7 @@ mod tests {
                 /*has_input_focus*/ true,
                 sender.clone(),
                 /*enhanced_keys_supported*/ false,
-                "Ask Mikodex to do anything".to_string(),
+                "Ask Codex to do anything".to_string(),
                 /*disable_paste_burst*/ false,
             );
 
@@ -9537,7 +9539,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -9574,7 +9576,7 @@ mod tests {
                 /*has_input_focus*/ true,
                 sender,
                 /*enhanced_keys_supported*/ false,
-                "Ask Mikodex to do anything".to_string(),
+                "Ask Codex to do anything".to_string(),
                 /*disable_paste_burst*/ false,
             );
             type_chars_humanlike(&mut composer, &input.chars().collect::<Vec<_>>());
@@ -9600,7 +9602,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_service_tier_commands_enabled(/*enabled*/ true);
@@ -9675,7 +9677,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -9727,7 +9729,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_steer_enabled(true);
@@ -9780,7 +9782,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.draft.textarea.insert_str("restore me");
@@ -9818,7 +9820,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_task_running(/*running*/ true);
@@ -9862,7 +9864,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_queue_submissions(/*queue_submissions*/ true);
@@ -9898,7 +9900,7 @@ mod tests {
                 /*has_input_focus*/ true,
                 sender,
                 /*enhanced_keys_supported*/ false,
-                "Ask Mikodex to do anything".to_string(),
+                "Ask Codex to do anything".to_string(),
                 /*disable_paste_burst*/ false,
             );
             composer.set_task_running(/*running*/ true);
@@ -9947,7 +9949,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer
@@ -9983,7 +9985,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_task_running(/*running*/ true);
@@ -10016,7 +10018,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         let mut keymap = RuntimeKeymap::defaults();
@@ -10042,7 +10044,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_task_running(/*running*/ true);
@@ -10080,7 +10082,7 @@ mod tests {
                 /*has_input_focus*/ true,
                 sender,
                 /*enhanced_keys_supported*/ false,
-                "Ask Mikodex to do anything".to_string(),
+                "Ask Codex to do anything".to_string(),
                 /*disable_paste_burst*/ false,
             );
             composer.set_task_running(/*running*/ true);
@@ -10126,7 +10128,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -10154,7 +10156,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_task_running(/*running*/ true);
@@ -10184,7 +10186,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -10209,7 +10211,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -10253,7 +10255,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_collaboration_modes_enabled(/*enabled*/ true);
@@ -10275,7 +10277,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_collaboration_modes_enabled(/*enabled*/ true);
@@ -10296,7 +10298,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -10328,7 +10330,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -10356,7 +10358,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_task_running(/*running*/ false);
@@ -10385,7 +10387,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -10412,7 +10414,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -10462,7 +10464,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_collaboration_modes_enabled(/*enabled*/ true);
@@ -10500,7 +10502,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -10767,7 +10769,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -10846,7 +10848,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -10923,7 +10925,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -10965,7 +10967,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11010,7 +11012,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11047,7 +11049,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11096,7 +11098,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         let path = PathBuf::from("/tmp/image1.png");
@@ -11134,7 +11136,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11168,7 +11170,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         let remote_image_url = "https://example.com/remote.png".to_string();
@@ -11202,7 +11204,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         let remote_image_urls = vec![
@@ -11234,7 +11236,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11289,7 +11291,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_text_content("hello".to_string(), Vec::new(), Vec::new());
@@ -11321,7 +11323,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11355,7 +11357,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11387,7 +11389,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11422,7 +11424,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11447,7 +11449,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11490,7 +11492,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11533,7 +11535,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11576,7 +11578,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11629,7 +11631,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         let path = PathBuf::from("/tmp/image2.png");
@@ -11668,7 +11670,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         let path = PathBuf::from("/tmp/image_dup.png");
@@ -11697,7 +11699,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         let path = PathBuf::from("/tmp/image3.png");
@@ -11740,7 +11742,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11766,7 +11768,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11826,7 +11828,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11889,7 +11891,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11930,7 +11932,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11954,7 +11956,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -11991,7 +11993,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12169,7 +12171,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12198,7 +12200,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12245,7 +12247,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12284,7 +12286,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12317,7 +12319,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12347,7 +12349,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12390,7 +12392,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12415,7 +12417,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12440,7 +12442,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_collaboration_modes_enabled(/*enabled*/ true);
@@ -12474,7 +12476,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12518,7 +12520,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_text_content("!git status".to_string(), Vec::new(), Vec::new());
@@ -12538,7 +12540,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_text_content("!git status".to_string(), Vec::new(), Vec::new());
@@ -12558,7 +12560,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
         composer.set_text_content("git status".to_string(), Vec::new(), Vec::new());
@@ -12578,7 +12580,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12606,7 +12608,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12640,7 +12642,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12666,7 +12668,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12693,7 +12695,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12724,7 +12726,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12745,7 +12747,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12770,7 +12772,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12807,7 +12809,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12827,7 +12829,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12872,7 +12874,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 
@@ -12909,7 +12911,7 @@ mod tests {
             /*has_input_focus*/ true,
             sender,
             /*enhanced_keys_supported*/ false,
-            "Ask Mikodex to do anything".to_string(),
+            "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
 

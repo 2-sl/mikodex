@@ -76,7 +76,7 @@ pub(crate) enum StatusLineItem {
     )]
     ProjectRoot,
 
-    /// Hostname of the machine running Mikodex.
+    /// Hostname of the machine running Codex.
     Hostname,
 
     /// Current git branch name (if in a repository).
@@ -114,7 +114,7 @@ pub(crate) enum StatusLineItem {
     /// Remaining usage on the secondary rate limit.
     WeeklyLimit,
 
-    /// Mikodex application version.
+    /// Codex application version.
     CodexVersion,
 
     /// Total context window size in tokens.
@@ -168,6 +168,13 @@ pub(crate) enum StatusLineItem {
     Provider,
 }
 
+impl serde::Serialize for StatusLineItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Display emits the canonical config ID even when the item was parsed from an alias.
+        serializer.collect_str(self)
+    }
+}
+
 impl StatusLineItem {
     /// User-visible description shown in the popup.
     pub(crate) fn description(self) -> &'static str {
@@ -204,7 +211,7 @@ impl StatusLineItem {
             StatusLineItem::WeeklyLimit => {
                 "Remaining usage on the secondary usage limit (omitted when unavailable)"
             }
-            StatusLineItem::CodexVersion => "Mikodex application version",
+            StatusLineItem::CodexVersion => "Codex application version",
             StatusLineItem::ContextWindowSize => {
                 "Total context window size in tokens (omitted when unknown)"
             }
@@ -373,13 +380,15 @@ impl StatusLineSetupView {
                 let use_theme_colors = items
                     .iter()
                     .any(|item| item.id == STATUS_LINE_USE_THEME_COLORS_ITEM_ID && item.enabled);
-                preview_data.status_line_for_items(
-                    items
-                        .iter()
-                        .filter(|item| item.enabled)
-                        .filter_map(|item| item.id.parse::<StatusLineItem>().ok()),
-                    use_theme_colors,
-                )
+                preview_data
+                    .status_line_for_items(
+                        items
+                            .iter()
+                            .filter(|item| item.enabled)
+                            .filter_map(|item| item.id.parse::<StatusLineItem>().ok()),
+                        use_theme_colors,
+                    )
+                    .map(Into::into)
             })
             .on_confirm(|ids, app_event| {
                 let use_theme_colors = ids

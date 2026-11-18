@@ -12,7 +12,6 @@ use codex_app_server_protocol::ThreadRealtimeStopResponse;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::RealtimeConversationVersion;
 use codex_protocol::protocol::RealtimeOutputModality;
-use codex_protocol::protocol::RealtimeVoice;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
 use uuid::Uuid;
@@ -39,7 +38,7 @@ impl AppServerSession {
                     codex_response_handoff_mode: None,
                     backend_reasoning_status: false,
                     codex_response_handoff_channel_prefixes: None,
-                    model,
+                    model: None,
                     output_modality: RealtimeOutputModality::Audio,
                     include_startup_context: Some(false),
                     initial_items: None,
@@ -53,7 +52,7 @@ impl AppServerSession {
                         call_id,
                     }),
                     version: Some(RealtimeConversationVersion::V3),
-                    voice,
+                    voice: None,
                 },
             })
             .await

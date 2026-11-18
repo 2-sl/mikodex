@@ -29,6 +29,7 @@ pub(in crate::keymap) fn register(
     use KeyCode::Char;
     use KeymapContext::Chat;
     use KeymapContext::Global;
+    use KeymapContext::Pager;
     for (context, name, completion, spec) in [
         (Global, "change_host", Char('b'), "b"),
         (Global, "select_transcript", Char('['), "["),

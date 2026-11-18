@@ -67,7 +67,6 @@ impl SideParentStatus {
             | ServerRequest::ExecCommandApproval { .. } => Some(SideParentStatus::NeedsApproval),
             ServerRequest::DynamicToolCall { .. }
             | ServerRequest::AttestationGenerate { .. }
-            | ServerRequest::CurrentTimeRead { .. }
             | ServerRequest::ChatgptAuthTokensRefresh { .. } => None,
         }
     }
@@ -295,9 +294,7 @@ impl App {
     }
 
     pub(super) fn side_retention_enabled(&self, tui: &tui::Tui) -> bool {
-        // Keep /side conversations paired on owned screens without requiring the separate
-        // experimental workspace feature. Terminal scrollback mode cannot retain two panes.
-        tui.is_owned_screen()
+        self.local_settings.workspace_enabled(&self.config) && tui.is_owned_screen()
     }
 
     pub(super) fn conversation_focus_available(&self, tui: &tui::Tui) -> bool {
@@ -306,7 +303,7 @@ impl App {
             && (self.chat_widget.no_modal_or_popup_active()
                 // Replaying the parent may reopen a completion for its parked draft.
                 // The focused chooser hides it and owns the keystrokes.
-                || (self.chooser_focus() == Some(sidebar::PaneFocus::Sidebar)
+                || (self.panel_focus() == Some(sidebar::PaneFocus::Sidebar)
                     && self.sidebar_chooser_available()
                     && self.chat_widget.completion_can_yield_focus()))
     }
@@ -595,6 +592,7 @@ impl App {
                         response: crate::dynamic_tools::failure_response(
                             "Source task was closed while handling a dynamic tool call",
                         ),
+                        reply: None,
                     });
                     task.abort();
                     false

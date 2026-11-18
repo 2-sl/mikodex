@@ -201,6 +201,7 @@ impl SidebarPane {
 
     pub(super) fn chat_tabs(&self) -> ChatTabs<'_> {
         ChatTabs {
+            label_style: crate::thread_label::ThreadLabelStyle::Plain,
             discovery: &self.discovery,
             scroll: self.chooser_scroll,
             opening: self.opening.as_ref(),
@@ -673,13 +674,13 @@ impl App {
 
     pub(super) fn sidebar_has_focus(&self) -> bool {
         self.active_side_parent_thread_id().is_some()
-            || self.chooser_focus() == Some(PaneFocus::Sidebar)
+            || self.panel_focus() == Some(PaneFocus::Sidebar)
     }
 }
 
 #[derive(PartialEq)]
 pub(super) enum SidebarLayout {
-    Chooser {
+    Panel {
         main: Rect,
         sidebar: Rect,
         focus: PaneFocus,
@@ -690,7 +691,7 @@ pub(super) enum SidebarLayout {
 impl SidebarLayout {
     pub(super) fn divider_area(&self) -> Option<Rect> {
         let (x, pane) = match self {
-            Self::Chooser { main, .. } => (main.right(), *main),
+            Self::Panel { main, .. } => (main.right(), *main),
             Self::Chat(panes) => (panes.divider, panes.focused.union(panes.tab_strip)),
         };
         (!pane.is_empty()).then(|| Rect::new(x, pane.y, side_pane::GAP, pane.height))
@@ -746,7 +747,7 @@ pub(super) fn content_layout(
     match content {
         SidebarContent::Chooser | SidebarContent::Document(_) => (app.sidebar_chooser_available()
             && (focus == PaneFocus::Main || app.chat_widget.completion_can_yield_focus()))
-        .then_some(SidebarLayout::Chooser {
+        .then_some(SidebarLayout::Panel {
             main,
             sidebar,
             focus,

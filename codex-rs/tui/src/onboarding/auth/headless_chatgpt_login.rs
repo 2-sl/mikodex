@@ -142,7 +142,7 @@ pub(crate) fn render_device_code_prompt<'a>(
         lines.push(Line::from(vec!["  ".into(), user_code.cyan().bold()]));
         lines.push("".into());
         lines.push(
-            "  Continue only if you started this login in Mikodex. If a website or another person gave you this code, cancel."
+            "  Continue only if you started this login in Codex. If a website or another person gave you this code, cancel."
                 .dim()
                 .into(),
         );

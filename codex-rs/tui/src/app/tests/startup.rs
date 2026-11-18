@@ -126,7 +126,7 @@ async fn uncertain_windows_sandbox_setup_keeps_intent_and_input_locked() {
         if transport_error {
             insta::assert_snapshot!(rendered, @"■ Windows sandbox setup response was lost. Waiting for completion or reconnection.");
         } else {
-            insta::assert_snapshot!(rendered, @"■ Windows sandbox setup request timed out. Waiting for completion; restart Mikodex if it does not finish.");
+            insta::assert_snapshot!(rendered, @"■ Windows sandbox setup request timed out. Waiting for completion; restart Codex if it does not finish.");
         }
     }
 }
@@ -211,7 +211,7 @@ fn startup_bottom_pane() -> (BottomPane, UnboundedReceiver<AppEvent>) {
             frame_requester: FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
-            placeholder_text: "Ask Mikodex to do anything".to_string(),
+            placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: true,
             animations_enabled: true,
             effects: Default::default(),
@@ -1054,6 +1054,7 @@ async fn auto_declined_mcp_elicitations_do_not_leave_startup_quarantine_armed() 
             let request = ServerRequest::McpServerElicitationRequest {
                 request_id: AppServerRequestId::Integer(10),
                 params: McpServerElicitationRequestParams {
+                    environment_id: None,
                     thread_id: thread_id.to_string(),
                     turn_id: Some("turn-auth".to_string()),
                     server_name: "payments".to_string(),
@@ -1514,7 +1515,7 @@ async fn remote_overview_startup_hides_disabled_older_server_notice() -> Result<
     app.local_settings.tui.show_server_version_notice = true;
     app.refresh_server_version_overview_notice("2.1.0");
     let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80);
-    assert!(rendered.contains("Service v2.0.0 < Mikodex CLI v2.1.0"));
+    assert!(rendered.contains("Service v2.0.0 < Codex CLI v2.1.0"));
     app.pending_server_version_notice =
         Some(crate::status::remote_connection::ServerVersionNotice {
             message: "Older service".to_string(),
@@ -1545,6 +1546,7 @@ async fn startup_thread_started_discards_another_threads_buffered_events() {
     let other_thread_id = ThreadId::new();
     app.enqueue_primary_thread_notification(ServerNotification::McpServerStatusUpdated(
         McpServerStatusUpdatedNotification {
+            environment_id: None,
             thread_id: Some(other_thread_id.to_string()),
             name: "other".to_string(),
             status: McpServerStartupState::Starting,
@@ -1759,6 +1761,7 @@ async fn send_failed_mcp_startup(
         app_server,
         codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+                environment_id: None,
                 thread_id: Some(thread_id.to_string()),
                 name: "fixture".to_string(),
                 status: McpServerStartupState::Failed,

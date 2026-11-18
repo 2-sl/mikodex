@@ -1,5 +1,6 @@
 use super::*;
 use crate::clipboard_copy::CopyStatus;
+use crate::history_cell::AgentMarkdownCell;
 use crate::history_cell::PlainHistoryCell;
 use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
@@ -272,7 +273,7 @@ fn configured_pager_page_motion_moves_the_select_cursor() {
         (0..12).map(|row| format!("line {row}").into()).collect(),
     )) as Arc<dyn HistoryCell>];
     let config = serde_json::from_value(serde_json::json!({
-        "pager": {"page_down": "x"}
+        "pager": {"page_down": "c"}
     }))
     .expect("keymap config");
     let keymap = crate::keymap::RuntimeKeymap::from_config(&config).expect("configured page down");
@@ -284,7 +285,7 @@ fn configured_pager_page_motion_moves_the_select_cursor() {
 
     press(&mut view, &cells, KeyCode::Char('v'));
     assert!(view.select_mode.is_some_and(|mode| mode.mark.is_some()));
-    press(&mut view, &cells, KeyCode::Char('x'));
+    press(&mut view, &cells, KeyCode::Char('c'));
 
     let cursor = view
         .select_mode

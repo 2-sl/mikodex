@@ -11,14 +11,14 @@ Before.
 Before.
 
 flowchart LR
-A["Mikodex reply<br/>completed"] --> B["Rendered in Ghostty"]
+A["Codex reply<br/>completed"] --> B["Rendered in Ghostty"]
 
 ---
 
 Before.
 
 ┌─────────────┐  ┌─────────────────────┐
-│ Mikodex reply │  │ Rendered in Ghostty │
+│ Codex reply │  │ Rendered in Ghostty │
 │ completed   │  │                     │
 └┬────────────┘  └┬────────────────────┘
  │                ▲
@@ -32,7 +32,7 @@ Before.
 Before.
 
 ┌─────────────┐  ┌─────────────────────┐
-│ Mikodex reply │  │ Rendered in Ghostty │
+│ Codex reply │  │ Rendered in Ghostty │
 │ completed   │  │                     │
 └┬────────────┘  └┬────────────────────┘
  │                ▲
@@ -56,7 +56,7 @@ current
 terminal
 width.
 flowchart LR
-A["Mikodex reply<br/>completed"] --> B["Rendered in Ghostty"]
+A["Codex reply<br/>completed"] --> B["Rendered in Ghostty"]
 
 After.
 
@@ -66,7 +66,7 @@ Before.
 
 ```mermaid
 flowchart LR
-A["Mikodex reply<br/>completed"] --> B["Rendered in Ghostty"]
+A["Codex reply<br/>completed"] --> B["Rendered in Ghostty"]
 ```
 
 After.
@@ -76,7 +76,7 @@ After.
 Before.
 
 ┌─────────────┐  ┌─────────────────────┐
-│ Mikodex reply │  │ Rendered in Ghostty │
+│ Codex reply │  │ Rendered in Ghostty │
 │ completed   │  │                     │
 └┬────────────┘  └┬────────────────────┘
  │                ▲

@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::app::backend_sessions::BackendSessions;
+use crate::app::session_lifecycle::FreshSessionStart;
+use crate::app_server_session::AppServerSessionEvent;
 use codex_app_server_protocol::SkillMetadata;
 use codex_app_server_protocol::SkillScope;
 use codex_app_server_protocol::SkillsListEntry;
@@ -113,7 +115,7 @@ async fn new_session_refreshes_account_for_the_started_provider() -> Result<()> 
         Box::pin(app.start_fresh_session(
             &mut tui,
             &mut server,
-            /*session_start_source*/ None,
+            FreshSessionStart::PreserveCurrentView(None),
             /*initial_user_message*/ None,
             /*new_thread_name*/ None,
         ))
@@ -433,7 +435,7 @@ async fn new_sessions_preserve_yolo_launch_and_later_permission_choices() -> Res
         app.start_fresh_session(
             &mut tui,
             &mut server,
-            /*session_start_source*/ None,
+            FreshSessionStart::PreserveCurrentView(None),
             /*initial_user_message*/ None,
             /*new_thread_name*/ None,
         )
@@ -494,7 +496,7 @@ async fn new_session_preserves_vim_line_yank() -> Result<()> {
     app.start_fresh_session(
         &mut tui,
         &mut server,
-        /*session_start_source*/ None,
+        FreshSessionStart::PreserveCurrentView(None),
         /*initial_user_message*/ None,
         /*new_thread_name*/ None,
     )
@@ -703,13 +705,14 @@ async fn replacement_uses_server_defaults_and_preserves_explicit_launch_settings
                     socket_path: client_home.path().join("daemon.sock").abs(),
                 },
             };
+            app.backend_registry.connect(&server);
             app.open_agents_overview(&server);
         }
         let mut tui = crate::tui::test_support::make_test_tui()?;
         app.start_fresh_session(
             &mut tui,
             &mut server,
-            /*session_start_source*/ None,
+            FreshSessionStart::PreserveCurrentView(None),
             /*initial_user_message*/ None,
             /*new_thread_name*/ None,
         )
@@ -755,7 +758,7 @@ async fn replacement_uses_server_defaults_and_preserves_explicit_launch_settings
             let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 140)
                 .replace(&server_config.cwd.display().to_string(), "<PROJECT>");
             insta::assert_snapshot!(rendered, @"
-            › Ask Mikodex to do anything
+            › Ask Codex to do anything
 
               server-model high · <PROJECT>
               ← for agents · ? for shortcuts
@@ -1009,7 +1012,7 @@ async fn replacement_failure_keeps_current_task_and_restores_input() -> Result<(
         app.start_fresh_session(
             &mut tui,
             &mut server,
-            /*session_start_source*/ None,
+            FreshSessionStart::PreserveCurrentView(None),
             Some("keep this request".into()),
             /*new_thread_name*/ None,
         )
@@ -1153,6 +1156,7 @@ async fn backend_handoff_errors_are_snapshotted() -> Result<()> {
     let trust_error = next_history_message(&mut events);
     insta::assert_snapshot!(trust_error, @"■ Unable to check folder trust: config/read failed while checking remote project trust");
 
+    tui.pause_events();
     // Starting a fresh thread must observe the same destination trust check as resuming one.
     app.start_new_session_on_other_backend(
         &mut tui,
@@ -1220,8 +1224,11 @@ async fn resumed_backend_handoff_detaches_through_the_source_connection() -> Res
             model_provider: "repaired-provider".into(),
         },
     );
-    app.agents_overview
-        .input_states
+    let destination_slot = backends
+        .slot(destination_id)
+        .expect("registered destination");
+    backends
+        .parked_inputs_mut(destination_slot)
         .insert(resumed_id, stale_input);
 
     app.resume_backend_session(&mut tui, &mut backends, target)
@@ -1661,7 +1668,7 @@ async fn replacement_preserves_remote_launch_paths_and_older_servers() -> Result
         app.start_fresh_session(
             &mut tui,
             &mut server,
-            /*session_start_source*/ None,
+            FreshSessionStart::PreserveCurrentView(None),
             /*initial_user_message*/ None,
             /*new_thread_name*/ None,
         )
@@ -2168,6 +2175,84 @@ async fn cloud_switch_wait_keeps_draft_editable_without_submitting_to_local() ->
             event,
             AppEvent::CodexOp(AppCommand::UserTurn { .. }) | AppEvent::UpdateReasoningEffort(_)
         ))
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn cloud_switch_wait_quits_on_ctrl_c_before_adopting_the_thread() -> Result<()> {
+    use crate::app::cloud_switch_wait::ClipboardHandoff;
+    use crate::app::cloud_switch_wait::wait_for_cloud_switch;
+    use crate::app_event::ExitMode;
+
+    for completed in [false, true] {
+        let (mut app, mut app_events, _operations) = make_test_app_with_channels().await;
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        let operation = async {
+            if !completed {
+                std::future::pending::<()>().await;
+            }
+            Ok::<_, std::convert::Infallible>(())
+        };
+        let ctrl_c = TuiEvent::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        let wait = wait_for_cloud_switch(
+            &mut app,
+            &mut tui,
+            operation,
+            tokio_stream::iter([ctrl_c]).chain(tokio_stream::pending()),
+            ClipboardHandoff::SettleBeforeNextView,
+        );
+        tokio::pin!(wait);
+        assert_eq!(futures::poll!(&mut wait), std::task::Poll::Ready(Ok(None)));
+        let exits: Vec<_> = std::iter::from_fn(|| app_events.try_recv().ok())
+            .filter_map(|event| match event {
+                AppEvent::Exit(mode) => Some(mode),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(exits, [ExitMode::ShutdownFirst]);
+    }
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn cloud_switch_wait_ctrl_c_clears_buffered_draft_before_quitting() -> Result<()> {
+    use crate::app::cloud_switch_wait::ClipboardHandoff;
+    use crate::app::cloud_switch_wait::wait_for_cloud_switch;
+    use crate::app_event::ExitMode;
+
+    let (mut app, mut app_events, _operations) = make_test_app_with_channels().await;
+    let thread_id = ThreadId::new();
+    let session = test_thread_session(thread_id, app.config.cwd.to_path_buf());
+    app.chat_widget.handle_thread_session(session);
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let (send, events) = tokio::sync::mpsc::unbounded_channel();
+    let ctrl_c = TuiEvent::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    send.send(TuiEvent::Key(KeyCode::Char('a').into()))?;
+    send.send(ctrl_c.clone())?;
+    let wait = wait_for_cloud_switch(
+        &mut app,
+        &mut tui,
+        std::future::pending::<Result<(), std::convert::Infallible>>(),
+        tokio_stream::wrappers::UnboundedReceiverStream::new(events),
+        ClipboardHandoff::SettleBeforeNextView,
+    );
+    tokio::pin!(wait);
+    assert!(futures::poll!(&mut wait).is_pending());
+    let history: Vec<_> = std::iter::from_fn(|| app_events.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::AppendMessageHistoryEntry { thread_id, text } => Some((thread_id, text)),
+            AppEvent::Exit(_) => panic!("the first Ctrl+C should clear the draft"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(history, [(thread_id, "a".into())]);
+
+    send.send(ctrl_c)?;
+    assert_eq!(futures::poll!(&mut wait), std::task::Poll::Ready(Ok(None)));
+    assert!(
+        std::iter::from_fn(|| app_events.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::Exit(ExitMode::ShutdownFirst)))
     );
     Ok(())
 }

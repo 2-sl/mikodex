@@ -1,4 +1,4 @@
-//! Transcript/history cells for the Mikodex TUI.
+//! Transcript/history cells for the Codex TUI.
 //!
 //! A `HistoryCell` is the unit of display in the conversation UI, representing both committed
 //! transcript entries and, transiently, an in-flight active cell that can mutate in place while
@@ -162,7 +162,9 @@ mod tests;
     ts(export_to = "statusline.d.ts", rename = "DisplayMode")
 )]
 pub(crate) enum HistoryRenderMode {
+    #[serde(rename = "standard")]
     Rich,
+    #[serde(rename = "raw")]
     Raw,
 }
 
