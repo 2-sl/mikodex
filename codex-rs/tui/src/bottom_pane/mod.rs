@@ -364,6 +364,9 @@ pub(crate) struct BottomPaneParams {
 }
 
 impl BottomPane {
+    pub(crate) fn command_reference_items(&self) -> Vec<(String, String)> {
+        self.composer.command_reference_items()
+    }
     pub(crate) fn set_mention_usage_home(
         &mut self,
         codex_home: &std::path::Path,

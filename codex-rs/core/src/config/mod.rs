@@ -860,6 +860,8 @@ pub struct Config {
 
     /// Preferred docked sidebar width as a percentage of the terminal.
     pub tui_sidebar_width_percent: Option<u8>,
+    pub tui_agents_overview_width_percent: Option<u8>,
+    pub tui_command_reference_width_percent: Option<u8>,
 
     /// Mouse wheel speed multiplier for transcript scrolling; defaults to one row per event.
     pub tui_mouse_scroll_speed: Option<f64>,
@@ -4931,6 +4933,14 @@ impl Config {
                 .as_ref()
                 .is_none_or(|tui| tui.fullscreen_transcript),
             tui_sidebar_width_percent: cfg.tui.as_ref().and_then(|tui| tui.sidebar_width_percent),
+            tui_agents_overview_width_percent: cfg
+                .tui
+                .as_ref()
+                .and_then(|tui| tui.agents_overview_width_percent),
+            tui_command_reference_width_percent: cfg
+                .tui
+                .as_ref()
+                .and_then(|tui| tui.command_reference_width_percent),
             tui_mouse_scroll_speed: cfg.tui.as_ref().and_then(|tui| tui.mouse_scroll_speed),
             tui_copy_on_select: cfg
                 .tui

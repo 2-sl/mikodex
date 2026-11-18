@@ -748,6 +748,9 @@ pub(crate) struct ComposerDraftSnapshot {
 }
 
 impl ChatComposer {
+    pub(crate) fn command_reference_items(&self) -> Vec<(String, String)> {
+        self.slash_input().command_reference_items()
+    }
     fn slash_input(&self) -> SlashInput<'_> {
         SlashInput::new(
             self.slash_commands_enabled(),

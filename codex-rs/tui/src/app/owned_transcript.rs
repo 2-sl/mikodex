@@ -291,8 +291,37 @@ impl App {
             }
             None => (None, None),
         };
+        self.ensure_agents_overview_sidebar_view();
+        let dashboard_visible = self
+            .chat_widget
+            .selected_index_for_present_view(agents_overview::AGENTS_OVERVIEW_VIEW_ID)
+            .is_some();
+        if dashboard_visible {
+            self.agents_overview.sidebar_focused = false;
+            self.agents_overview.command_reference_focused = false;
+        }
+        let dock = if caller_inset.is_none() && live.is_none() && !dashboard_visible {
+            super::agents_overview_dock::layout(self, screen_size.into())
+        } else {
+            None
+        };
+        if dock
+            .as_ref()
+            .is_none_or(|dock| dock.command_reference.is_empty())
+        {
+            self.agents_overview.command_reference_focused = false;
+        }
+        if dock.is_none() {
+            self.agents_overview.sidebar_focused = false;
+        }
+        if let Some(view) = self.agents_overview.sidebar_view.as_mut() {
+            view.set_docked_focus(self.agents_overview.sidebar_focused);
+        }
+        let conversation_inset = caller_inset
+            .or(live)
+            .or_else(|| dock.map(|dock| dock.conversation));
         let mut prepared =
-            self.prepare_conversation(screen_size.into(), caller_inset.or(live), &frames);
+            self.prepare_conversation(screen_size.into(), conversation_inset, &frames);
         self.conversation_frame.sidebar = layout;
         self.conversation_frame.chat_strip = strip;
         self.conversation_frame.sidebar_input =
@@ -340,6 +369,7 @@ impl App {
         }
         prepared.floating_shortcuts = hud.is_some();
         let mut painted = PaintedConversation::default();
+        let mut background_delay = None;
         tui.draw_with_shortcut_hud(screen_size.height, hud, |frame| {
             if let Some(backdrop) = backdrop {
                 let viewport = frame.area();
@@ -358,6 +388,45 @@ impl App {
                 }
             }
             painted = self.paint_conversation(frame, &prepared);
+            background_delay = self
+                .chat_widget
+                .empty_state_animation
+                .borrow_mut()
+                .render_chat_background(prepared.area, frame.buffer);
+            let frame_dock = if dashboard_visible { None } else { dock };
+            if let Some(dock) = frame_dock {
+                if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
+                    view.render_docked(dock.sidebar, frame.buffer);
+                }
+                let command_items = self.chat_widget.command_reference_items();
+                let command_scroll = self.agents_overview.command_reference_scroll;
+                super::command_reference::render(
+                    dock.command_reference,
+                    frame.buffer,
+                    &command_items,
+                    command_scroll,
+                    self.agents_overview.command_reference_focused,
+                );
+                dock.render_divider(frame.buffer, self);
+                frame.image_placements.retain(|image| {
+                    !dock.sidebar.intersects(image.area)
+                        && !dock.command_reference.intersects(image.area)
+                });
+                if self.agents_overview.sidebar_focused {
+                    frame.cursor_position = self
+                        .agents_overview
+                        .sidebar_view
+                        .as_ref()
+                        .and_then(|view| view.cursor_pos(dock.sidebar).map(Into::into));
+                    if let Some(view) = self.agents_overview.sidebar_view.as_ref()
+                        && view.cursor_pos(dock.sidebar).is_some()
+                    {
+                        frame.set_cursor_style(view.cursor_style(dock.sidebar));
+                    }
+                } else if self.agents_overview.command_reference_focused {
+                    frame.cursor_position = None;
+                }
+            }
             let label_style = parent
                 .and_then(|id| self.backend_registry.owner(id))
                 .or(self.app_server_backend_id)
@@ -629,6 +698,9 @@ impl App {
             }
             self.paint_centered_dialog(frame);
         })?;
+        if let Some(delay) = background_delay {
+            tui.frame_requester().schedule_frame_in(delay);
+        }
         self.finish_conversation(tui, painted)
     }
 

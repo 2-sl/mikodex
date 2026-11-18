@@ -46,6 +46,7 @@ use codex_protocol::ThreadId;
 use codex_protocol::openai_models::ReasoningEffort;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
@@ -241,6 +242,7 @@ pub(super) struct AgentsOverviewView {
     pub(super) can_return_to_chat: bool,
     selected: usize,
     state: Arc<Mutex<AgentsOverviewViewState>>,
+    docked_focus: bool,
     app_event_tx: AppEventSender,
     keymap: ListKeymap,
     agents_keymap: AgentsKeymap,
@@ -320,6 +322,7 @@ impl AgentsOverviewView {
             can_return_to_chat: false,
             selected,
             state,
+            docked_focus: false,
             app_event_tx,
             keymap: keymap.list,
             agents_keymap: keymap.agents,
@@ -336,6 +339,33 @@ impl AgentsOverviewView {
 
     pub(super) fn thread_ids(&self) -> Vec<ThreadId> {
         self.rows.iter().map(|row| row.thread_id).collect()
+    }
+
+    pub(super) fn handle_docked_key_event(
+        &mut self,
+        key: KeyEvent,
+        _activation_key: Option<crate::key_hint::KeyBinding>,
+    ) -> bool {
+        if key.kind == KeyEventKind::Release {
+            BottomPaneView::handle_key_release(self, key);
+            return false;
+        }
+        let state = self.state();
+        let editing_metadata = state.editing_metadata();
+        let help = state.help;
+        let renaming = state.rename_target.is_some();
+        drop(state);
+        let action = self.keymap.action_for(key);
+        if action == Some(ListAction::Cancel) && !editing_metadata && !help {
+            return true;
+        }
+        let focus_conversation = !help
+            && !renaming
+            && self.selected != usize::MAX
+            && self.selected_row().is_some()
+            && matches!(action, Some(ListAction::Accept | ListAction::MoveRight));
+        BottomPaneView::handle_key_event(self, key);
+        focus_conversation
     }
 
     pub(super) fn selection_after_removal(

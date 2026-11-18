@@ -968,6 +968,9 @@ fn token_usage_info_from_app_server(token_usage: ThreadTokenUsage) -> TokenUsage
 }
 
 impl ChatWidget {
+    pub(crate) fn command_reference_items(&self) -> Vec<(String, String)> {
+        self.bottom_pane.command_reference_items()
+    }
     /// Stores or overwrites the cached nickname and role for a collab agent thread.
     ///
     /// Called by `App::upsert_agent_picker_thread` and `App::replace_chat_widget` to keep the

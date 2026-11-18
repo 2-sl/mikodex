@@ -52,14 +52,32 @@ struct CenterLayout {
 }
 
 impl AgentsOverviewView {
-    pub(in crate::app) fn clamp_docked_details_height(
-        requested: u16,
-        area_height: u16,
-    ) -> u16 {
+    pub(in crate::app) fn clamp_docked_details_height(requested: u16, area_height: u16) -> u16 {
         let maximum = area_height
             .saturating_sub(MIN_DOCKED_LIST_HEIGHT + 1)
             .max(MIN_DOCKED_DETAILS_HEIGHT);
         requested.clamp(MIN_DOCKED_DETAILS_HEIGHT, maximum)
+    }
+
+    pub(in crate::app) fn set_docked_focus(&mut self, focused: bool) {
+        self.docked_focus = focused;
+    }
+
+    pub(in crate::app) fn render_docked(&self, area: Rect, buf: &mut Buffer) {
+        self.render(area, buf);
+    }
+
+    pub(in crate::app) fn docked_details_divider(&self, _area: Rect) -> Option<(Rect, u16)> {
+        let state = self.state();
+        Some((state.details_divider_area?, state.docked_details_height?))
+    }
+
+    pub(in crate::app) fn set_docked_details_height(&self, height: u16) {
+        self.state().docked_details_height = Some(height);
+    }
+
+    pub(in crate::app) fn set_docked_details_resizing(&self, resizing: bool) {
+        self.state().docked_details_resizing = resizing;
     }
 
     fn center_layout(&self, area: Rect) -> CenterLayout {
@@ -299,6 +317,8 @@ impl Renderable for AgentsOverviewView {
                 ratatui::style::Style::default()
                     .fg(ratatui::style::Color::Cyan)
                     .add_modifier(ratatui::style::Modifier::BOLD)
+            } else if self.docked_focus {
+                ratatui::style::Style::default().fg(ratatui::style::Color::Cyan)
             } else {
                 ratatui::style::Style::default().dim()
             };

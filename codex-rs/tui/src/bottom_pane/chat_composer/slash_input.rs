@@ -174,6 +174,10 @@ impl<'a> SlashInput<'a> {
         has_slash_command_prefix(name, self.command_flags, self.service_tier_commands)
     }
 
+    pub(super) fn command_reference_items(&self) -> Vec<(String, String)> {
+        self.command_popup("/").command_reference_items()
+    }
+
     pub(super) fn command_popup(&self, filter_text: &str) -> CommandPopup {
         let mut command_popup = CommandPopup::new(
             CommandPopupFlags {

@@ -207,9 +207,11 @@ mod agents_overview;
 mod agents_overview_actions;
 mod agents_overview_details;
 pub(crate) mod agents_overview_discovery;
+mod agents_overview_dock;
 mod agents_overview_threads;
 mod agents_overview_usage;
 mod agents_overview_view;
+mod command_reference;
 pub(crate) use agents_overview::AGENTS_OVERVIEW_VIEW_ID;
 mod activity_groups;
 mod app_server_event_targets;
@@ -951,6 +953,9 @@ impl App {
         if Box::pin(sidebar_close::handle(self, tui, app_server, &event)).await {
             return Ok(AppRunControl::Continue);
         }
+        if self.handle_agents_overview_dock_resize(tui, &event).await? {
+            return Ok(AppRunControl::Continue);
+        }
         if self.handle_pane_resize(tui, &event).await {
             return Ok(AppRunControl::Continue);
         }
@@ -1153,6 +1158,11 @@ impl App {
             event
         };
 
+        if let TuiEvent::Key(key) = &event
+            && self.handle_dock_arrow_focus(tui, app_server, *key).await
+        {
+            return Ok(AppRunControl::Continue);
+        }
         if let TuiEvent::Key(key) = &event
             && self.handle_side_focus_key(tui, app_server, *key).await
         {
@@ -1403,7 +1413,9 @@ impl App {
                         && !self
                             .chat_widget
                             .active_view_accepts_input_when_disconnected();
-                    self.chat_widget.handle_paste(pasted);
+                    if !self.handle_agents_overview_sidebar_paste(pasted.clone()) {
+                        self.chat_widget.handle_paste(pasted);
+                    }
                     if restrict_disconnected_input {
                         self.chat_widget.handle_restricted_key(
                             KeyEvent::new(KeyCode::Null, KeyModifiers::NONE),
@@ -1549,6 +1561,40 @@ impl App {
             .chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
             .is_some();
+        self.ensure_agents_overview_sidebar_view();
+        if dashboard_visible {
+            self.agents_overview.sidebar_focused = false;
+            self.agents_overview.command_reference_focused = false;
+        }
+        if let Some(view) = self.agents_overview.sidebar_view.as_mut() {
+            view.set_docked_focus(self.agents_overview.sidebar_focused);
+        }
+        let dock = agents_overview_dock::conversation_area_visible(self)
+            .then(|| {
+                agents_overview_dock::layout(
+                    self,
+                    Rect::new(0, 0, screen_size.width, screen_size.height),
+                )
+            })
+            .flatten();
+        if dock
+            .as_ref()
+            .is_none_or(|dock| dock.command_reference.is_empty())
+        {
+            self.agents_overview.command_reference_focused = false;
+        }
+        if dock.is_none() {
+            self.agents_overview.sidebar_focused = false;
+        }
+        let conversation_width = dock
+            .as_ref()
+            .map_or(screen_size.width, |dock| dock.conversation.width);
+        let command_items = dock
+            .as_ref()
+            .filter(|dock| !dock.command_reference.is_empty())
+            .map(|_| self.chat_widget.command_reference_items())
+            .unwrap_or_default();
+        let command_scroll = self.agents_overview.command_reference_scroll;
         let dashboard_was_visible = std::mem::replace(
             &mut self.agents_overview.rendered_full_screen,
             dashboard_visible,
@@ -1564,7 +1610,8 @@ impl App {
             self.maybe_run_resize_reflow(tui, screen_size)?;
         }
         let hud = self.workspace_hud(tui, screen_size.into());
-        self.with_chat_widget_frame(screen_size.width, |desired_height, chat_widget| {
+        let mut background_delay = None;
+        self.with_chat_widget_frame(conversation_width, |desired_height, chat_widget| {
             let desired_height = if dashboard_visible {
                 screen_size.height
             } else {
@@ -1572,18 +1619,53 @@ impl App {
             };
             let mut rendered_area = Rect::default();
             tui.draw_with_resize_reflow(desired_height, screen_size, hud, |frame| {
-                let area = frame.area();
-                rendered_area = area;
-                chat_widget.render(area, frame.buffer);
+                let screen = frame.area();
+                rendered_area = screen;
+                let frame_dock = if dashboard_visible { None } else { dock };
+                let conversation_area = frame_dock.map_or(screen, |dock| dock.conversation);
+                chat_widget.render(conversation_area, frame.buffer);
                 if let Some(previews) = &self.chat_widget.composer_images {
                     frame.image_placements = previews.placements.take();
                 }
-                self.chat_widget.note_rendered_width(area.width);
-                if let Some((x, y)) = chat_widget.cursor_pos(area) {
-                    frame.set_cursor_style(chat_widget.cursor_style(area));
+                background_delay = self
+                    .chat_widget
+                    .empty_state_animation
+                    .borrow_mut()
+                    .render_chat_background(conversation_area, frame.buffer);
+                self.chat_widget
+                    .note_rendered_width(conversation_area.width);
+                if let Some(dock) = frame_dock {
+                    if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
+                        view.render_docked(dock.sidebar, frame.buffer);
+                    }
+                    command_reference::render(
+                        dock.command_reference,
+                        frame.buffer,
+                        &command_items,
+                        command_scroll,
+                        self.agents_overview.command_reference_focused,
+                    );
+                    dock.render_divider(frame.buffer, self);
+                }
+                if !self.agents_overview.sidebar_focused
+                    && !self.agents_overview.command_reference_focused
+                    && let Some((x, y)) = chat_widget.cursor_pos(conversation_area)
+                {
+                    frame.set_cursor_style(chat_widget.cursor_style(conversation_area));
+                    frame.set_cursor_position((x, y));
+                }
+                if self.agents_overview.sidebar_focused
+                    && let Some(dock) = frame_dock
+                    && let Some(view) = self.agents_overview.sidebar_view.as_ref()
+                    && let Some((x, y)) = view.cursor_pos(dock.sidebar)
+                {
+                    frame.set_cursor_style(view.cursor_style(dock.sidebar));
                     frame.set_cursor_position((x, y));
                 }
             })?;
+            if let Some(delay) = background_delay {
+                tui.frame_requester().schedule_frame_in(delay);
+            }
             Ok(rendered_area)
         })
     }

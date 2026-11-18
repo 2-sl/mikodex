@@ -40,6 +40,50 @@ const GOAL_USAGE_HINT: &str = "Example: /goal improve benchmark coverage";
 const RAW_USAGE: &str = "Usage: /raw [on|off]";
 const USAGE_CHATGPT_LOGIN_REQUIRED: &str = "Sign in with ChatGPT to use /usage.";
 
+fn background_image_source_path(argument: &str) -> Result<PathBuf, String> {
+    let argument = argument.trim();
+    let quoted = (argument.starts_with('"') && argument.ends_with('"'))
+        || (argument.starts_with(char::from(39)) && argument.ends_with(char::from(39)));
+    let argument = if argument.len() >= 2 && quoted {
+        &argument[1..argument.len() - 1]
+    } else {
+        argument
+    };
+    if argument.is_empty() {
+        return Err(
+            r#"Usage: /background "<image path>" | /background on|off|clear (alias: /bga)"#
+                .to_string(),
+        );
+    }
+    let mut expanded = String::with_capacity(argument.len());
+    let mut remaining = argument;
+    while let Some(start) = remaining.find('%') {
+        expanded.push_str(&remaining[..start]);
+        let after_start = &remaining[start + 1..];
+        let Some(end) = after_start.find('%') else {
+            expanded.push_str(&remaining[start..]);
+            remaining = "";
+            break;
+        };
+        let variable = &after_start[..end];
+        let value = std::env::var(variable)
+            .map_err(|_| format!("Environment variable %{variable}% is not defined."))?;
+        expanded.push_str(&value);
+        remaining = &after_start[end + 1..];
+    }
+    expanded.push_str(remaining);
+    if let Some(relative) = expanded
+        .strip_prefix("~/")
+        .or_else(|| expanded.strip_prefix("~\\"))
+    {
+        let home = dirs::home_dir()
+            .ok_or_else(|| "Could not resolve the user home directory.".to_string())?;
+        Ok(home.join(relative))
+    } else {
+        Ok(PathBuf::from(expanded))
+    }
+}
+
 impl ChatWidget {
     /// Dispatch a bare slash command and record its staged local-history entry.
     ///
@@ -588,6 +632,23 @@ impl ChatWidget {
             }
             SlashCommand::Theme => {
                 self.open_theme_picker();
+            }
+            SlashCommand::Background => {
+                let (enabled, image) = {
+                    let animation = self.empty_state_animation.borrow();
+                    (
+                        animation.is_background_enabled(),
+                        animation
+                            .background_image_path()
+                            .map(|path| path.display().to_string()),
+                    )
+                };
+                let status = if enabled { "enabled" } else { "disabled" };
+                let image = image.unwrap_or_else(|| "default animation".to_string());
+                self.add_info_message(
+                    format!(r#"Animated chat background: {status}; image: {image}. Use /background on|off|clear or /background "<image path>" (/bga is an alias)."#),
+                    /*hint*/ None,
+                );
             }
             SlashCommand::Pets => {
                 self.open_pets_picker();
@@ -1170,6 +1231,68 @@ impl ChatWidget {
             SlashCommand::Pets if !trimmed.is_empty() => {
                 self.select_pet_by_id(args);
             }
+            SlashCommand::Background => {
+                let action = trimmed.to_ascii_lowercase();
+                let home = self.config.codex_home.as_path().to_path_buf();
+                if matches!(action.as_str(), "off" | "disable" | "disabled") {
+                    let result = self
+                        .empty_state_animation
+                        .borrow_mut()
+                        .set_background_enabled(false, home.as_path());
+                    match result {
+                        Ok(()) => self.add_info_message(
+                            "Animated chat background disabled. Use /background on to show it again."
+                                .to_string(),
+                            /*hint*/ None,
+                        ),
+                        Err(error) => self.add_error_message(error),
+                    }
+                } else if matches!(action.as_str(), "on" | "enable" | "enabled") {
+                    let result = self
+                        .empty_state_animation
+                        .borrow_mut()
+                        .set_background_enabled(true, home.as_path());
+                    match result {
+                        Ok(()) => self.add_info_message(
+                            "Animated chat background enabled.".to_string(),
+                            /*hint*/ None,
+                        ),
+                        Err(error) => self.add_error_message(error),
+                    }
+                } else if matches!(action.as_str(), "clear" | "remove" | "none") {
+                    let result = self
+                        .empty_state_animation
+                        .borrow_mut()
+                        .clear_background_image(home.as_path());
+                    match result {
+                        Ok(()) => self.add_info_message(
+                            "Saved chat background image cleared.".to_string(),
+                            /*hint*/ None,
+                        ),
+                        Err(error) => self.add_error_message(error),
+                    }
+                } else {
+                    match background_image_source_path(trimmed) {
+                        Ok(path) => {
+                            let result = self
+                                .empty_state_animation
+                                .borrow_mut()
+                                .set_background_image(&path, home.as_path());
+                            match result {
+                                Ok(destination) => self.add_info_message(
+                                    format!(
+                                        "Chat background image saved to {}.",
+                                        destination.display()
+                                    ),
+                                    /*hint*/ None,
+                                ),
+                                Err(error) => self.add_error_message(error),
+                            }
+                        }
+                        Err(error) => self.add_error_message(error),
+                    }
+                }
+            }
             _ => self.dispatch_command_from_source(cmd, source),
         }
         if source == SlashCommandDispatchSource::Live && cmd != SlashCommand::Goal {
@@ -1401,7 +1524,8 @@ impl ChatWidget {
             | SlashCommand::Config
             | SlashCommand::Theme
             | SlashCommand::Tui
-            | SlashCommand::Pets => QueueDrain::Stop,
+            | SlashCommand::Pets
+            | SlashCommand::Background => QueueDrain::Stop,
         }
     }
 

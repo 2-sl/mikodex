@@ -13,6 +13,93 @@ use crate::keymap::keymap_action_ids;
 mod select_mode;
 
 impl App {
+    pub(super) fn handle_agents_overview_sidebar_key_event(
+        &mut self,
+        key_event: KeyEvent,
+        activation_key: Option<crate::key_hint::KeyBinding>,
+    ) -> bool {
+        if !self.agents_overview.sidebar_focused
+            || self.overlay.is_some()
+            || !self.chat_widget.no_modal_or_popup_active()
+        {
+            return false;
+        }
+        let Some(view) = self.agents_overview.sidebar_view.as_mut() else {
+            self.agents_overview.sidebar_focused = false;
+            self.agents_overview.command_reference_focused = false;
+            return false;
+        };
+        if view.handle_docked_key_event(key_event, activation_key) {
+            self.agents_overview.sidebar_focused = false;
+            self.agents_overview.command_reference_focused = false;
+        }
+        true
+    }
+
+    pub(super) fn handle_command_reference_key_event(&mut self, key: KeyEvent) -> bool {
+        if !self.agents_overview.command_reference_focused
+            || self.overlay.is_some()
+            || !self.chat_widget.no_modal_or_popup_active()
+        {
+            return false;
+        }
+        if key.kind == KeyEventKind::Release {
+            return true;
+        }
+        match key.code {
+            KeyCode::Esc | KeyCode::Left => {
+                self.agents_overview.command_reference_focused = false;
+            }
+            KeyCode::Tab => {
+                self.agents_overview.command_reference_focused = false;
+                self.agents_overview.sidebar_focused = true;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.agents_overview.command_reference_scroll = self
+                    .agents_overview
+                    .command_reference_scroll
+                    .saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.agents_overview.command_reference_scroll = self
+                    .agents_overview
+                    .command_reference_scroll
+                    .saturating_add(1);
+            }
+            KeyCode::PageUp => {
+                self.agents_overview.command_reference_scroll = self
+                    .agents_overview
+                    .command_reference_scroll
+                    .saturating_sub(8);
+            }
+            KeyCode::PageDown => {
+                self.agents_overview.command_reference_scroll = self
+                    .agents_overview
+                    .command_reference_scroll
+                    .saturating_add(8);
+            }
+            KeyCode::Home => self.agents_overview.command_reference_scroll = 0,
+            KeyCode::Enter | KeyCode::Right => {
+                self.agents_overview.command_reference_focused = false;
+            }
+            _ => {}
+        }
+        true
+    }
+
+    pub(super) fn handle_agents_overview_sidebar_paste(&mut self, pasted: String) -> bool {
+        if !self.agents_overview.sidebar_focused
+            || self.overlay.is_some()
+            || !self.chat_widget.no_modal_or_popup_active()
+        {
+            return false;
+        }
+        if let Some(view) = self.agents_overview.sidebar_view.as_mut() {
+            crate::bottom_pane::BottomPaneView::handle_paste(view, pasted);
+        }
+        true
+    }
+
     pub(super) fn should_recover_vim_insert_escape(
         &self,
         tui: &tui::Tui,
@@ -244,6 +331,27 @@ impl App {
 
     fn key_chord_contexts(&self, tui: &tui::Tui) -> crate::keymap::KeymapContextSet {
         let contexts = self.active_keymap_contexts();
+        if self.agents_overview.sidebar_focused
+            && self.overlay.is_none()
+            && self.chat_widget.no_modal_or_popup_active()
+        {
+            let contexts = self
+                .agents_overview
+                .sidebar_view
+                .as_ref()
+                .map(|view| crate::bottom_pane::BottomPaneView::keymap_contexts(view))
+                .unwrap_or_default()
+                .with(crate::keymap::KeymapContext::Global)
+                .with(crate::keymap::KeymapContext::Chat);
+            return contexts.with_voice_toggle(&self.keymap);
+        }
+        if self.agents_overview.command_reference_focused
+            && self.overlay.is_none()
+            && self.chat_widget.no_modal_or_popup_active()
+        {
+            return KeymapContextSet::new(crate::keymap::KeymapContext::List)
+                .with(crate::keymap::KeymapContext::Global);
+        }
         if !self.conversation_focus_available(tui) {
             return contexts;
         }
@@ -466,6 +574,12 @@ impl App {
     ) {
         let activation_key = self.routed_key_activation.take();
         if self.chat_widget.fork_in_progress {
+            return;
+        }
+        if self.handle_agents_overview_sidebar_key_event(key_event, activation_key)
+            || self.handle_command_reference_key_event(key_event)
+        {
+            tui.frame_requester().schedule_frame();
             return;
         }
         if self.chat_widget.has_provider_error()

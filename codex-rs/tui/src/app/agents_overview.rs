@@ -82,6 +82,12 @@ pub(super) struct AgentsOverviewState {
     pub(super) refresh_task: Option<tokio::task::JoinHandle<()>>,
     pub(super) refresh_notifications: HashMap<ThreadId, Vec<ServerNotification>>,
     pub(super) rendered_full_screen: bool,
+    pub(super) sidebar_view: Option<AgentsOverviewView>,
+    pub(super) sidebar_focused: bool,
+    pub(super) command_reference_focused: bool,
+    pub(super) command_reference_scroll: usize,
+    pub(super) dock_drag: Option<super::agents_overview_dock::DockDividerDrag>,
+    pub(super) dock_resize: Option<super::agents_overview_dock::DockResizeMode>,
     pub(super) details_divider_drag: Option<DetailsDividerDrag>,
     pub(super) visible_thread_ids: Vec<ThreadId>,
     /// One-shot successor selected before a removal invalidates the displayed rows.
@@ -149,6 +155,35 @@ impl Drop for AgentsOverviewState {
 }
 
 impl App {
+    pub(super) fn ensure_agents_overview_sidebar_view(&mut self) {
+        if self.agents_overview.sidebar_view.is_some() {
+            return;
+        }
+        self.refresh_agents_overview_sidebar_view();
+    }
+
+    fn refresh_agents_overview_sidebar_view(&mut self) {
+        let selected = self
+            .agents_overview
+            .sidebar_view
+            .as_ref()
+            .and_then(|view| {
+                view.selected_index()
+                    .and_then(|index| view.thread_ids().get(index).copied())
+            })
+            .or_else(|| self.current_displayed_thread_id());
+        let threads = self
+            .agents_overview
+            .threads
+            .values()
+            .flatten()
+            .cloned()
+            .collect();
+        let mut view = self.agents_overview_view(threads, selected);
+        view.load_search_matches(0);
+        view.set_docked_focus(self.agents_overview.sidebar_focused);
+        self.agents_overview.sidebar_view = Some(view);
+    }
     pub(super) fn handle_agents_overview_details_mouse(
         &mut self,
         tui: &mut crate::Tui,
@@ -168,8 +203,7 @@ impl App {
                 return false;
             }
             match mouse.kind {
-                MouseEventKind::Drag(MouseButton::Left)
-                | MouseEventKind::Up(MouseButton::Left) => {
+                MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
                     let area_height = self
                         .agents_overview
                         .view_state
@@ -205,17 +239,13 @@ impl App {
         if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
             return false;
         }
-        let (divider, initial_height, area_height) = {
+        let (divider, initial_height) = {
             let view = self
                 .agents_overview
                 .view_state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            (
-                view.details_divider_area,
-                view.docked_details_height,
-                view.docked_area_height,
-            )
+            (view.details_divider_area, view.docked_details_height)
         };
         let Some(divider) = divider else {
             return false;
@@ -561,6 +591,7 @@ impl App {
     }
 
     pub(super) fn repaint_agents_overview(&mut self) {
+        self.refresh_agents_overview_sidebar_view();
         let Some(selected) = self
             .chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)

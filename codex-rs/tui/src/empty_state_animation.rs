@@ -8,6 +8,7 @@ mod policy;
 mod renderer;
 mod sequence;
 
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -32,6 +33,9 @@ use renderer::Renderer;
 pub(crate) const FRAME_INTERVAL: Duration = Duration::from_millis(/*millis*/ 50);
 // The preview's first visible pose (10.8s / 7.2s), also the start of an idle-screen replay.
 const SETTLED_BLOSSOM: f64 = 0.5;
+const BACKGROUND_IMAGE_DIRECTORY: &str = "background";
+const BACKGROUND_IMAGE_FILENAME: &str = "custom.png";
+const BACKGROUND_DISABLED_FILENAME: &str = "disabled";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ComposerState {
@@ -51,9 +55,317 @@ pub(crate) struct EmptyStateAnimation {
     renderer: Option<Renderer>,
     stage: Option<Rect>,
     replaying: bool,
+    background_image_path: Option<PathBuf>,
+    background_disabled_path: Option<PathBuf>,
+    background_image_cache: Option<(PathBuf, image::RgbaImage)>,
+    chat_background_elapsed: Duration,
+    chat_background_last_frame: Option<Instant>,
 }
 
 impl EmptyStateAnimation {
+    pub(crate) fn for_home(home: &Path) -> Self {
+        Self {
+            background_image_path: Some(
+                home.join(BACKGROUND_IMAGE_DIRECTORY)
+                    .join(BACKGROUND_IMAGE_FILENAME),
+            ),
+            background_disabled_path: Some(
+                home.join(BACKGROUND_IMAGE_DIRECTORY)
+                    .join(BACKGROUND_DISABLED_FILENAME),
+            ),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn is_background_enabled(&self) -> bool {
+        self.background_disabled_path
+            .as_deref()
+            .is_none_or(|path| !path.exists())
+    }
+
+    pub(crate) fn set_background_enabled(
+        &mut self,
+        enabled: bool,
+        home: &Path,
+    ) -> Result<(), String> {
+        let path = home
+            .join(BACKGROUND_IMAGE_DIRECTORY)
+            .join(BACKGROUND_DISABLED_FILENAME);
+        if enabled {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!(
+                        "Could not enable the chat background ({}): {error}",
+                        path.display()
+                    ));
+                }
+            }
+        } else {
+            let directory = home.join(BACKGROUND_IMAGE_DIRECTORY);
+            std::fs::create_dir_all(&directory).map_err(|error| {
+                format!(
+                    "Could not create chat background settings directory {}: {error}",
+                    directory.display()
+                )
+            })?;
+            std::fs::write(&path, b"disabled\n").map_err(|error| {
+                format!(
+                    "Could not disable the chat background ({}): {error}",
+                    path.display()
+                )
+            })?;
+        }
+        self.background_disabled_path = Some(path);
+        self.reset_chat_background();
+        Ok(())
+    }
+
+    pub(crate) fn set_background_image(
+        &mut self,
+        source: &Path,
+        home: &Path,
+    ) -> Result<PathBuf, String> {
+        let source = source.canonicalize().map_err(|error| {
+            format!(
+                "Could not open background image {}: {error}",
+                source.display()
+            )
+        })?;
+        let image = image::open(&source).map_err(|error| {
+            format!(
+                "Could not read background image {}: {error}",
+                source.display()
+            )
+        })?;
+        let directory = home.join(BACKGROUND_IMAGE_DIRECTORY);
+        std::fs::create_dir_all(&directory).map_err(|error| {
+            format!(
+                "Could not create background image directory {}: {error}",
+                directory.display()
+            )
+        })?;
+        let destination = directory.join(BACKGROUND_IMAGE_FILENAME);
+        let temporary = directory.join("custom.pending.png");
+        image
+            .save_with_format(&temporary, image::ImageFormat::Png)
+            .map_err(|error| format!("Could not save background image: {error}"))?;
+        if destination.exists() {
+            std::fs::remove_file(&destination).map_err(|error| {
+                format!(
+                    "Could not replace background image {}: {error}",
+                    destination.display()
+                )
+            })?;
+        }
+        std::fs::rename(&temporary, &destination).map_err(|error| {
+            format!(
+                "Could not install background image {}: {error}",
+                destination.display()
+            )
+        })?;
+        self.background_image_path = Some(destination.clone());
+        self.background_image_cache = Some((destination.clone(), image.to_rgba8()));
+        self.set_background_enabled(true, home)?;
+        self.reset_chat_background();
+        Ok(destination)
+    }
+
+    pub(crate) fn clear_background_image(&mut self, home: &Path) -> Result<(), String> {
+        let path = home
+            .join(BACKGROUND_IMAGE_DIRECTORY)
+            .join(BACKGROUND_IMAGE_FILENAME);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "Could not remove background image {}: {error}",
+                    path.display()
+                ));
+            }
+        }
+        self.background_image_path = Some(path);
+        self.background_image_cache = None;
+        self.reset_chat_background();
+        Ok(())
+    }
+
+    pub(crate) fn background_image_path(&self) -> Option<&Path> {
+        self.background_image_path
+            .as_deref()
+            .filter(|path| path.is_file())
+    }
+
+    fn reset_chat_background(&mut self) {
+        self.chat_background_elapsed = Duration::ZERO;
+        self.chat_background_last_frame = None;
+        self.background_image_cache = None;
+    }
+
+    pub(crate) fn render_chat_background(
+        &mut self,
+        area: Rect,
+        buffer: &mut Buffer,
+    ) -> Option<Duration> {
+        if !self.is_background_enabled()
+            || area.is_empty()
+            || area.width > MAX_COLUMNS.saturating_mul(4)
+            || area.height > MAX_ROWS.saturating_mul(4)
+            || area.intersection(buffer.area) != area
+        {
+            self.chat_background_last_frame = None;
+            return None;
+        }
+        let now = Instant::now();
+        let elapsed = self
+            .chat_background_last_frame
+            .replace(now)
+            .map(|previous| now.saturating_duration_since(previous))
+            .unwrap_or_default();
+        self.chat_background_elapsed += elapsed;
+        let image_path = self.background_image_path().map(Path::to_path_buf);
+        if let Some(path) = image_path {
+            let cache_matches = self
+                .background_image_cache
+                .as_ref()
+                .is_some_and(|(cached_path, _)| cached_path == &path);
+            if !cache_matches {
+                self.background_image_cache = image::open(&path)
+                    .ok()
+                    .map(|image| (path.clone(), image.to_rgba8()));
+            }
+        } else {
+            self.background_image_cache = None;
+        }
+
+        if let Some((_, image)) = self.background_image_cache.as_ref() {
+            self.paint_chat_background_image(area, buffer, image);
+        } else {
+            self.paint_chat_background_logo(area, buffer);
+        }
+        Some(FRAME_INTERVAL)
+    }
+
+    fn paint_chat_background_logo(&mut self, area: Rect, buffer: &mut Buffer) {
+        let width = area.width.min(MAX_COLUMNS);
+        let height = ((u32::from(width) * 21 / 60) as u16)
+            .min(area.height)
+            .min(MAX_ROWS);
+        if width == 0 || height == 0 {
+            return;
+        }
+        let stage = Rect::new(
+            area.x + area.width.saturating_sub(width) / 2,
+            area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        );
+        let background = terminal_palette::default_bg().unwrap_or((15, 20, 37));
+        let color_level = terminal_palette::effective_stdout_color_level();
+        let lighting = Lighting::terminal(
+            terminal_palette::default_fg().unwrap_or((210, 221, 235)),
+            background,
+        );
+        let phase = self.chat_background_elapsed.as_secs_f64() / sequence::LOOP_SECONDS;
+        let cells = self
+            .renderer
+            .get_or_insert_with(Renderer::default)
+            .frame(width, height, phase, &lighting);
+        for (index, cell) in cells.iter().enumerate() {
+            if cell.dots == 0 {
+                continue;
+            }
+            let point = (
+                stage.x + (index % usize::from(width)) as u16,
+                stage.y + (index / usize::from(width)) as u16,
+            );
+            let target = &mut buffer[point];
+            if target.symbol() != " " {
+                continue;
+            }
+            let [_, red, green, blue] = cell.rgb.to_be_bytes();
+            target
+                .set_char(char::from_u32(0x2800 + u32::from(cell.dots)).unwrap_or(' '))
+                .set_fg(background_terminal_color(
+                    (red, green, blue),
+                    background,
+                    /*opacity*/ 0.38,
+                    color_level,
+                ));
+        }
+    }
+
+    fn paint_chat_background_image(
+        &self,
+        area: Rect,
+        buffer: &mut Buffer,
+        image: &image::RgbaImage,
+    ) {
+        if image.width() == 0 || image.height() == 0 {
+            return;
+        }
+        let target_width = area.width.min(MAX_COLUMNS).max(1);
+        let target_height = area.height.min(MAX_ROWS).max(1);
+        let pixel_width = target_width.saturating_mul(2);
+        let pixel_height = target_height.saturating_mul(2);
+        let fitted = image::imageops::resize(
+            image,
+            u32::from(pixel_width),
+            u32::from(pixel_height),
+            image::imageops::FilterType::Triangle,
+        );
+        let stage = Rect::new(
+            area.x + area.width.saturating_sub(target_width) / 2,
+            area.y + area.height.saturating_sub(target_height) / 2,
+            target_width,
+            target_height,
+        );
+        let bob = (self.chat_background_elapsed.as_secs_f64() * std::f64::consts::TAU / 8.0).sin();
+        let opacity = (0.28 + bob * 0.035) as f32;
+        let background = terminal_palette::default_bg().unwrap_or((15, 20, 37));
+        let color_level = terminal_palette::effective_stdout_color_level();
+        let vertical_shift = if bob > 0.65 {
+            -1_i32
+        } else if bob < -0.65 {
+            1
+        } else {
+            0
+        };
+        for y in 0..target_height {
+            for x in 0..target_width {
+                let target_y = i32::from(stage.y + y) + vertical_shift;
+                if target_y < i32::from(stage.y) || target_y >= i32::from(stage.bottom()) {
+                    continue;
+                }
+                let cell = &mut buffer[(stage.x + x, target_y as u16)];
+                if cell.symbol() != " " {
+                    continue;
+                }
+                let top = fitted.get_pixel(u32::from(x) * 2, u32::from(y) * 2).0;
+                let bottom = fitted.get_pixel(u32::from(x) * 2, u32::from(y) * 2 + 1).0;
+                if top[3] == 0 && bottom[3] == 0 {
+                    continue;
+                }
+                let mix = |pixel: [u8; 4]| {
+                    background_terminal_color(
+                        (pixel[0], pixel[1], pixel[2]),
+                        background,
+                        opacity * f32::from(pixel[3]) / 255.0,
+                        color_level,
+                    )
+                };
+                if top[3] > 0 {
+                    cell.set_char('?').set_fg(mix(top));
+                }
+                if bottom[3] > 0 {
+                    cell.set_bg(mix(bottom));
+                }
+            }
+        }
+    }
+
     pub(crate) fn is_eligible(&self) -> bool {
         self.eligible
     }
@@ -284,6 +596,28 @@ impl EmptyStateAnimation {
                 target.set_style(target.style().dim());
             }
         }
+    }
+}
+
+fn background_terminal_color(
+    rgb: (u8, u8, u8),
+    background: (u8, u8, u8),
+    opacity: f32,
+    color_level: terminal_palette::StdoutColorLevel,
+) -> Color {
+    let color = crate::color::blend(rgb, background, opacity);
+    if color_level == terminal_palette::StdoutColorLevel::Ansi256 {
+        static COLORS: [OnceLock<Color>; 4096] = [const { OnceLock::new() }; 4096];
+        let (r, g, b) = (color.0 >> 4, color.1 >> 4, color.2 >> 4);
+        let index = usize::from(r) * 256 + usize::from(g) * 16 + usize::from(b);
+        *COLORS[index].get_or_init(|| {
+            terminal_palette::best_color_for_level(
+                (r * 16 + 8, g * 16 + 8, b * 16 + 8),
+                color_level,
+            )
+        })
+    } else {
+        terminal_palette::best_color_for_level(color, color_level)
     }
 }
 
