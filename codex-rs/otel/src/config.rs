@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::fmt;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::Deserialize;
@@ -49,6 +51,8 @@ pub fn validate_span_attributes(attributes: &HashMap<String, String>) -> std::io
 
 #[derive(Clone, Debug)]
 pub struct OtelSettings {
+    /// Optional credential helper shared by explicitly configured OTLP HTTP exporters.
+    pub headers_helper: Option<OtelHeadersHelper>,
     pub http_client_factory: codex_http_client::HttpClientFactory,
     pub environment: String,
     pub service_name: String,

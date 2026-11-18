@@ -1,5 +1,6 @@
 use crate::config::OtelExporter;
 use crate::config::OtelHttpProtocol;
+use crate::headers_helper::HeadersHelper;
 use crate::metrics::MetricsError;
 use crate::metrics::Result;
 use crate::metrics::config::MetricsConfig;
@@ -350,6 +351,7 @@ impl MetricsClient {
     /// Build a metrics client from configuration and validate defaults.
     pub fn new(config: MetricsConfig) -> Result<Self> {
         let MetricsConfig {
+            headers_helper,
             http_client_factory,
             environment,
             service_name,
@@ -747,6 +749,7 @@ fn build_otlp_metric_exporter(
                     factory,
                     tls.as_ref(),
                     OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
+                    headers_helper,
                 )
                 .map_err(|err| MetricsError::InvalidConfig {
                     message: err.to_string(),
