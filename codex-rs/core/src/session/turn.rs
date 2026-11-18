@@ -3173,8 +3173,9 @@ async fn try_run_sampling_request(
             }
             break Err(CodexErr::Stream(
                 "stream closed before response.completed".into(),
-            ))
-        }) {
+            ));
+        };
+        let event = match event {
             Ok(event) => event,
             Err(err) => {
                 if let CodexErrorDetails::ResponseIncomplete(incomplete) = err.details() {
