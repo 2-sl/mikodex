@@ -1,7 +1,7 @@
 //! TUI keymap config schema and canonical key-spec normalization.
 //!
 //! This module defines the on-disk `[tui.keymap]` contract used by
-//! `~/.mikodex/config.toml` and normalizes user-entered key specs into canonical
+//! `~/.codex/config.toml` and normalizes user-entered key specs into canonical
 //! forms consumed by runtime keymap resolution in `codex-rs/tui/src/keymap.rs`.
 //!
 //! Responsibilities:
@@ -488,6 +488,8 @@ pub struct TuiPagerKeymap {
     pub close_transcript: Option<KeybindingsSpec>,
     /// Find text in a transcript pager.
     pub find: Option<KeybindingsSpec>,
+    /// Mark Markdown structure under the caret in transcript selection mode.
+    pub mark_markdown: Option<KeybindingsSpec>,
 }
 
 /// List selection context keybindings for popup-style selectable lists.

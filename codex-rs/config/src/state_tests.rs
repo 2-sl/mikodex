@@ -151,7 +151,7 @@ exclude = ["LEGACY_*"]
 fn disabled_layers_do_not_validate_shell_environment_policy() {
     let layer = ConfigLayerEntry::new_disabled(
         ConfigLayerSource::Project {
-            dot_codex_folder: AbsolutePathBuf::from_absolute_path("/untrusted/.mikodex")
+            dot_codex_folder: AbsolutePathBuf::from_absolute_path("/untrusted/.codex")
                 .expect("project path should be absolute"),
         },
         toml::from_str(
@@ -289,6 +289,34 @@ approval_policy = "on-request"
 }
 
 #[test]
+fn a_project_setting_only_the_provider_preserves_the_user_tui_value() -> anyhow::Result<()> {
+    let dir = TempDir::new()?;
+    let project = ConfigLayerEntry::new(
+        ConfigLayerSource::Project {
+            dot_codex_folder: test_user_config_path(&dir, ".codex"),
+        },
+        toml::toml! { [tui] status_line_provider = "default" }.into(),
+    );
+    for contents in ["", "tui = 42"] {
+        let user_config: TomlValue = toml::from_str(contents)?;
+        let user = ConfigLayerEntry::new(
+            ConfigLayerSource::User {
+                file: test_user_config_path(&dir, "config.toml"),
+                profile: None,
+            },
+            user_config.clone(),
+        );
+        let stack = ConfigLayerStack::new(
+            vec![user, project.clone()],
+            ConfigRequirements::default(),
+            ConfigRequirementsToml::default(),
+        )?;
+        assert_eq!(stack.effective_config(), user_config);
+    }
+    Ok(())
+}
+
+#[test]
 fn layer_iterators_preserve_precedence_and_disabled_layers() {
     let temp_dir = TempDir::new().expect("tempdir");
     let user_source = ConfigLayerSource::User {
@@ -296,7 +324,7 @@ fn layer_iterators_preserve_precedence_and_disabled_layers() {
         profile: None,
     };
     let project_source = ConfigLayerSource::Project {
-        dot_codex_folder: test_user_config_path(&temp_dir, ".mikodex"),
+        dot_codex_folder: test_user_config_path(&temp_dir, ".codex"),
     };
     let session_source = ConfigLayerSource::SessionFlags;
     let empty_config = TomlValue::Table(toml::map::Map::new());

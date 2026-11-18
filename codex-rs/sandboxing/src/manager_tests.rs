@@ -1,6 +1,4 @@
 use super::SandboxCommand;
-#[cfg(windows)]
-use super::SandboxDirectSpawnTransformRequest;
 use super::SandboxManager;
 use super::SandboxNetwork;
 use super::SandboxSelection;
@@ -439,30 +437,11 @@ fn transform_linux_seccomp_request(
     codex_linux_sandbox_exe: &std::path::Path,
     manager: SandboxManager,
 ) -> super::WrappedSandboxCommand {
-    let cwd = AbsolutePathBuf::current_dir().expect("current dir");
-    let cwd_uri = PathUri::from_abs_path(&cwd);
-    let permissions = PermissionProfile::Disabled;
+    let cwd = PathUri::from_abs_path(&AbsolutePathBuf::current_dir().expect("current dir"));
     manager
         .transform(SandboxTransformRequest {
-            command: SandboxCommand {
-                program: "true".into(),
-                args: Vec::new(),
-                cwd: cwd_uri.clone(),
-                env: HashMap::new(),
-                managed_network: None,
-                additional_permissions: None,
-            },
-            permissions: &permissions,
-            workspace_roots: None,
-            runtime_readable_paths: &[],
-            selection: SandboxSelection::Explicit(SandboxType::LinuxSeccomp),
-            enforce_managed_network: false,
-            environment_id: None,
-            network: None,
-            sandbox_policy_cwd: &cwd_uri,
             sandbox_exe: Some(codex_linux_sandbox_exe),
-            use_legacy_landlock: false,
-            windows_sandbox_level: WindowsSandboxLevel::Disabled,
+            ..sandbox_transform_request(&cwd, SandboxType::LinuxSeccomp)
         })
         .expect("transform")
 }
@@ -636,7 +615,15 @@ async fn inherited_terminal_preserves_native_linux_helper_and_uses_its_dispatch_
 
 #[cfg(unix)]
 #[tokio::test]
-async fn linux_unix_socket_grant_uses_effective_managed_policy() -> anyhow::Result<()> {
+async fn linux_helper_uses_effective_managed_policy() -> anyhow::Result<()> {
+    for transparent_tcp in [false, true] {
+        check_linux_managed_policy(transparent_tcp).await?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn check_linux_managed_policy(transparent_tcp: bool) -> anyhow::Result<()> {
     use codex_network_proxy::ConfigReloader;
     use codex_network_proxy::ConfigReloaderFuture;
     use codex_network_proxy::ConfigState;
@@ -690,7 +677,7 @@ async fn linux_unix_socket_grant_uses_effective_managed_policy() -> anyhow::Resu
     let denied = ManagedNetworkSandboxContext::default();
     let cwd = AbsolutePathBuf::current_dir()?;
     let cwd_uri = PathUri::from_abs_path(&cwd);
-    let manager = SandboxManager::new();
+    let manager = SandboxManager::new().with_linux_sandbox_transparent_tcp(transparent_tcp);
     for (label, context, live_proxy, enforce_managed_network, expected) in [
         (
             "missing policy stays managed with restrictive defaults",
@@ -771,7 +758,7 @@ async fn linux_unix_socket_grant_uses_effective_managed_policy() -> anyhow::Resu
 
 #[cfg(target_os = "windows")]
 #[test]
-fn transform_for_direct_spawn_windows_preserves_only_wrapper_setup_environment() {
+fn windows_wrapper_preserves_only_setup_environment() {
     let mut env = HashMap::from([
         ("Path".to_string(), r"C:\Windows\System32".to_string()),
         ("username".to_string(), "wrong-user".to_string()),
@@ -831,7 +818,7 @@ fn wrapper_runtime_selection_uses_the_parent_not_environment_overrides() {
 
 #[cfg(target_os = "windows")]
 #[test]
-fn transform_for_direct_spawn_windows_materializes_inner_helper() {
+fn windows_file_system_wrapper_materializes_inner_helper() {
     let codex_home = tempfile::TempDir::new().expect("codex home");
     let helper_dir = tempfile::TempDir::new().expect("helper dir");
     let configured_helper = helper_dir.path().join("configured-codex-helper.exe");
@@ -867,9 +854,12 @@ fn transform_for_direct_spawn_windows_materializes_inner_helper() {
         ]),
         NetworkSandboxPolicy::Restricted,
     );
-    let other_workspace = tempfile::TempDir::new().expect("other workspace");
-    let other_workspace_root = AbsolutePathBuf::from_absolute_path(
-        canonicalize(other_workspace.path()).expect("canonical other workspace"),
+    let policy = super::PreparedLaunchPolicy::resolve(
+        permissions,
+        &cwd_uri,
+        Some(std::slice::from_ref(&cwd_uri)),
+        &[],
+        &super::SandboxOperation::FileSystemHelper,
     )
     .expect("resolve helper policy");
     let mut exec_request = super::SandboxExecRequest {
@@ -889,7 +879,13 @@ fn transform_for_direct_spawn_windows_materializes_inner_helper() {
         permission_profile: policy.permissions,
         arg0: None,
     };
-    let exec_request = prepare(/*roots*/ None, &cwd_uri);
+    super::wrap_windows_file_system_helper(
+        &mut exec_request,
+        &policy.workspace_roots,
+        codex_home.path(),
+        Some(&configured_helper),
+    )
+    .expect("wrap filesystem helper");
 
     let inner_env_json = exec_request
         .command
@@ -935,54 +931,6 @@ fn transform_for_direct_spawn_windows_materializes_inner_helper() {
         exec_request.command[separator_index + 2],
         "--codex-run-as-fs-helper"
     );
-    let explicit_root = PathUri::from_abs_path(&workspace_roots[1]);
-    // The wrapper encodes the cwd for an empty root list. Its serialized policy must
-    // already have removed the workspace write grant.
-    for (request, expected_roots, expected_writes) in [
-        (&exec_request, &workspace_roots[..], None),
-        (
-            &prepare(Some(&[]), &cwd_uri),
-            &workspace_roots[..1],
-            Some([false, false]),
-        ),
-        (
-            // The legacy workspace-write projection always includes its policy cwd.
-            // Anchor it at the grant and check the command cwd independently.
-            &prepare(Some(std::slice::from_ref(&explicit_root)), &explicit_root),
-            &workspace_roots[1..],
-            Some([false, true]),
-        ),
-    ] {
-        assert_eq!(
-            request
-                .command
-                .windows(2)
-                .filter_map(|args| {
-                    (args[0] == "--workspace-root").then_some(std::path::PathBuf::from(&args[1]))
-                })
-                .collect::<Vec<_>>(),
-            expected_roots
-                .iter()
-                .map(|root| root.as_path().to_path_buf())
-                .collect::<Vec<_>>()
-        );
-        if let Some(expected_writes) = expected_writes {
-            let profile_json = request
-                .command
-                .windows(2)
-                .find(|args| args[0] == "--permission-profile")
-                .expect("serialized wrapper policy");
-            let policy = serde_json::from_str::<PermissionProfile>(&profile_json[1])
-                .expect("decode wrapper policy")
-                .file_system_sandbox_policy();
-            assert_eq!(
-                workspace_roots
-                    .each_ref()
-                    .map(|root| policy.can_write_local_path_with_cwd(root, &workspace_roots[0])),
-                expected_writes
-            );
-        }
-    }
     assert_eq!(
         materialized_helper
             .parent()

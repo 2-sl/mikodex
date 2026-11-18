@@ -1,6 +1,8 @@
 use crate::types::StatusLineSelection;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde_json::Value as JsonValue;
+use std::borrow::Cow;
+use toml::Value as TomlValue;
 
 /// Provenance for one layer in the effective Codex configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,7 +20,7 @@ pub enum ConfigLayerSource {
         file: AbsolutePathBuf,
         profile: Option<String>,
     },
-    /// Configuration loaded from a project's `.mikodex` directory.
+    /// Configuration loaded from a project's `.codex` directory.
     Project { dot_codex_folder: AbsolutePathBuf },
     /// Overrides supplied for the current session.
     SessionFlags,
@@ -26,6 +28,23 @@ pub enum ConfigLayerSource {
     LegacyManagedConfigTomlFromFile { file: AbsolutePathBuf },
     /// Legacy managed configuration delivered by MDM.
     LegacyManagedConfigTomlFromMdm,
+}
+
+pub(crate) fn without_status_line_provider(config: &TomlValue) -> Cow<'_, TomlValue> {
+    let mut values = Cow::Borrowed(config);
+    if config
+        .get("tui")
+        .and_then(|tui| tui.get("status_line_provider"))
+        .is_some()
+        && let Some(table) = values.to_mut().as_table_mut()
+        && let Some(tui) = table.get_mut("tui").and_then(TomlValue::as_table_mut)
+    {
+        tui.remove("status_line_provider");
+        if tui.is_empty() {
+            table.remove("tui");
+        }
+    }
+    values
 }
 
 impl ConfigLayerSource {

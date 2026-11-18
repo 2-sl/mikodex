@@ -129,11 +129,11 @@ async fn first_layer_config_error_from_entries(layers: &[ConfigLayerEntry]) -> O
 /// - system    `/etc/codex/config.toml` (Unix) or
 ///   `%ProgramData%\OpenAI\Codex\config.toml` (Windows)
 /// - cloud     enterprise-managed cloud config bundle fragments
-/// - user      `${MIKODEX_HOME}/config.toml`
-/// - profile   `${MIKODEX_HOME}/<name>.config.toml`, when selected
+/// - user      `${CODEX_HOME}/config.toml`
+/// - profile   `${CODEX_HOME}/<name>.config.toml`, when selected
 /// - cwd       `${PWD}/config.toml` (loaded but disabled when the directory is untrusted)
-/// - tree      parent directories up to root looking for `./.mikodex/config.toml` (loaded but disabled when untrusted)
-/// - repo      `$(git rev-parse --show-toplevel)/.mikodex/config.toml` (loaded but disabled when untrusted)
+/// - tree      parent directories up to root looking for `./.codex/config.toml` (loaded but disabled when untrusted)
+/// - repo      `$(git rev-parse --show-toplevel)/.codex/config.toml` (loaded but disabled when untrusted)
 /// - runtime   e.g., --config flags, model selector in UI
 ///
 /// (*) Only available on macOS via managed device profiles.
@@ -1177,7 +1177,7 @@ impl ProjectTrustContext {
         }
 
         let relative_dir = dir.as_path().strip_prefix(checkout_root.as_path()).ok()?;
-        Some(repo_root.join(relative_dir).join(".mikodex"))
+        Some(repo_root.join(relative_dir).join(".codex"))
     }
 }
 
@@ -1658,7 +1658,11 @@ pub fn resolve_relative_paths_in_config_toml(
     }
     // The typed round trip resolves AbsolutePathBuf fields against this layer's directory.
     let _guard = AbsolutePathBufGuard::new(base_dir);
-    let Ok(resolved) = ConfigToml::try_from(value_from_config_toml.clone()) else {
+    // Provider identities contain no paths. An ignored malformed identity must not
+    // prevent an unrelated path in this layer from being resolved against its directory.
+    let path_input =
+        crate::config_layer_source::without_status_line_provider(&value_from_config_toml);
+    let Ok(resolved) = ConfigToml::try_from(path_input.into_owned()) else {
         return Ok(value_from_config_toml);
     };
     drop(_guard);
@@ -1884,7 +1888,7 @@ async fn discover_project_layers(
     let mut layers = Vec::new();
     let mut startup_warnings = Vec::new();
     for dir in dirs {
-        let dot_codex_abs = dir.join(".mikodex");
+        let dot_codex_abs = dir.join(".codex");
         let dot_codex_uri = PathUri::from_abs_path(&dot_codex_abs);
         if !fs
             .get_metadata(&dot_codex_uri, Default::default(), /*sandbox*/ None)
