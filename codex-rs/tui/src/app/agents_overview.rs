@@ -502,7 +502,7 @@ impl App {
             .flatten()
             .cloned()
             .collect();
-        let view = self.agents_overview_view(threads, selected_thread_id);
+        let view = self.agents_overview_view(threads.clone(), selected_thread_id);
         let matches = &mut self.agents_overview.search_matches;
         if !matches.is_empty() {
             let visible: HashSet<_> = view

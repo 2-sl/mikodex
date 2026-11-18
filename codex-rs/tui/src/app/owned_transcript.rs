@@ -800,9 +800,6 @@ impl App {
                 Some(sidebar::SidebarLayout::Panel {
                     focus: PaneFocus::Sidebar,
                     ..
-                }) | Some(sidebar::SidebarLayout::Chooser {
-                    focus: PaneFocus::Sidebar,
-                    ..
                 })
             );
         let options = |interacting| ComposerRenderOptions {

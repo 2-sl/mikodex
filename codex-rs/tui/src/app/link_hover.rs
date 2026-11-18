@@ -12,7 +12,6 @@ use crossterm::event::MouseEventKind::ScrollUp;
 use crossterm::event::MouseEventKind::Up;
 
 use super::App;
-use super::App;
 use super::agents_overview_dock;
 use super::side_companion::SideCompanion;
 use crate::app_event::AppEvent;
