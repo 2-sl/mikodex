@@ -430,7 +430,7 @@ impl TraceReducer {
         Ok(())
     }
 
-    fn single_tool_for_model_visible_call(
+    pub(super) fn single_tool_for_model_visible_call(
         &self,
         model_visible_call_id: &str,
     ) -> Result<Option<ToolCallId>> {

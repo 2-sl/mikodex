@@ -84,6 +84,18 @@ pub(crate) struct CloudModelSelection {
 }
 
 impl AppServerSession {
+    pub(crate) fn pending_cloud_turn_settings(&self) -> Option<PendingCloudTurnSettings> {
+        (self.thread_params_mode() == ThreadParamsMode::Cloud)
+            .then(|| self.cloud_turn_settings.clone())
+    }
+
+    pub(crate) fn move_staged_cloud_settings(&self, from: ThreadId, to: ThreadId) {
+        let mut pending = self.cloud_turn_settings.lock();
+        if let Some(settings) = pending.remove(&from) {
+            pending.insert(to, settings);
+        }
+    }
+
     fn cloud_model_catalog_is_current(&self) -> bool {
         matches!(&self.request_handle,
             AppServerRequestHandle::Cloud(handle) if handle.model_catalog_is_current()

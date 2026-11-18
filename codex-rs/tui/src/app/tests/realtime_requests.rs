@@ -165,9 +165,39 @@ async fn check_remote_voice_start(
     ))
     .await?;
 
+    Box::pin(app.handle_event(
+        &mut tui,
+        &mut app_server,
+        next_call_result(&mut events).await?,
+    ))
+    .await?;
+    let calls = calls.received_requests().await.unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].headers["thread-id"], thread_id.to_string());
+    assert_eq!(calls[0].headers["session-id"], thread_id.to_string());
+    let voice_session_id = calls[0].headers["voice-session-id"].to_str()?;
+    let uuid = uuid::Uuid::parse_str(voice_session_id)?;
+    assert_eq!(uuid.get_version(), Some(uuid::Version::Random));
+    assert_eq!(uuid.to_string(), voice_session_id);
+    assert_ne!(voice_session_id, thread_id.to_string());
+    if base_path == "/v1" {
+        let body = std::str::from_utf8(&calls[0].body)?;
+        assert!(body.contains(r#""voice":"marin""#));
+        assert!(body.contains(r#""model":"gpt-live-1.1-codex""#));
+    } else {
+        let body = calls[0].body_json::<serde_json::Value>()?;
+        assert_eq!(body["sdp"], "v=0\r\n");
+        assert_eq!(body["session"]["model"], "gpt-live-1.1-codex");
+        assert_eq!(
+            body["session"]["audio"]["output"]["voice"],
+            expected_voice.unwrap_or("cove")
+        );
+    }
     let starts = recorded_params(&requests, "thread/realtime/start");
     assert_eq!(starts.len(), 1);
     let start = &starts[0];
+    assert_eq!(start["realtimeSessionId"], thread_id.to_string());
+    assert_eq!(start["voiceSessionId"], voice_session_id);
     assert_eq!(
         serde_json::json!({
             "threadId": start["threadId"],

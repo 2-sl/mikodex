@@ -423,7 +423,8 @@ async fn write_and_project(
     let _live_writer_guard = store.live_writer_locks.lock(thread_id).await;
     let (recorder, rollout_id, history_mode) = live_writer_parts(store, thread_id).await?;
     let sync_rollout_path = matches!(&write_op, RolloutWriteOp::Persist | RolloutWriteOp::Flush);
-    let write_op = match write_op {
+    let is_flush = matches!(&write_op, RolloutWriteOp::Flush);
+    match write_op {
         RolloutWriteOp::AppendItems(items) => {
             let items = into_persisted_rollout_items(items, history_mode);
             if items.is_empty() {
@@ -438,13 +439,21 @@ async fn write_and_project(
         durable_write(&recorder, write_op).await?;
     } else {
         let rollout_path = recorder.rollout_path();
-        // SQLite is a rebuildable view. The flush barrier must win before projection starts so it
-        // can lag JSONL after failure, but can never get ahead of canonical history.
-        durable_write(&recorder, write_op).await?;
-        if let Err(err) = super::thread_history_materialization::materialize_to_sqlite(
+        // Only the plain file's length is a decoded JSONL byte offset.
+        let flushed_len = if is_flush && store.state_db.is_some() {
+            tokio::fs::metadata(codex_rollout::plain_rollout_path(rollout_path))
+                .await
+                .ok()
+                .filter(std::fs::Metadata::is_file)
+                .map(|file| file.len())
+        } else {
+            None
+        };
+        if let Err(err) = super::thread_history_materialization::materialize_durable_suffix(
             store,
             rollout_id,
             rollout_path,
+            flushed_len,
         )
         .await
         {

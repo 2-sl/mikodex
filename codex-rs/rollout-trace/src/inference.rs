@@ -122,6 +122,26 @@ impl InferenceTraceContext {
         }
     }
 
+    /// Original history IDs of tool outputs omitted during request preparation.
+    pub fn stripped_output_ids(&self, input: &[ResponseItem]) -> Vec<(usize, String)> {
+        if matches!(self.state, InferenceTraceContextState::Disabled) {
+            return Vec::new();
+        }
+        let mut ids = Vec::new();
+        for (index, item) in input.iter().enumerate() {
+            if matches!(
+                item,
+                ResponseItem::FunctionCallOutput { .. } | ResponseItem::CustomToolCallOutput { .. }
+            ) && let Some(id) = item
+                .id()
+                .filter(|id| id.allocation().is_none() && !id.is_prefixed())
+            {
+                ids.push((index, id.to_string()));
+            }
+        }
+        ids
+    }
+
     /// Starts a new attempt after the concrete provider request has been built.
     pub fn start_attempt(&self) -> InferenceTraceAttempt {
         let InferenceTraceContextState::Enabled(context) = &self.state else {
@@ -175,32 +195,47 @@ impl InferenceTraceAttempt {
         headers.insert(INFERENCE_CALL_ID_HEADER, inference_call_id);
     }
 
-    /// Records the request payload replay should treat as the model-visible inference input.
-    ///
-    /// This is usually the exact provider request. Callers may instead pass a
-    /// logical request when the transport omits already-sent input, such as
-    /// websocket reuse after an untraced warmup response.
-    pub fn record_started(&self, request: &impl Serialize) {
+    /// Captures the transport's encoded JSON and the immutable Core prompt that produced it.
+    /// A continuation from an unrecorded warmup also supplies its full formatted context.
+    pub fn record_started<P: Serialize + Send + Sync + 'static>(
+        &self,
+        outgoing: impl AsRef<[u8]> + Send + 'static,
+        prepared_prompt: Arc<P>,
+        stripped_tool_output_ids: Vec<(usize, String)>,
+        warmup_context: impl FnOnce() -> serde_json::Result<Option<Vec<u8>>> + Send + 'static,
+    ) {
         let InferenceTraceAttemptState::Enabled(attempt) = &self.state else {
             return;
         };
-        let Some(request_payload) = write_json_payload_best_effort(
-            &attempt.context.writer,
-            RawPayloadKind::InferenceRequest,
-            request,
-        ) else {
-            return;
-        };
-
-        append_with_context_best_effort(
-            &attempt.context,
-            RawTraceEventPayload::InferenceStarted {
-                inference_call_id: attempt.inference_call_id.clone(),
-                thread_id: attempt.context.thread_id.clone(),
-                codex_turn_id: attempt.context.codex_turn_id.clone(),
-                model: attempt.context.model.clone(),
-                provider_name: attempt.context.provider_name.clone(),
-                request_payload,
+        let ctx = &attempt.context;
+        let thread_id = ctx.thread_id.clone();
+        let codex_turn_id = ctx.codex_turn_id.clone();
+        let inference_call_id = attempt.inference_call_id.clone();
+        let model = ctx.model.clone();
+        let provider_name = ctx.provider_name.clone();
+        let start = ctx.writer.defer_event(
+            RawTraceEventContext::turn(&thread_id, &codex_turn_id),
+            move |bundle| {
+                let request_payload =
+                    bundle.write_body(RawPayloadKind::InferenceRequest, outgoing.as_ref())?;
+                let prepared_prompt_payload = bundle.write_body(
+                    RawPayloadKind::PreparedPrompt,
+                    &serde_json::to_vec(prepared_prompt.as_ref())?,
+                )?;
+                let warmup_context_payload = warmup_context()?
+                    .map(|bytes| bundle.write_body(RawPayloadKind::WarmupContext, &bytes))
+                    .transpose()?;
+                Ok(RawTraceEventPayload::InferenceStarted {
+                    inference_call_id,
+                    thread_id,
+                    codex_turn_id,
+                    model,
+                    provider_name,
+                    request_payload,
+                    stripped_tool_output_ids,
+                    prepared_prompt_payload,
+                    warmup_context_payload,
+                })
             },
         );
     }
@@ -486,7 +521,13 @@ mod tests {
                 "role": "user",
                 "content": [{"type": "input_text", "text": "hello"}]
             }],
-        }));
+        });
+        attempt.record_started(
+            serde_json::to_vec(&request)?,
+            Arc::new(request),
+            Vec::new(),
+            || Ok(None),
+        );
         attempt.record_completed("resp-1", Some("req-1"), &None, &[]);
 
         let rollout = replay_bundle(temp.path())?;
@@ -501,7 +542,9 @@ mod tests {
         assert_eq!(inference.codex_turn_id, "turn-1");
         assert_eq!(inference.execution.status, ExecutionStatus::Completed);
         assert_eq!(inference.upstream_request_id, Some("req-1".to_string()));
-        assert_eq!(rollout.raw_payloads.len(), 2);
+        let prepared = &rollout.raw_payloads[&inference.prepared_prompt_payload_id];
+        assert_eq!(prepared.parts.len(), 1);
+        assert_eq!(rollout.raw_payloads.len(), 4);
 
         Ok(())
     }

@@ -118,7 +118,59 @@ fn normalize_image_detail(detail: &mut Option<ImageDetail>, model_info: &ModelIn
     }
 }
 
-pub struct ResponseStream {
+/// Whether the producer has posted a response's bill and deferred a turn error.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) enum ChargePosting {
+    #[default]
+    Unposted,
+    Posted,
+    PostedTurnExhausted,
+}
+
+/// Carries the hook price and the response producer's billing state.
+#[derive(Debug, Default)]
+pub(crate) struct SamplingCharge {
+    pub(crate) hooks: codex_hooks::ModelRequestHookOutcome,
+    pub(crate) posting: ChargePosting,
+}
+
+/// Core consumes a terminal event and its hook output together. Other readers
+/// of the public response stream still see the provider's unmodified event.
+#[derive(Debug)]
+pub(crate) struct SamplingEvent {
+    pub(crate) event: Result<ResponseEvent>,
+    pub(crate) hook_output: SamplingCharge,
+}
+
+/// The provider's usage and the hook's contribution describe the same
+/// response. Keeping them separate preserves the provider's original numbers.
+#[derive(Debug)]
+pub(crate) struct SamplingUsage {
+    pub(crate) provider: Option<codex_protocol::protocol::TokenUsage>,
+    pub(crate) charge: SamplingCharge,
+}
+
+#[cfg(test)]
+impl From<codex_protocol::protocol::TokenUsage> for SamplingUsage {
+    fn from(provider: codex_protocol::protocol::TokenUsage) -> Self {
+        Self {
+            provider: Some(provider),
+            charge: Default::default(),
+        }
+    }
+}
+
+impl From<Result<ResponseEvent>> for SamplingEvent {
+    fn from(event: Result<ResponseEvent>) -> Self {
+        Self {
+            event,
+            hook_output: Default::default(),
+        }
+    }
+}
+
+/// A sampling consumer receives the hook outcome with the provider event it settles.
+pub(crate) struct SamplingStream {
     pub(crate) routing_affinity: Option<codex_http_client::ChatGptRoutingAffinity>,
     pub(crate) rx_event: mpsc::Receiver<Result<ResponseEvent>>,
     pub(crate) interrupt: Option<oneshot::Sender<codex_api::ResponseInterrupt>>,

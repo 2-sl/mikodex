@@ -529,8 +529,17 @@ async fn windows_elevated_temp_only_core_and_direct_spawn_enforce_carveouts() ->
                         use_legacy_landlock: false,
                         windows_sandbox_level: WindowsSandboxLevel::Elevated,
                     },
-                },
-            )?;
+                    permissions: &permission_profile,
+                    workspace_roots: Some(std::slice::from_ref(&cwd_uri)),
+                    runtime_readable_paths: None,
+                    selection: SandboxSelection::Explicit(SandboxType::WindowsRestrictedToken),
+                    network: Default::default(),
+                    sandbox_policy_cwd: &cwd_uri,
+                    sandbox_exe: Some(codex.as_path()),
+                    use_legacy_landlock: false,
+                    windows_sandbox_level: WindowsSandboxLevel::Elevated,
+                })?
+                .into_command_request()?;
             let output = Command::new(&request.command[0])
                 .args(&request.command[1..])
                 .current_dir(request.cwd.to_abs_path()?)

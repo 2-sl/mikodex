@@ -37,7 +37,7 @@ const AGENT_NAMES: &str = include_str!("../../../assets/agent/agent_names.txt");
 /// unrepresentable.
 #[allow(clippy::large_enum_variant)]
 pub(super) enum SpawnInitialInput {
-    UserInput(Vec<UserInput>),
+    UserInput(Vec<ResolvedUserInput>),
     InterAgentCommunication(InterAgentCommunication, AgentCommunicationContext),
 }
 
@@ -199,7 +199,7 @@ impl LocalAgentControl {
     pub(crate) async fn spawn_agent(
         &self,
         config: Config,
-        initial_input: Vec<UserInput>,
+        initial_input: Vec<ResolvedUserInput>,
         session_source: Option<SessionSource>,
     ) -> CodexResult<ThreadId> {
         let (spawned_agent, _) = Box::pin(self.spawn_agent_internal(
@@ -902,7 +902,8 @@ impl LocalAgentControl {
             parent_turn_id: options.parent_turn_id,
             turn_trigger: options.turn_trigger,
             root_turn_id: options.root_turn_id,
-            cyber_access_program: options.cyber_access_program,
+            cyber_access_program,
+            inherited_client_metadata: options.inherited_client_metadata,
             ..Default::default()
         };
         let input_admission_started_at = Instant::now();

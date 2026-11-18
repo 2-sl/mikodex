@@ -97,6 +97,8 @@ pub(crate) struct GuardianReviewContext {
     pub(crate) serving_assessment: Option<Arc<ServingAssessment>>,
     /// The latest response ID and its connection affinity when review was requested.
     pub(crate) parent_response: Option<Arc<ParentResponse>>,
+    /// A host-verified, still-running tool invocation that requested this nested review.
+    pub(crate) enclosing_invocation_id: Option<String>,
     turn: Arc<TurnContext>,
     review_execution: Option<codex_direct_tool_timing::ReviewExecution>,
     environments: TurnEnvironmentSnapshot,
@@ -141,6 +143,7 @@ impl GuardianReviewContext {
         Self {
             serving_assessment: None,
             review_execution: None,
+            enclosing_invocation_id: None,
             parent_response: turn.extension_data.get::<ParentResponse>(),
             environments: environments.clone(),
             project_instructions: None,
@@ -168,6 +171,7 @@ impl From<&Arc<StepContext>> for GuardianReviewContext {
         Self {
             serving_assessment: step.serving_assessment.clone(),
             review_execution: None,
+            enclosing_invocation_id: None,
             parent_response: step.turn.extension_data.get::<ParentResponse>(),
             turn: Arc::clone(&step.turn),
             environments: step.environments.clone(),
@@ -187,6 +191,7 @@ impl From<Arc<TurnContext>> for GuardianReviewContext {
         Self {
             serving_assessment: None,
             review_execution: None,
+            enclosing_invocation_id: None,
             parent_response: turn.extension_data.get::<ParentResponse>(),
             environments: turn.initial_environments.clone(),
             project_instructions: None,

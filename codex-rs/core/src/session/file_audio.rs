@@ -10,6 +10,9 @@ use std::time::Duration;
 
 use codex_attachment_store::FormatSpecificMetadata;
 use codex_attachment_store::ResolveRequest;
+use codex_attachment_store::UploadContent;
+use codex_attachment_store::UploadRequest;
+use codex_attachment_store::UploadResult;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::models::AudioReference;
 use codex_protocol::models::ContentItem;
@@ -41,9 +44,129 @@ pub(super) fn file_ids(items: &[ResponseItemEnvelope]) -> impl Iterator<Item = &
             ResponseItem::Message { content, .. } => Some(content),
             _ => None,
         })
-        .flatten()
-        .filter_map(|part| match part {
-            ContentItem::InputAudio {
+        .await
+        else {
+            *output = codex_protocol::models::FunctionCallOutputPayload::from_text(
+                "audio content omitted because it could not be processed".into(),
+            );
+            continue;
+        };
+        let mut replaced_with_text = false;
+        for (part, charge) in &mut admitted {
+            if let FunctionCallOutputContentItem::InputAudio {
+                audio: AudioReference::Inline { audio_url },
+            } = part
+            {
+                let url = std::mem::take(audio_url);
+                *part = store_tool_audio(store, thread_id, ephemeral, url).await;
+                if matches!(part, FunctionCallOutputContentItem::InputText { .. }) {
+                    *charge = 0;
+                    replaced_with_text = true;
+                }
+            }
+        }
+        if replaced_with_text {
+            admitted =
+                truncate_measured_tool_output(admitted, TruncationPolicy::Tokens(repair_limit));
+        }
+        output.body = codex_protocol::models::FunctionCallOutputBody::ContentItems(
+            admitted.into_iter().map(|(part, _)| part).collect(),
+        );
+        metadata.tool_audio_budget_applied = true;
+    }
+}
+
+fn admit_tool_audio(
+    parts: Vec<FunctionCallOutputContentItem>,
+    history_limit: usize,
+    preserve_producer_limit: bool,
+) -> (Vec<(FunctionCallOutputContentItem, usize)>, usize) {
+    let mut measured = Vec::with_capacity(parts.len());
+    for mut part in parts {
+        let charge = match &mut part {
+            FunctionCallOutputContentItem::InputAudio {
+                audio: AudioReference::Inline { audio_url },
+            } => match codex_utils_audio::prepare_and_measure_inline_audio(audio_url) {
+                Ok(tokens) => tokens,
+                Err(error) => {
+                    part = FunctionCallOutputContentItem::InputText {
+                        text: error.placeholder().into(),
+                    };
+                    0
+                }
+            },
+            FunctionCallOutputContentItem::InputAudio {
+                audio: AudioReference::File { .. },
+            } => estimate_file_audio_tokens(/*duration*/ None),
+            _ => 0,
+        };
+        measured.push((part, charge));
+    }
+    let admitted = truncate_measured_tool_output(measured, TruncationPolicy::Tokens(history_limit));
+    // Admission matches inline history. Only storage can introduce a new placeholder
+    // after that point. With no explicit producer limit, keep such repairs within
+    // the size of the result the model would otherwise have received.
+    let repair_limit = if preserve_producer_limit {
+        admitted
+            .iter()
+            .fold(0_usize, |sum, (part, charge)| {
+                let cost = match part {
+                    FunctionCallOutputContentItem::InputText { text } => approx_token_count(text),
+                    _ => *charge,
+                };
+                sum.saturating_add(cost)
+            })
+            .min(history_limit)
+    } else {
+        history_limit
+    };
+    (admitted, repair_limit)
+}
+
+async fn store_tool_audio(
+    store: &dyn AttachmentStore,
+    thread_id: &str,
+    ephemeral: bool,
+    inline_url: String,
+) -> FunctionCallOutputContentItem {
+    let (mime, data, inline_url) = match tokio::task::spawn_blocking(move || {
+        codex_utils_audio::decode_audio(&inline_url).map(|(mime, data)| (mime, data, inline_url))
+    })
+    .await
+    {
+        Ok(Ok(decoded)) => decoded,
+        Ok(Err(error)) => {
+            return FunctionCallOutputContentItem::InputText {
+                text: error.placeholder().into(),
+            };
+        }
+        Err(_) => {
+            return FunctionCallOutputContentItem::InputText {
+                text: "audio content omitted because it could not be processed".into(),
+            };
+        }
+    };
+    let result = store
+        .upload(UploadRequest {
+            thread_id: thread_id.to_owned(),
+            ephemeral,
+            content: UploadContent::ToolAudio {
+                declared_mime_type: mime.to_owned(),
+                data,
+            },
+        })
+        .await;
+    tool_audio_after_upload(result, mime, inline_url)
+}
+
+fn tool_audio_after_upload(
+    result: Result<UploadResult, codex_attachment_store::AttachmentStoreError>,
+    mime: &str,
+    mut inline_url: String,
+) -> FunctionCallOutputContentItem {
+    match result {
+        Ok(UploadResult::File { file_id }) if !file_id.trim().is_empty() => {
+            FunctionCallOutputContentItem::InputAudio {
                 audio: AudioReference::File { file_id },
             } => Some(file_id),
             _ => None,

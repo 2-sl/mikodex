@@ -86,9 +86,8 @@ impl FileSystemSandboxRunner {
         request: FsHelperRequest,
     ) -> Result<FsHelperPayload, JSONRPCErrorError> {
         let command = self.sandbox_command(sandbox)?;
-        crate::run_integrity_checks(&command).await;
-        let request_json = serde_json::to_vec(&request).map_err(json_error)?;
-        run_command(command, request_json).await
+        crate::run_integrity_checks((&command).into()).await;
+        Ok(command)
     }
 
     #[tracing::instrument(
@@ -173,27 +172,18 @@ impl FileSystemSandboxRunner {
             additional_permissions: None,
         };
         let mut request = sandbox_manager
-            .transform_for_direct_spawn(SandboxDirectSpawnTransformRequest {
-                workspace_roots,
-                windows_sandbox_proxy_settings_mode:
-                    codex_sandboxing::WindowsSandboxProxySettingsMode::Preserve,
-                transform: SandboxTransformRequest {
-                    command,
-                    permissions: permission_profile,
-                    workspace_roots: None,
-                    runtime_readable_paths: &[],
-                    selection,
-                    enforce_managed_network: false,
-                    environment_id: None,
-                    network: None,
-                    sandbox_policy_cwd: &cwd.uri,
-                    sandbox_exe: if cfg!(windows) {
-                        Some(self.runtime_paths.codex_self_exe.as_path())
-                    } else {
-                        self.runtime_paths.codex_linux_sandbox_exe.as_deref()
-                    },
-                    use_legacy_landlock: sandbox_context.use_legacy_landlock,
-                    windows_sandbox_level,
+            .transform(SandboxTransformRequest {
+                command,
+                permissions: &sandbox.permissions,
+                workspace_roots: Some(&sandbox.workspace_roots),
+                runtime_readable_paths: Some(&helper_readable_paths),
+                selection,
+                network: Default::default(),
+                sandbox_policy_cwd: &sandbox.cwd,
+                sandbox_exe: if cfg!(windows) {
+                    Some(helper.as_path())
+                } else {
+                    self.runtime_paths.codex_linux_sandbox_exe.as_deref()
                 },
             })
             .map_err(|err| match err {
@@ -201,8 +191,10 @@ impl FileSystemSandboxRunner {
                     "filesystem sandbox cannot be enforced on this executor".to_string(),
                 ),
                 err => invalid_request(format!("failed to prepare fs sandbox: {err}")),
-            })?;
-        request.sandbox_override = sandbox_context.sandbox_override;
+            })?
+            .into_command_request()
+            .map_err(io_error)?;
+        request.sandbox_override = sandbox.sandbox_override;
         Ok(request)
     }
 }
@@ -515,29 +507,22 @@ pub(crate) async fn wait_for_helper_output(
 }
 
 pub(crate) fn spawn_command(
-    SandboxExecRequest {
-        command: argv,
-        cwd,
-        mut env,
-        arg0,
-        ..
-    }: SandboxExecRequest,
+    request: SandboxExecRequest,
     stdin: ChildStdin,
 ) -> Result<Child, JSONRPCErrorError> {
-    let Some((program, args)) = argv.split_first() else {
+    let Some((program, args)) = request.program_and_args() else {
         return Err(invalid_request("fs sandbox command was empty".to_string()));
     };
     let mut command = Command::new(program);
+    command.args(args);
     #[cfg(unix)]
-    if let Some(arg0) = arg0 {
+    if let Some(arg0) = request.arg0 {
         command.arg0(arg0);
     }
-    #[cfg(not(unix))]
-    let _ = arg0;
-    command.args(args);
     // TODO(anp): Keep PathUri through the filesystem helper launch boundary.
-    let cwd = cwd.to_abs_path().map_err(io_error)?;
+    let cwd = request.cwd.to_abs_path().map_err(io_error)?;
     command.current_dir(cwd.as_path());
+    let mut env = request.env;
     env.retain(|name, _| !codex_protocol::shell_environment::is_non_inheritable_env_var(name));
     command.envs(env);
     command.stdin(stdin);

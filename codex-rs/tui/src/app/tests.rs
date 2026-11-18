@@ -3217,31 +3217,6 @@ fn attach_live_thread_for_selection_rejects_unmaterialized_fallback_threads() ->
 }
 
 #[tokio::test]
-async fn refresh_agent_picker_thread_liveness_prunes_closed_metadata_only_threads() -> Result<()> {
-    let mut app = Box::pin(make_test_app()).await;
-    let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(
-        app.chat_widget.config_ref(),
-    ))
-    .await
-    .expect("embedded app server");
-    let thread_id = ThreadId::new();
-    app.agent_navigation.upsert(
-        thread_id,
-        Some("Ghost".to_string()),
-        Some("worker".to_string()),
-        /*is_closed*/ false,
-    );
-
-    let is_available =
-        Box::pin(app.refresh_agent_picker_thread_liveness(&mut app_server, thread_id)).await;
-
-    assert!(!is_available);
-    assert_eq!(app.agent_navigation.get(&thread_id), None);
-    assert!(!app.thread_event_channels.contains_key(&thread_id));
-    Ok(())
-}
-
-#[tokio::test]
 async fn docked_replay_finishes_while_skills_refresh_is_pending() -> Result<()> {
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
     let parent = ThreadId::new();
@@ -3619,12 +3594,13 @@ async fn reopen_saved_side_chat(during: DuringOpen) -> Result<()> {
     // Only the selected sibling fits. + starts the refresh and the chord joins it.
     side_frame(&mut app, &mut tui, Size::new(size.width, /*height*/ 10))?;
     let strip = app.conversation_frame.sidebar_tab_strip().unwrap();
-    let click = mouse(
+    for kind in [
         MouseEventKind::Down(MouseButton::Left),
-        strip.right() - 3,
-        strip.y,
-    );
-    boxed_future!(app.handle_tui_event(&mut tui, &mut server, click)).await?;
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        let click = mouse(kind, strip.right() - 3, strip.y);
+        boxed_future!(app.handle_tui_event(&mut tui, &mut server, click)).await?;
+    }
     let request = app.sidebar().unwrap().discovery.request().unwrap();
     for key in open_chooser {
         boxed_future!(app.handle_tui_event(&mut tui, &mut server, TuiEvent::Key(key))).await?;
@@ -3700,10 +3676,24 @@ async fn reopen_saved_side_chat(during: DuringOpen) -> Result<()> {
     app.pending_server_profiles.remove(&parent);
     app.local_settings.tui.keymap = toml::from_str("[list]\naccept = ['f5 g']")?;
     enable_side_retention(&mut app)?;
-    for key in [KeyCode::Char('j'), KeyCode::F(5), KeyCode::Char('g')] {
+    let painted_frame = std::mem::take(&mut app.conversation_frame);
+    let pane = app.sidebar_mut();
+    let child_choice = pane.chat_tabs().choice_index(child).expect("saved child");
+    pane.choice = child_choice - 1;
+    pane.chooser_scroll = Default::default();
+    pane.focus_document_request = Some(uuid::Uuid::new_v4());
+    for key in [KeyCode::Down, KeyCode::F(5), KeyCode::Char('g')] {
         boxed_future!(app.handle_tui_event(&mut tui, &mut server, TuiEvent::Key(key.into())))
             .await?;
     }
+    assert_eq!(app.sidebar().expect("sidebar").choice, child_choice);
+    assert!(
+        app.sidebar()
+            .expect("sidebar")
+            .focus_document_request
+            .is_none()
+    );
+    app.conversation_frame = painted_frame;
     let opening = side_frame(&mut app, &mut tui, size)?;
     let status = opening
         .lines()
@@ -4967,7 +4957,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             ))
             .await?;
         } else {
-            assert!(columns.iter().all(|x| *x == divider - 2));
+            assert!(columns.iter().all(|x| *x == divider - 1));
             // A fresh transcript press cancels a drag whose release was lost.
             for kind in [MouseEventKind::Down(left), MouseEventKind::Up(left)] {
                 boxed_future!(app.handle_tui_event(
@@ -4983,9 +4973,9 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         }
     }
     // Text preview, graphics guide, and the divider on the protected image row.
-    insta::assert_snapshot!(format!("{previews:?}"), @"[197, 197, 199]");
+    insta::assert_snapshot!(format!("{previews:?}"), @"[198, 198, 199]");
     side_frame(&mut app, &mut tui, wide)?;
-    assert_eq!(divider_at(&tui, 0), 197);
+    assert_eq!(divider_at(&tui, 0), 198);
     let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&path)?)?;
     assert_eq!(saved["tui"]["sidebar_width_percent"].as_integer(), Some(34));
 
@@ -4998,8 +4988,10 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     }
     let zoom = KeyEvent::from(KeyCode::Char('z'));
     keys!(prefix, zoom);
+    assert!(app.conversation_frame.side_pane().is_none());
     let zoomed = side_frame(&mut app, &mut tui, wide)?;
     keys!(prefix, zoom);
+    assert!(app.conversation_frame.side_pane().is_some());
     let restored = side_frame(&mut app, &mut tui, wide)?;
     assert_eq!(divider_at(&tui, 0), 197);
     keys!(prefix, zoom);
@@ -5325,7 +5317,13 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     let [up, enter] = [KeyCode::Char('k'), KeyCode::Enter].map(KeyEvent::from);
     side_frame(&mut app, &mut tui, even)?;
     let sidebar_x = app.conversation_frame.chat_strip.unwrap().x;
-    keys!(prefix, chooser_key, up, enter);
+    keys!(prefix, chooser_key);
+    side_frame(&mut app, &mut tui, even)?;
+    keys!(KeyCode::Home.into());
+    side_frame(&mut app, &mut tui, even)?;
+    assert_eq!(app.chooser_focus(), Some(sidebar::PaneFocus::Sidebar));
+    assert_eq!(app.sidebar().unwrap().choice, 0);
+    keys!(enter);
     app.local_settings.tui.keymap = toml::from_str("[global]\nleader = 'f12'")?;
     enable_side_retention(&mut app)?;
     app.local_settings.tui.animations = false;
@@ -5369,6 +5367,38 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     let frame = side_frame(&mut app, &mut tui, even)?;
     let header = frame.lines().next().unwrap().split_once('│').unwrap().1;
     assert_app_snapshot!("side_chat_tabs", header.trim_end());
+    let owner = app
+        .app_server_backend_id
+        .unwrap_or_else(crate::backend_id::BackendId::new);
+    let local_registry = std::mem::replace(
+        &mut app.backend_registry,
+        crate::app::backend_registry::BackendRegistry::new([owner].into()),
+    );
+    assert!(app.backend_registry.observe(owner, parent_thread_id));
+    let frame = side_frame(&mut app, &mut tui, even)?;
+    let header = frame.lines().next().unwrap().split_once('│').unwrap().1;
+    insta::assert_snapshot!(
+        header.split_inclusive('×').take(2).collect::<String>(),
+        @" ☁︎ Investigate …×  ☁︎ Fix cache    ×"
+    );
+    keys!(prefix, chooser_key);
+    let frame = side_frame(&mut app, &mut tui, even)?;
+    let labels = frame
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once('│').map(|(_, pane)| pane))
+        .filter(|pane| pane.contains("Investigate rendering") || pane.contains("Fix cache"))
+        .map(|pane| pane.trim().trim_start_matches(['›', '○', ' ']))
+        .filter(|pane| pane.starts_with("☁︎"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!(labels, @"
+    ☁︎ Investigate rendering
+    ☁︎ Fix cache
+    ");
+    keys!(KeyCode::Enter.into());
+    app.backend_registry = local_registry;
+    side_frame(&mut app, &mut tui, even)?;
     assert_eq!(app.conversation_frame.chat_strip.unwrap().x, sidebar_x);
 
     // At this width only one tab fits. Use the arrow to go back and the wheel to return.
@@ -5376,16 +5406,27 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     let narrow_frame = side_frame(&mut app, &mut tui, narrow)?;
     let header = narrow_frame.lines().next().unwrap();
     insta::assert_snapshot!("side_chat_tab_overflow", header.trim_end());
-    let arrow = header.chars().position(|c| c == '‹').expect("previous tab");
+    let strip = app.conversation_frame.chat_strip.unwrap();
+    let arrow_x = header.chars().position(|c| c == '‹').expect("previous tab") as u16;
+    let buffer = tui.terminal.previous_buffer();
+    let arrow_cell = &buffer[(arrow_x, strip.y)];
+    let add_cell = &buffer[(strip.right() - 3, strip.y)];
+    let idle_style = arrow_cell.style();
+    assert_eq!(idle_style, add_cell.style());
+
+    let hover = mouse(MouseEventKind::Moved, arrow_x, strip.y);
+    boxed_future!(app.handle_tui_event(&mut tui, &mut app_server, hover)).await?;
+    side_frame(&mut app, &mut tui, narrow)?;
+    assert_ne!(
+        tui.terminal.previous_buffer()[(arrow_x, strip.y)].style(),
+        idle_style
+    );
     for (kind, expected) in [
-        (MouseEventKind::Down(MouseButton::Left), side_thread_id),
+        (MouseEventKind::Down(MouseButton::Left), sibling),
+        (MouseEventKind::Up(MouseButton::Left), side_thread_id),
         (MouseEventKind::ScrollDown, sibling),
     ] {
-        let event = mouse(
-            kind,
-            arrow as u16,
-            app.conversation_frame.chat_strip.unwrap().y,
-        );
+        let event = mouse(kind, arrow_x, strip.y);
         boxed_future!(app.handle_tui_event(&mut tui, &mut app_server, event)).await?;
         drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
         assert_eq!(app.current_displayed_thread_id(), Some(expected));
@@ -5393,14 +5434,42 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     }
     side_frame(&mut app, &mut tui, even)?;
 
-    keys!(prefix, chooser_key, up, enter);
+    keys!(prefix, chooser_key);
+    side_frame(&mut app, &mut tui, even)?;
+    keys!(up);
+    side_frame(&mut app, &mut tui, even)?;
+    keys!(enter);
     assert_eq!(app.current_displayed_thread_id(), Some(side_thread_id));
     assert_eq!(app.chat_widget.composer_text_with_pending(), child_draft);
     assert!(side_frame(&mut app, &mut tui, even)?.contains(child_row));
     let strip = app.conversation_frame.chat_strip.unwrap();
     let down = MouseEventKind::Down(MouseButton::Left);
-    let click = mouse(down, strip.x + 12, strip.y);
-    boxed_future!(app.handle_tui_event(&mut tui, &mut app_server, click)).await?;
+    let release = MouseEventKind::Up(MouseButton::Left);
+    let sibling_tab = app
+        .conversation_frame
+        .sidebar_targets
+        .iter()
+        .find_map(|(target, area)| {
+            (*target
+                == side_focus::SidebarTarget::Tab(crate::sidebar_tab_strip::TabTarget::Tab(
+                    crate::sidebar_tab_strip::SidebarTab::Chat(sibling),
+                )))
+            .then_some(*area)
+        })
+        .expect("sibling tab");
+    for (kind, x) in [
+        (down, sibling_tab.x),
+        (release, sibling_tab.right()),
+        (down, sibling_tab.x),
+        (release, sibling_tab.x),
+    ] {
+        boxed_future!(app.handle_tui_event(&mut tui, &mut app_server, mouse(kind, x, strip.y)))
+            .await?;
+        if x == sibling_tab.right() {
+            assert_eq!(app.current_displayed_thread_id(), Some(side_thread_id));
+            assert!(app.sidebar().unwrap().close.is_none());
+        }
+    }
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     assert_eq!(app.current_displayed_thread_id(), Some(sibling));
     assert!(!tui.has_deferred_thread_switch_clear());
@@ -5483,29 +5552,30 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         assert_eq!(app.chooser_focus(), expected_focus, "{focus}");
         side_frame(&mut app, &mut tui, even)?;
         let strip = app.conversation_frame.sidebar_tab_strip().unwrap();
-        let chooser = app.conversation_frame.chat_strip.is_none();
         let add = strip.right() - 3;
-        let tabs = app
-            .sidebar()
-            .unwrap()
-            .chat_tabs()
-            .strip()
-            .strip_targets(strip);
-        let [inactive, selected] = tabs
+        let [inactive, selected] = app
+            .conversation_frame
+            .sidebar_targets
+            .iter()
             .filter_map(|(target, area)| {
-                matches!(target, crate::sidebar_tab_strip::TabTarget::Tab(_)).then_some(area)
+                matches!(
+                    target,
+                    side_focus::SidebarTarget::Tab(crate::sidebar_tab_strip::TabTarget::Tab(_))
+                )
+                .then_some(*area)
             })
             .collect::<Vec<_>>()
             .try_into()
             .expect("both side-chat tabs are visible");
-        assert_eq!(selected.x, inactive.right() + 1);
+        assert_eq!(selected.x, inactive.right() + 2);
+        assert_eq!(inactive.width, selected.width);
         let [inactive, selected] = [inactive, selected].map(|area| area.x + 1);
         for (state, column, row, palette, redraw) in [
             ("rest", selected, strip.y + 1, Some(colors), None),
             ("hover", inactive, strip.y, Some(colors), Some(true)),
             ("fallback", inactive + 1, strip.y, None, Some(false)),
             ("selected", selected, strip.y, Some(colors), Some(true)),
-            ("leave", selected, strip.y + 1, Some(colors), Some(chooser)),
+            ("leave", selected, strip.y + 1, Some(colors), Some(true)),
             ("light rest", selected, strip.y + 1, Some(light), None),
             ("light hover", inactive, strip.y, Some(light), Some(true)),
             ("light add", add, strip.y, Some(light), Some(true)),
@@ -5595,8 +5665,14 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     let close_x = (chooser.x..chooser.right())
         .rfind(|&x| tui.terminal.previous_buffer()[(x, chooser.y)].symbol() == "×")
         .expect("close button on the second tab");
-    let click_close = mouse(down, close_x, chooser.y);
-    boxed_future!(app.handle_tui_event(&mut tui, &mut app_server, click_close)).await?;
+    for kind in [down, release] {
+        boxed_future!(app.handle_tui_event(
+            &mut tui,
+            &mut app_server,
+            mouse(kind, close_x, chooser.y)
+        ))
+        .await?;
+    }
     let frame = side_frame(&mut app, &mut tui, even)?;
     let dialog = frame
         .lines()
@@ -5609,12 +5685,14 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     assert_eq!(app.current_displayed_thread_id(), Some(parent_thread_id));
     assert_eq!(app.chooser_focus(), chooser_focus);
     side_frame(&mut app, &mut tui, even)?;
-    boxed_future!(app.handle_tui_event(
-        &mut tui,
-        &mut app_server,
-        mouse(down, close_x - 1, chooser.y)
-    ))
-    .await?;
+    for kind in [down, release] {
+        boxed_future!(app.handle_tui_event(
+            &mut tui,
+            &mut app_server,
+            mouse(kind, close_x - 1, chooser.y)
+        ))
+        .await?;
+    }
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
@@ -5633,8 +5711,14 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     ));
     keys!(prefix, chooser_key);
     side_frame(&mut app, &mut tui, even)?;
-    boxed_future!(app.handle_tui_event(&mut tui, &mut app_server, mouse(down, close_x, chooser.y)))
+    for kind in [down, release] {
+        boxed_future!(app.handle_tui_event(
+            &mut tui,
+            &mut app_server,
+            mouse(kind, close_x, chooser.y)
+        ))
         .await?;
+    }
     assert!(side_frame(&mut app, &mut tui, even)?.contains("discard unsent input"));
     keys!(KeyCode::Esc.into());
     app.select_agent_thread(&mut tui, &mut app_server, sibling)
@@ -8926,6 +9010,8 @@ async fn make_test_app() -> Box<App> {
     let session_telemetry = test_session_telemetry(&config, model.as_str());
 
     Box::new(App {
+        statusline_picker: None,
+        statusline_metrics: Default::default(),
         provider_writes: HashMap::new(),
         feature_write_lock: Arc::default(),
         config_notification_test_generation: 0,
@@ -8995,6 +9081,7 @@ async fn make_test_app() -> Box<App> {
         daemon_cli_executable: None,
         pending_update_action: None,
         daemon_restart: None,
+        remote_control_pending: false,
         pending_shutdown_exit_thread_id: None,
         windows_sandbox: WindowsSandboxState::default(),
         thread_event_channels: HashMap::new(),
@@ -9018,6 +9105,7 @@ async fn make_test_app() -> Box<App> {
         divider_drag: None,
         pane_resize: None,
         passive_link_drag: None,
+        sidebar_press: None,
         abandoned_side_threads: HashSet::new(),
         active_thread_id: None,
         active_thread_rx: None,
@@ -9066,6 +9154,8 @@ pub(super) async fn make_test_app_with_channels() -> (
 
     (
         Box::new(App {
+            statusline_picker: None,
+            statusline_metrics: Default::default(),
             provider_writes: HashMap::new(),
             feature_write_lock: Arc::default(),
             config_notification_test_generation: 0,
@@ -9135,6 +9225,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             daemon_cli_executable: None,
             pending_update_action: None,
             daemon_restart: None,
+            remote_control_pending: false,
             pending_shutdown_exit_thread_id: None,
             windows_sandbox: WindowsSandboxState::default(),
             thread_event_channels: HashMap::new(),
@@ -9158,6 +9249,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             divider_drag: None,
             pane_resize: None,
             passive_link_drag: None,
+            sidebar_press: None,
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
             active_thread_rx: None,
@@ -9636,62 +9728,6 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
     Ok(())
 }
 
-#[tokio::test]
-async fn snapshot_thread_switch_discards_queued_previous_history() -> Result<()> {
-    let (mut app, mut events, _op_rx) = make_test_app_with_channels().await;
-    app.transcript_cells = vec![plain_line_cell("Previous thread transcript")];
-    app.chat_widget
-        .add_plain_history_lines(vec![Line::from("Previous queued history")]);
-    let mut tui = crate::tui::test_support::make_test_tui()?;
-    let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
-    let next_thread_id = ThreadId::new();
-    app.render_thread_snapshot(
-        &mut tui,
-        &app_server,
-        next_thread_id,
-        ThreadEventSnapshot {
-            delegated_turns: Vec::new(),
-            session: Some(test_thread_session(
-                next_thread_id,
-                test_path_buf("/tmp/next"),
-            )),
-            turns: vec![test_turn(
-                "next-turn",
-                TurnStatus::Completed,
-                vec![ThreadItemPayload::UserMessage {
-                    id: "next-user".to_string(),
-                    client_id: None,
-                    content: vec![AppServerUserInput::Text {
-                        text: "Next thread prompt".to_string(),
-                        text_elements: Vec::new(),
-                    }],
-                }],
-            )],
-            events: Vec::new(),
-            active_reasoning_item: None,
-            input_state: None,
-        },
-        /*resume_restored_queue*/ false,
-    )?;
-    assert_eq!(app.pending_thread_switch_resets, 1);
-    while let Ok(event) = events.try_recv() {
-        app.handle_event(&mut tui, &mut app_server, event).await?;
-    }
-    assert_eq!(app.pending_thread_switch_resets, 0);
-    let rendered = app
-        .render_transcript_lines_for_reflow(/*width*/ 80)
-        .lines
-        .iter()
-        .map(rendered_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(!rendered.contains("Previous thread transcript"));
-    assert!(!rendered.contains("Previous queued history"));
-    assert!(rendered.contains("Next thread prompt"));
-    app_server.shutdown().await?;
-    Ok(())
-}
-
 fn rendered_line_text(line: &crate::terminal_hyperlinks::HyperlinkLine) -> String {
     line.line
         .spans
@@ -10162,7 +10198,7 @@ async fn resizing_empty_transcript_schedules_settled_size_recheck() {
     );
 }
 
-fn test_turn(turn_id: &str, status: TurnStatus, items: Vec<ThreadItemPayload>) -> Turn {
+pub(super) fn test_turn(turn_id: &str, status: TurnStatus, items: Vec<ThreadItemPayload>) -> Turn {
     Turn {
         id: turn_id.to_string(),
         root_turn_id: None,

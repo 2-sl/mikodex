@@ -205,6 +205,11 @@ impl ChatWidget {
         &mut self,
         notification: McpServerStatusUpdatedNotification,
     ) {
+        if notification.status == McpServerStartupState::Ready
+            && let Some(footer) = &self.statusline_read
+        {
+            footer.server_ready(&notification.name);
+        }
         let refresh_connector_mentions = notification.name == "codex_apps"
             && notification.status == McpServerStartupState::Ready;
         let status = match notification.status {

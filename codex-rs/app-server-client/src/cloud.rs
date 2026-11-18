@@ -10,6 +10,8 @@ use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::Result as JsonRpcResult;
+use codex_app_server_protocol::ThreadResumeResponse;
+use codex_app_server_protocol::ThreadSetNameParams;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnStartParams;
 use std::collections::HashMap;
@@ -20,18 +22,40 @@ use std::sync::MutexGuard;
 use std::sync::PoisonError;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::time::Instant;
+use tokio::time::timeout_at;
+
+/// Rejection from the original network policy during Cloud recovery.
+pub const CLOUD_RECOVERY_NETWORK_BLOCKED: &str =
+    "The current network policy blocks cloud reconnection.";
 
 /// Operations the cloud worker must handle without forwarding to another backend.
 /// Unsupported operations must return an explicit error; they must not claim success.
 pub enum CloudOperation {
     Request(Box<ClientRequest>),
-    /// Host project metadata stays on the private transport, outside the app-server wire.
-    StartProjectThread {
+    /// Opens a provisional attachment and serves its initial history on a scoped channel.
+    PrepareThreadResume {
+        request_id: RequestId,
+        params: Box<codex_app_server_protocol::ThreadResumeParams>,
+        history: mpsc::Receiver<CloudCommand>,
+    },
+    /// Sent on the scoped channel after the caller has prepared the replacement view.
+    CommitPreparedResume,
+    /// Environment selection stays on the private transport, outside the app-server wire.
+    StartThreadWithEnvironment {
         request_id: RequestId,
         params: Box<codex_app_server_protocol::ThreadStartParams>,
-        project: codex_cloud_client::ProjectEnvironment,
+        environment: codex_cloud_client::EnvironmentSelection,
     },
     SubmitUserMessage(Box<TurnStartParams>),
+    /// Apply the result of a name write that already succeeded outside the command queue.
+    ThreadNameSaved(ThreadSetNameParams),
+    ResumeDisconnectedThread {
+        thread_id: String,
+        require_history: bool,
+        deadline: Instant,
+        release: oneshot::Receiver<oneshot::Sender<Result<(), &'static str>>>,
+    },
     Notify(ClientNotification),
     Resolve {
         request_id: RequestId,
@@ -58,6 +82,39 @@ pub enum CloudUserMessageReceipt {
 pub struct CloudCommand {
     pub operation: CloudOperation,
     pub response: oneshot::Sender<io::Result<RequestResult>>,
+}
+
+/// Allows the worker to install a held stream after the caller reads its history.
+/// Dropping the token cancels that replacement.
+pub struct CloudRecoveryRelease {
+    release: oneshot::Sender<oneshot::Sender<Result<(), &'static str>>>,
+    deadline: Instant,
+}
+
+impl CloudRecoveryRelease {
+    pub async fn install(self) -> Result<(), &'static str> {
+        let (ack, mut installed) = oneshot::channel();
+        self.release
+            .send(ack)
+            .map_err(|_| "Cloud reconnection expired.")?;
+        let response = match timeout_at(self.deadline, &mut installed).await {
+            Ok(result) => result.ok(),
+            Err(_) => {
+                installed.close();
+                installed.try_recv().ok()
+            }
+        };
+        response.unwrap_or(Err("Cloud reconnection expired."))
+    }
+}
+
+#[derive(Clone, Default)]
+pub(super) enum IdleReconnect {
+    #[default]
+    Inactive,
+    Offered(Arc<str>),
+    Opening(Arc<str>),
+    Connected(Arc<str>),
 }
 
 #[derive(Clone)]
@@ -207,6 +264,84 @@ impl CloudClient {
 }
 
 impl CloudRequestHandle {
+    /// Generate metadata with Cloud's own account, outside its conversation command queue.
+    pub async fn generate_thread_title(
+        &self,
+        model: &str,
+        effort: Option<codex_protocol::openai_models::ReasoningEffort>,
+        prompt: String,
+        schema: serde_json::Value,
+    ) -> color_eyre::Result<String> {
+        let client = self
+            .title_client
+            .as_ref()
+            .ok_or_else(|| io::Error::other("Cloud title generation is unavailable"))?;
+        client.generate(model, effort, prompt, schema).await
+    }
+
+    /// Read the saved title even when another Cloud conversation owns the attachment.
+    pub async fn read_native_thread_name(
+        &self,
+        thread_id: &str,
+    ) -> Option<Result<Option<String>, codex_cloud_client::Error>> {
+        Some(self.native.as_ref()?.read_thread_name(thread_id).await)
+    }
+
+    /// Save an automatic name without occupying the conversation command queue.
+    pub async fn save_native_thread_name(
+        &self,
+        params: ThreadSetNameParams,
+    ) -> Option<color_eyre::Result<()>> {
+        let client = self.native.as_ref()?;
+        Some(
+            async {
+                client
+                    .set_thread_name(&params.thread_id, &params.name)
+                    .await?;
+                self.unit(CloudOperation::ThreadNameSaved(params)).await?;
+                Ok(())
+            }
+            .await,
+        )
+    }
+
+    /// Accept a quiet Attach only for the conversation displayed by the caller.
+    pub fn reconnect_idle_thread(&self, thread_id: &str) -> bool {
+        self.reconnect.send_if_modified(|state| {
+            if let IdleReconnect::Offered(root) = state
+                && root.as_ref() == thread_id
+            {
+                *state = IdleReconnect::Opening(Arc::clone(root));
+                return true;
+            }
+            false
+        })
+    }
+
+    pub async fn resume_disconnected_thread(
+        &self,
+        thread_id: String,
+        require_history: bool,
+        deadline: Instant,
+    ) -> Result<(Option<ThreadResumeResponse>, CloudRecoveryRelease), TypedRequestError> {
+        let (release, held) = oneshot::channel();
+        let response = timeout_at(
+            deadline,
+            self.send(CloudOperation::ResumeDisconnectedThread {
+                thread_id,
+                require_history,
+                deadline,
+                release: held,
+            }),
+        )
+        .await
+        .map_err(io::Error::from)
+        .and_then(std::convert::identity);
+        let settings: Option<ThreadResumeResponse> =
+            crate::decode_typed_response("thread/resume", response)?;
+        Ok((settings, CloudRecoveryRelease { release, deadline }))
+    }
+
     /// Whether a completed model read still belongs to the bound Cloud account.
     pub fn model_catalog_is_current(&self) -> bool {
         self.catalog
@@ -248,16 +383,31 @@ impl CloudRequestHandle {
         })
     }
 
-    pub(crate) async fn start_project_thread(
+    /// Discover saved environments using this Cloud connection's authenticated account.
+    pub async fn list_saved_environments(
+        &self,
+    ) -> Result<Vec<codex_cloud_client::SavedEnvironment>, codex_cloud_client::Error> {
+        let catalog = self
+            .native
+            .as_ref()
+            .ok_or(codex_cloud_client::Error::InvalidCredentials)?;
+        let environments = catalog.list_saved_environments().await?;
+        if !catalog.model_catalog_is_current() {
+            return Err(codex_cloud_client::Error::InvalidCredentials);
+        }
+        Ok(environments)
+    }
+
+    pub(crate) async fn start_thread_with_environment(
         &self,
         request_id: RequestId,
         params: codex_app_server_protocol::ThreadStartParams,
-        project: codex_cloud_client::ProjectEnvironment,
+        environment: codex_cloud_client::EnvironmentSelection,
     ) -> io::Result<RequestResult> {
-        self.send(CloudOperation::StartProjectThread {
+        self.send(CloudOperation::StartThreadWithEnvironment {
             request_id,
             params: Box::new(params),
-            project,
+            environment,
         })
         .await
     }

@@ -3,6 +3,7 @@
 //! All producers share one writer. Write failures prevent further recording and
 //! suppress the final closing event.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::BufWriter;
@@ -15,10 +16,16 @@ use std::sync::PoisonError;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use crate::payload::PayloadCapture;
+use crate::payload::capture_parts;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
 use serde::Serialize;
+#[cfg(test)]
+use serde_json::value::RawValue;
+use sha2::Digest;
+use sha2::Sha256;
 
 use crate::bundle::MANIFEST_FILE_NAME;
 use crate::bundle::PAYLOADS_DIR_NAME;
@@ -32,24 +39,183 @@ use crate::raw_event::RawTraceEvent;
 use crate::raw_event::RawTraceEventContext;
 use crate::raw_event::RawTraceEventPayload;
 
-/// Local trace bundle writer.
-///
-/// The writer appends raw events and writes payload files. It does not keep a
-/// reduced `RolloutTrace` in memory; replay is owned by the reducer.
+// Bound the number of retained prompts before their serialized sizes are known.
+const MAX_PENDING_JOBS: usize = 8;
+type WriteJob = Box<dyn FnOnce(&mut BundleWriter) + Send>;
+
+/// Logical bytes per new body, and physical bytes for all files in one recording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraceCaptureLimits {
+    /// Maximum uncompressed bytes retained from a single body or separated value.
+    pub max_payload_bytes: usize,
+    /// Maximum bytes on disk for the manifest, event log, and compressed payload shards.
+    pub max_bytes: u64,
+}
+
+impl Default for TraceCaptureLimits {
+    fn default() -> Self {
+        Self {
+            max_payload_bytes: 64 << 20,
+            max_bytes: 256 << 20,
+        }
+    }
+}
+
+/// Serializes trace writes in submission order. Explicit writes wait until their evidence is readable.
 #[derive(Debug)]
 pub struct TraceWriter {
     inner: Mutex<TraceWriterInner>,
 }
 
-#[derive(Debug)]
-struct TraceWriterInner {
-    manifest: TraceBundleManifest,
-    payloads_dir: PathBuf,
-    event_log: BufWriter<File>,
+/// Owns the bundle files until shutdown. Each body is flushed before its event is published.
+pub(crate) struct BundleWriter {
+    rollout_id: String,
+    events: BufWriter<File>,
+    shards: ShardWriter,
+    limits: TraceCaptureLimits,
+    metadata_bytes: u64,
+    event_log_full: bool,
+    items: HashMap<(RawPayloadKind, [u8; 32]), RawPayloadRef>,
+    writing_content: bool,
     next_seq: u64,
     next_payload_ordinal: u64,
-    // Preserve the first failure even when a producer cannot return it to its caller.
-    error: Option<String>,
+    // Keep the first error so explicit reads and shutdown can detect an incomplete recording.
+    failure: Arc<OnceLock<String>>,
+}
+
+impl BundleWriter {
+    fn record<T>(&mut self, write: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        check_recording(&self.failure)?;
+        if self.event_log_full {
+            bail!("trace event log reached its byte limit");
+        }
+        write(self).inspect_err(|error| {
+            if self.event_log_full {
+                return;
+            }
+            let error = format!("{error:#}");
+            tracing::error!("rollout recording failed: {error}");
+            let _ = self.failure.set(error);
+        })
+    }
+
+    pub(crate) fn write_body(
+        &mut self,
+        kind: RawPayloadKind,
+        body: &[u8],
+    ) -> Result<RawPayloadRef> {
+        let parts = capture_parts(kind, body, self.limits.max_payload_bytes)?;
+        if parts.is_empty() {
+            return self.store_body(kind, body, body.len(), Vec::new());
+        }
+        // Literal fragments preserve whitespace, key order and escapes without reserving a
+        // sentinel in user JSON. A missing child occupies exactly one original value slot.
+        let mut fragments = Vec::with_capacity(parts.len() + 1);
+        let mut children = Vec::with_capacity(parts.len());
+        let mut end = 0;
+        for (range, child_kind) in parts {
+            fragments.push(std::str::from_utf8(&body[end..range.start])?);
+            end = range.end;
+            let bytes = &body[range];
+            let key = (child_kind, Sha256::digest(bytes).into());
+            let child = if let Some(child) = self.items.get(&key) {
+                child.clone()
+            } else {
+                let child = self.write_body(child_kind, bytes)?;
+                self.items.insert(key, child.clone());
+                child
+            };
+            children.push(child);
+        }
+        fragments.push(std::str::from_utf8(&body[end..])?);
+        self.store_body(kind, &serde_json::to_vec(&fragments)?, body.len(), children)
+    }
+
+    fn store_body(
+        &mut self,
+        kind: RawPayloadKind,
+        body: &[u8],
+        original_bytes: usize,
+        parts: Vec<RawPayloadRef>,
+    ) -> Result<RawPayloadRef> {
+        // Bridge admits whole shards. Keep attachment bytes out of shards that carry
+        // message structure, so omitting a media shard cannot hide a tool or its links.
+        let content = kind == RawPayloadKind::ContentValue;
+        if self.writing_content != content {
+            self.shards.finish()?;
+            self.writing_content = content;
+        }
+        let ordinal = self.next_payload_ordinal;
+        let raw_payload_id = format!("raw_payload:{ordinal}");
+        // Layout is metadata. Applying the individual body cap to it would hide surviving siblings.
+        let retained = if parts.is_empty() {
+            body.len().min(self.limits.max_payload_bytes)
+        } else {
+            body.len()
+        };
+        // Leave room for lifecycle events and their explicit omitted-body references.
+        let reserve = (self.limits.max_bytes / 8).min(1 << 20);
+        let shard_limit = self
+            .limits
+            .max_bytes
+            .saturating_sub(self.metadata_bytes + reserve + if content { reserve } else { 0 });
+        let shard =
+            self.shards
+                .append_with_limit(&raw_payload_id, &body[..retained], shard_limit)?;
+        let capture = if shard.is_none() {
+            PayloadCapture::Omitted { original_bytes }
+        } else if retained != body.len() {
+            PayloadCapture::Truncated {
+                original_bytes,
+                retained_bytes: retained,
+            }
+        } else {
+            PayloadCapture::Complete
+        };
+        self.next_payload_ordinal += 1;
+        Ok(RawPayloadRef {
+            raw_payload_id,
+            kind,
+            shard,
+            capture,
+            parts,
+        })
+    }
+
+    fn append(
+        &mut self,
+        context: RawTraceEventContext,
+        payload: RawTraceEventPayload,
+        mut wall_time_unix_ms: i64,
+    ) -> Result<RawTraceEvent> {
+        if matches!(payload, RawTraceEventPayload::RecordingCompleted) {
+            self.shards.finish()?;
+            // Closure is observed here, after draining earlier jobs.
+            wall_time_unix_ms = unix_time_ms();
+        }
+        let event = RawTraceEvent {
+            schema_version: RAW_TRACE_EVENT_SCHEMA_VERSION,
+            seq: self.next_seq,
+            wall_time_unix_ms,
+            rollout_id: self.rollout_id.clone(),
+            thread_id: context.thread_id,
+            codex_turn_id: context.codex_turn_id,
+            payload,
+        };
+        let mut bytes = serde_json::to_vec(&event)?;
+        bytes.push(b'\n');
+        if self.metadata_bytes + self.shards.charged_bytes() + bytes.len() as u64
+            > self.limits.max_bytes
+        {
+            self.event_log_full = true;
+            bail!("trace event log reached its byte limit");
+        }
+        self.events.write_all(&bytes)?;
+        self.metadata_bytes += bytes.len() as u64;
+        self.events.flush()?;
+        self.next_seq += 1;
+        Ok(event)
+    }
 }
 
 impl TraceWriter {
@@ -60,7 +226,22 @@ impl TraceWriter {
         rollout_id: String,
         root_thread_id: AgentThreadId,
     ) -> Result<Self> {
-        let bundle_dir = bundle_dir.as_ref().to_path_buf();
+        Self::create_with_limits(
+            bundle_dir.as_ref(),
+            trace_id,
+            rollout_id,
+            root_thread_id,
+            TraceCaptureLimits::default(),
+        )
+    }
+
+    pub(crate) fn create_with_limits(
+        bundle_dir: &Path,
+        trace_id: String,
+        rollout_id: String,
+        root_thread_id: AgentThreadId,
+        limits: TraceCaptureLimits,
+    ) -> Result<Self> {
         let payloads_dir = bundle_dir.join(PAYLOADS_DIR_NAME);
         std::fs::create_dir_all(&payloads_dir)
             .with_context(|| format!("create trace payload dir {}", payloads_dir.display()))?;
@@ -68,14 +249,45 @@ impl TraceWriter {
         let started_at_unix_ms = unix_time_ms();
         let manifest =
             TraceBundleManifest::new(trace_id, rollout_id, root_thread_id, started_at_unix_ms);
+        let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
+        let metadata_bytes = manifest_bytes.len() as u64;
+        anyhow::ensure!(
+            metadata_bytes <= limits.max_bytes,
+            "manifest exceeds trace byte limit"
+        );
         let event_log_path = bundle_dir.join(RAW_EVENT_LOG_FILE_NAME);
         let event_log = OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(&event_log_path)
             .with_context(|| format!("open trace event log {}", event_log_path.display()))?;
-        write_json_file(&bundle_dir.join(MANIFEST_FILE_NAME), &manifest)?;
+        let manifest_path = bundle_dir.join(MANIFEST_FILE_NAME);
+        std::fs::write(&manifest_path, &manifest_bytes)
+            .with_context(|| format!("write trace manifest {}", manifest_path.display()))?;
 
+        let failure = Arc::new(OnceLock::new());
+        let mut bundle = BundleWriter {
+            rollout_id: manifest.rollout_id,
+            events: BufWriter::new(event_log),
+            shards: ShardWriter::new(payloads_dir),
+            limits,
+            metadata_bytes,
+            event_log_full: false,
+            items: HashMap::new(),
+            writing_content: false,
+            next_seq: 1,
+            next_payload_ordinal: 1,
+            failure: Arc::clone(&failure),
+        };
+        let (jobs, receiver) = mpsc::sync_channel::<WriteJob>(MAX_PENDING_JOBS);
+        let worker = thread::Builder::new()
+            .name("rollout-trace".into())
+            .spawn(move || {
+                for job in receiver {
+                    job(&mut bundle);
+                }
+            })
+            .context("start rollout trace writer")?;
         Ok(Self {
             inner: Mutex::new(TraceWriterInner {
                 manifest,
@@ -88,7 +300,28 @@ impl TraceWriter {
         })
     }
 
-    /// Writes a JSON payload file and returns its reduced-state reference.
+    fn submit(&self, job: impl FnOnce(&mut BundleWriter) + Send + 'static) -> Result<()> {
+        check_recording(&self.failure)?;
+        self.jobs
+            .as_ref()
+            .context("closed rollout trace writer")?
+            .send(Box::new(job))
+            .map_err(|_| anyhow!("rollout trace worker stopped"))
+    }
+
+    /// A caller that needs a published reference or a live read barrier waits in FIFO order.
+    fn call<T: Send + 'static>(
+        &self,
+        write: impl FnOnce(&mut BundleWriter) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let (reply, result) = mpsc::channel();
+        self.submit(move |bundle| {
+            let _ = reply.send(bundle.record(write));
+        })?;
+        result.recv().context("rollout trace worker stopped")?
+    }
+
+    /// Records a JSON body and returns its capture status and storage reference.
     pub fn write_json_payload(
         &self,
         kind: RawPayloadKind,
@@ -259,6 +492,10 @@ mod tests {
             }),
         )?;
         writer.append(RawTraceEventPayload::InferenceStarted {
+            prepared_prompt_payload: writer
+                .write_json_payload(RawPayloadKind::PreparedPrompt, &json!({"input": []}))?,
+            warmup_context_payload: None,
+            stripped_tool_output_ids: Vec::new(),
             inference_call_id: "inference-1".to_string(),
             thread_id: "thread-root".to_string(),
             codex_turn_id: "turn-1".to_string(),
@@ -363,3 +600,7 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "capture_tests.rs"]
+pub(crate) mod capture_tests;

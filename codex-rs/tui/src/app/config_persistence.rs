@@ -495,7 +495,9 @@ impl App {
             self.local_settings.tui.session_picker_view;
         self.chat_widget.local_settings.tui.resume_cwd = self.local_settings.tui.resume_cwd;
         self.config = config;
+        self.refresh_transcript_document_links();
         self.chat_widget.sync_plugin_mentions_config(&self.config);
+        self.chat_widget.refresh_status_line();
         Ok(())
     }
 

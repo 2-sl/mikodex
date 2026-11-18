@@ -12,7 +12,7 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
-use codex_protocol::user_input::UserInput;
+use codex_user_input::ResolvedUserInput;
 use serde_json::Value;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -238,7 +238,7 @@ pub(crate) async fn run_codex_thread_one_shot(
     config: Config,
     auth_manager: Arc<AuthManager>,
     models_manager: SharedModelsManager,
-    input: Vec<UserInput>,
+    input: Vec<ResolvedUserInput>,
     parent_session: Arc<Session>,
     parent_ctx: Arc<TurnContext>,
     cancel_token: CancellationToken,
@@ -307,7 +307,7 @@ pub(crate) async fn run_codex_thread_one_shot(
                 let _ = ops_tx
                     .send(Submission {
                         id: "shutdown".to_string(),
-                        op: Op::Shutdown {},
+                        op: Op::Shutdown.into(),
                         turn_extension_init: None,
                         trace: None,
                         parent_turn_id: None,

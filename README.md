@@ -85,11 +85,15 @@ The updater compares the published package SHA-256, so it notices when a new
 ZIP replaces the rolling release asset even if its version number is unchanged.
 It verifies the release checksum and the complete package before installing.
 Windows keeps a running executable locked, so a helper finishes the package swap
-after the update command exits and shows a confirmation dialog when it is done.
-Start Mikodex again after that confirmation. This updater currently supports the
+after the update command exits
+Start Mikodex again after the update command finishes. This updater currently supports the
 canonical Windows x64 package layout.
 
-## Resizing the sidebars
+## Resizing panes
+
+The Agent Command Center includes a horizontal divider between the session list
+and details. Drag it vertically to adjust their heights. The chosen height lasts
+for the current app session.
 
 Drag a vertical divider to resize the Agent Command Center or command reference
 sidebar. For keyboard resizing, press `Ctrl+X`, then `R` (the default

@@ -3,6 +3,8 @@ use super::turn_context::TurnContext;
 use crate::agent::host::AgentRuntimeServices;
 use crate::agent::host::AgentUsageReport;
 use crate::agent::host::UsageAccountingDecision;
+use crate::client_common::ChargePosting;
+use crate::client_common::SamplingUsage;
 use crate::context::ContextualUserFragment;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -44,13 +46,58 @@ impl Session {
         turn_id: &str,
         usage: &TokenUsage,
     ) -> CodexResult<()> {
-        match &self.agent_runtime {
-            AgentRuntimeServices::Controller => {
-                self.services
-                    .agent_control
-                    .record_usage(usage.clone())
-                    .await
+        let result = match usage.charge.posting {
+            ChargePosting::Unposted => {
+                self.record_numeric_usage(
+                    turn_id,
+                    usage.provider.as_ref(),
+                    usage.charge.hooks.charge,
+                )
+                .await
             }
+            ChargePosting::Posted => Ok(()),
+            ChargePosting::PostedTurnExhausted => Err(CodexErr::SessionBudgetExceeded),
+        };
+        if let Err(error) = &result
+            && !matches!(error.details(), CodexErrorDetails::SessionBudgetExceeded)
+        {
+            return result;
+        }
+        if let Some(message) = &usage.charge.hooks.invalid_price {
+            // A bad price does not erase successful siblings' contributions.
+            return Err(CodexErr::UsageAccountingFailed(format!(
+                "Invalid post-hook budget units: {message}"
+            )));
+        }
+        result
+    }
+
+    async fn record_numeric_usage(
+        &self,
+        turn_id: &str,
+        usage: Option<&TokenUsage>,
+        hook_charge: codex_hooks::HookCharge,
+    ) -> CodexResult<()> {
+        if usage.is_none() && hook_charge == codex_hooks::HookCharge::default() {
+            return Ok(());
+        }
+        let stop_new_work = match &self.agent_runtime {
+            AgentRuntimeServices::Controller => match self
+                .services
+                .agent_control
+                .record_usage(usage.cloned(), hook_charge)
+                .await
+            {
+                Ok(()) => false,
+                // A legacy controller can report a posted bill and a stop through this error.
+                // A native account has already chosen its own deadline action.
+                Err(error)
+                    if matches!(error.details(), CodexErrorDetails::SessionBudgetExceeded) =>
+                {
+                    self.native_rollout_budget().is_none()
+                }
+                Err(error) => return Err(CodexErr::UsageAccountingFailed(error.to_string())),
+            },
             AgentRuntimeServices::Host(services) => {
                 let Some(accounting) = &services.usage_accounting else {
                     return Ok(());
@@ -66,8 +113,11 @@ impl Session {
                         CodexErr::Fatal(format!("Host usage accounting failed: {error}"))
                     })?;
                 match decision {
-                    UsageAccountingDecision::Continue => Ok(()),
-                    UsageAccountingDecision::Exhausted => Err(CodexErr::SessionBudgetExceeded),
+                    UsageAccountingDecision::Continue => false,
+                    UsageAccountingDecision::Exhausted => true,
+                    UsageAccountingDecision::ExhaustedForTurn => {
+                        return Err(CodexErr::SessionBudgetExceeded);
+                    }
                 }
             }
         }

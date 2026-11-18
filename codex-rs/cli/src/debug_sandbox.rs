@@ -28,6 +28,7 @@ use codex_protocol::models::SandboxEnforcement;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxManager;
+use codex_sandboxing::SandboxNetwork;
 use codex_sandboxing::SandboxSelection;
 use codex_sandboxing::SandboxTransformRequest;
 use codex_sandboxing::SandboxType as SandboxBackend;
@@ -304,6 +305,19 @@ async fn run_command_under_sandbox(
         config.effective_local_windows_sandbox_type()
     };
 
+    let transparent_tcp = match sandbox_type {
+        SandboxType::Landlock { transparent_tcp } => {
+            transparent_tcp
+                || config
+                    .permissions
+                    .network
+                    .as_ref()
+                    .is_some_and(codex_core::config::NetworkProxySpec::transparent_tcp)
+        }
+        #[cfg(target_os = "macos")]
+        SandboxType::Seatbelt => false,
+        SandboxType::Windows => false,
+    };
     let sandbox = match permission_profile.enforcement() {
         SandboxEnforcement::Disabled | SandboxEnforcement::External => SandboxBackend::None,
         SandboxEnforcement::Managed => match sandbox_type {
@@ -413,11 +427,13 @@ async fn run_command_under_sandbox(
         },
         permissions: &permission_profile,
         workspace_roots: workspace_roots.as_deref(),
-        runtime_readable_paths: &[],
+        runtime_readable_paths: None,
         selection: SandboxSelection::Explicit(sandbox),
-        enforce_managed_network: network.is_some(),
-        network: network.as_ref(),
-        environment_id: None,
+        network: SandboxNetwork::new(
+            network.is_some(),
+            network.as_ref(),
+            /*environment_id*/ None,
+        ),
         sandbox_policy_cwd: &cwd,
         sandbox_exe: sandbox_exe.as_deref(),
         use_legacy_landlock,

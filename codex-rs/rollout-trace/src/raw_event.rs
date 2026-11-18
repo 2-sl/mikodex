@@ -105,6 +105,9 @@ pub enum RawTraceEventPayload {
         /// A delivery may never appear in a subsequent inference or compaction snapshot.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_message_payload: Option<RawPayloadRef>,
+        /// The accepted output has its history ID and can differ from the dispatch result.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_output_payload: Option<RawPayloadRef>,
     },
     InferenceStarted {
         inference_call_id: InferenceCallId,
@@ -113,6 +116,14 @@ pub enum RawTraceEventPayload {
         model: String,
         provider_name: String,
         request_payload: RawPayloadRef,
+        /// Core prompt before provider formatting.
+        prepared_prompt_payload: RawPayloadRef,
+        /// Full provider-formatted context only when the previous response was an untraced warmup.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        warmup_context_payload: Option<RawPayloadRef>,
+        /// History IDs removed from tool outputs on the wire, indexed within this request input.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        stripped_tool_output_ids: Vec<(usize, String)>,
     },
     InferenceCompleted {
         inference_call_id: InferenceCallId,
@@ -273,8 +284,12 @@ impl RawTraceEventPayload {
             } => Vec::new(),
             RawTraceEventPayload::HistoryItemAccepted {
                 agent_message_payload,
+                tool_output_payload,
                 ..
-            } => agent_message_payload.iter().collect(),
+            } => agent_message_payload
+                .iter()
+                .chain(tool_output_payload)
+                .collect(),
             RawTraceEventPayload::ThreadStarted {
                 metadata_payload, ..
             } => metadata_payload.iter().collect(),

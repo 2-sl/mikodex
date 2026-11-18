@@ -82,6 +82,30 @@ pub fn build_provider(
     let service_name = service_name_override.unwrap_or(originator.value.as_str());
     let runtime_metrics = config.features.enabled(Feature::RuntimeMetrics);
 
+    let managed_otel = config
+        .config_layer_stack
+        .requirements_toml()
+        .otel
+        .as_deref();
+    let helper_targets =
+        managed_otel.map(codex_config::OtelRequirementsToml::headers_helper_targets);
+    let headers_helper = config
+        .otel
+        .headers_helper
+        .as_ref()
+        .map(|command| OtelHeadersHelper {
+            command: command.clone(),
+            managed: managed_otel.is_some_and(|otel| otel.headers_helper.is_some()),
+            apply_to_logs: helper_targets.is_none_or(|targets| targets.logs),
+            apply_to_traces: helper_targets.is_none_or(|targets| targets.traces),
+            apply_to_metrics: helper_targets.is_none_or(|targets| targets.metrics),
+            refresh_interval: Duration::from_millis(
+                config
+                    .otel
+                    .headers_helper_refresh_interval_ms
+                    .map_or(DEFAULT_HEADERS_HELPER_REFRESH_INTERVAL_MS, NonZeroU64::get),
+            ),
+        });
     OtelProvider::try_new(&OtelSettings {
         http_client_factory: config.http_client_factory(),
         service_name: service_name.to_string(),

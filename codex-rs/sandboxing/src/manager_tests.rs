@@ -2,6 +2,7 @@ use super::SandboxCommand;
 #[cfg(windows)]
 use super::SandboxDirectSpawnTransformRequest;
 use super::SandboxManager;
+use super::SandboxNetwork;
 use super::SandboxSelection;
 use super::SandboxTransformRequest;
 use super::SandboxType;
@@ -117,18 +118,21 @@ fn unsandboxed_transform_preserves_foreign_cwd_and_unrestricted_file_system_poli
             },
             permissions: &permissions,
             workspace_roots: None,
-            runtime_readable_paths: &[],
+            runtime_readable_paths: None,
             selection: SandboxSelection::Explicit(SandboxType::None),
-            enforce_managed_network: false,
-            environment_id: Some("remote"),
-            network: None,
+            network: SandboxNetwork::new(
+                /*enforce_managed_network*/ false,
+                /*proxy*/ None,
+                Some("remote"),
+            ),
             sandbox_policy_cwd: &cwd_uri,
             sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })
         .expect("transform")
-        .into_command_request();
+        .into_command_request()
+        .expect("command request");
 
     assert_eq!(exec_request.cwd, cwd_uri);
     assert_eq!(exec_request.sandbox_policy_cwd, cwd_uri);
@@ -180,11 +184,9 @@ fn symlinked_workspace_reports_seatbelt_preparation_error() {
             },
             permissions: &permissions,
             workspace_roots: None,
-            runtime_readable_paths: &[],
+            runtime_readable_paths: None,
             selection: SandboxSelection::Explicit(SandboxType::MacosSeatbelt),
-            enforce_managed_network: false,
-            environment_id: None,
-            network: None,
+            network: Default::default(),
             sandbox_policy_cwd: &workspace_uri,
             sandbox_exe: None,
             use_legacy_landlock: false,
@@ -237,18 +239,17 @@ fn transform_additional_permissions_enable_network_for_external_sandbox() {
             },
             permissions: &permissions,
             workspace_roots: None,
-            runtime_readable_paths: &[],
+            runtime_readable_paths: None,
             selection: SandboxSelection::Explicit(SandboxType::None),
-            enforce_managed_network: false,
-            environment_id: None,
-            network: None,
+            network: Default::default(),
             sandbox_policy_cwd: &cwd_uri,
             sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })
         .expect("transform")
-        .into_command_request();
+        .into_command_request()
+        .expect("command request");
 
     assert_eq!(
         exec_request.permission_profile,
@@ -327,11 +328,9 @@ fn transform_additional_permissions_preserves_denied_entries() {
             },
             permissions: &permissions,
             workspace_roots: Some(roots),
-            runtime_readable_paths: &[],
+            runtime_readable_paths: Some(&[]),
             selection: SandboxSelection::Explicit(SandboxType::None),
-            enforce_managed_network: false,
-            network: None,
-            environment_id: None,
+            network: Default::default(),
             sandbox_policy_cwd: &cwd_uri,
             sandbox_exe: None,
             use_legacy_landlock: false,
@@ -340,7 +339,8 @@ fn transform_additional_permissions_preserves_denied_entries() {
         let exec_request = manager
             .transform(request)
             .expect("transform")
-            .into_command_request();
+            .into_command_request()
+            .expect("command request");
         assert_eq!(
             exec_request.permission_profile,
             PermissionProfile::from_runtime_permissions(
@@ -392,6 +392,46 @@ fn managed_mitm_ca_bundle_becomes_readable_for_restricted_sandbox() {
             },
         ])
     );
+}
+
+#[cfg(unix)]
+fn sandbox_transform_request(cwd: &PathUri, sandbox: SandboxType) -> SandboxTransformRequest<'_> {
+    SandboxTransformRequest {
+        command: SandboxCommand {
+            program: "true".into(),
+            args: Vec::new(),
+            cwd: cwd.clone(),
+            env: HashMap::new(),
+            managed_network: None,
+            additional_permissions: None,
+        },
+        permissions: &PermissionProfile::Disabled,
+        workspace_roots: None,
+        runtime_readable_paths: None,
+        selection: SandboxSelection::Explicit(sandbox),
+        network: Default::default(),
+        sandbox_policy_cwd: cwd,
+        sandbox_exe: None,
+        use_legacy_landlock: false,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn windows_token_filesystem_helper_is_unavailable_on_unix() {
+    let cwd = PathUri::from_abs_path(&AbsolutePathBuf::current_dir().expect("current dir"));
+    let request = SandboxTransformRequest {
+        permissions: &PermissionProfile::read_only(),
+        workspace_roots: Some(std::slice::from_ref(&cwd)),
+        windows_sandbox_level: WindowsSandboxLevel::RestrictedToken,
+        ..sandbox_transform_request(&cwd, SandboxType::WindowsRestrictedToken)
+    };
+
+    assert!(matches!(
+        SandboxManager::for_file_system_helpers().transform(request),
+        Err(super::SandboxTransformError::SandboxUnavailable)
+    ));
 }
 
 #[cfg(unix)]
@@ -536,8 +576,8 @@ fn transform_linux_seccomp_uses_helper_alias_when_launcher_is_not_helper_path() 
 }
 
 #[cfg(unix)]
-#[test]
-fn inherited_terminal_preserves_native_linux_helper_and_uses_its_dispatch_name()
+#[tokio::test]
+async fn inherited_terminal_preserves_native_linux_helper_and_uses_its_dispatch_name()
 -> anyhow::Result<()> {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
@@ -559,13 +599,37 @@ fn inherited_terminal_preserves_native_linux_helper_and_uses_its_dispatch_name()
         symlink("/bin/sh", &helper)?;
         let mut wrapped =
             transform_linux_seccomp_request(&helper, SandboxManager::for_inherited_terminal(&[]));
+        let facts = wrapped.integrity_request(Default::default());
+        assert_eq!(facts.launcher, Some(helper.as_os_str()));
         // Run a shell probe with the executable and argv[0] produced by the Linux backend.
+        let probe = ["-c", r#"printf '%s' "$0""#];
         wrapped.request.command.truncate(1);
         let mut child = wrapped.into_direct_command()?;
         assert_eq!(child.get_program(), helper.as_os_str());
-        let output = child.args(["-c", r#"printf '%s' "$0""#]).output()?;
+        let output = child.args(probe).output()?;
         assert!(output.status.success(), "{output:?}");
         assert_eq!(output.stdout, expected_arg0.as_bytes());
+
+        let mut wrapped = transform_linux_seccomp_request(&helper, SandboxManager::new());
+        wrapped
+            .request
+            .command
+            .splice(1.., probe.map(str::to_owned));
+        let mut child = wrapped
+            .spawn(crate::SpawnOptions {
+                tty: true,
+                stdin_open: true,
+                inherited_fds: codex_utils_pty::ChildFds::Inherited(&[]),
+            })
+            .await?;
+        let mut output = Vec::new();
+        while let Some(bytes) = child.stdout_rx.recv().await {
+            output.extend(bytes);
+        }
+        assert_eq!(
+            (child.exit_rx.await?, output),
+            (0, expected_arg0.as_bytes().to_vec())
+        );
     }
     Ok(())
 }
@@ -676,25 +740,32 @@ async fn linux_unix_socket_grant_uses_effective_managed_policy() -> anyhow::Resu
             },
             permissions: &PermissionProfile::Disabled,
             workspace_roots: None,
-            runtime_readable_paths: &[],
+            runtime_readable_paths: None,
             selection: SandboxSelection::Explicit(SandboxType::LinuxSeccomp),
-            enforce_managed_network,
-            environment_id: None,
-            network: live_proxy.then_some(&network),
+            network: SandboxNetwork::new(
+                enforce_managed_network,
+                live_proxy.then_some(&network),
+                /*environment_id*/ None,
+            ),
             sandbox_policy_cwd: &cwd_uri,
             sandbox_exe: Some(std::path::Path::new("/tmp/codex-linux-sandbox")),
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })?;
-        let transported_context = prepared
-            .into_command_request()
-            .command
+        let command = prepared.into_command_request()?.command;
+        assert_eq!(
+            command.iter().any(|arg| arg == "--transparent-tcp"),
+            transparent_tcp && expected.is_some(),
+            "{label}"
+        );
+        let transported_context = command
             .windows(2)
             .find(|args| args[0] == "--managed-network")
             .map(|args| serde_json::from_str::<ManagedNetworkSandboxContext>(&args[1]))
             .transpose()?;
         assert_eq!(transported_context, expected, "{label}");
     }
+
     Ok(())
 }
 
@@ -800,44 +871,23 @@ fn transform_for_direct_spawn_windows_materializes_inner_helper() {
     let other_workspace_root = AbsolutePathBuf::from_absolute_path(
         canonicalize(other_workspace.path()).expect("canonical other workspace"),
     )
-    .expect("absolute other workspace");
-    let workspace_roots = [cwd, other_workspace_root];
-    let manager = SandboxManager::new();
-    let prepare = |roots, policy_cwd| {
-        manager
-            .transform_for_direct_spawn_with_codex_home(
-                SandboxDirectSpawnTransformRequest {
-                    workspace_roots: workspace_roots.as_slice(),
-                    windows_sandbox_proxy_settings_mode:
-                        codex_windows_sandbox::WindowsSandboxProxySettingsMode::Preserve,
-                    transform: SandboxTransformRequest {
-                        command: SandboxCommand {
-                            program: configured_helper.as_os_str().to_owned(),
-                            args: vec!["--codex-run-as-fs-helper".to_string()],
-                            cwd: cwd_uri.clone(),
-                            env: HashMap::from([(
-                                "Path".to_string(),
-                                r"C:\Windows\System32".to_string(),
-                            )]),
-                            managed_network: None,
-                            additional_permissions: None,
-                        },
-                        permissions: &permissions,
-                        workspace_roots: roots,
-                        runtime_readable_paths: &[],
-                        selection: SandboxSelection::Explicit(SandboxType::WindowsRestrictedToken),
-                        enforce_managed_network: false,
-                        environment_id: None,
-                        network: None,
-                        sandbox_policy_cwd: policy_cwd,
-                        sandbox_exe: Some(configured_helper.as_path()),
-                        use_legacy_landlock: false,
-                        windows_sandbox_level: WindowsSandboxLevel::RestrictedToken,
-                    },
-                },
-                Some(codex_home.path()),
-            )
-            .expect("transform for direct spawn")
+    .expect("resolve helper policy");
+    let mut exec_request = super::SandboxExecRequest {
+        native_program: None,
+        sandbox_override: super::SandboxOverride::NoOverride,
+        command: vec![
+            configured_helper.display().to_string(),
+            "--codex-run-as-fs-helper".to_string(),
+        ],
+        cwd: cwd_uri.clone(),
+        sandbox_policy_cwd: cwd_uri,
+        env: HashMap::from([("Path".to_string(), r"C:\Windows\System32".to_string())]),
+        network: None,
+        network_environment_id: None,
+        sandbox: SandboxType::WindowsRestrictedToken,
+        windows_sandbox_level: WindowsSandboxLevel::RestrictedToken,
+        permission_profile: policy.permissions,
+        arg0: None,
     };
     let exec_request = prepare(/*roots*/ None, &cwd_uri);
 

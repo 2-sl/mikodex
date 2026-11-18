@@ -12,7 +12,7 @@ use crossterm::event::MouseEventKind::ScrollUp;
 use crossterm::event::MouseEventKind::Up;
 
 use super::App;
-use super::agents_overview_dock;
+use super::side_companion::SideCompanion;
 use crate::transcript_view::ViewAction;
 use crate::tui::PointerShape;
 use crate::tui::Tui;
@@ -26,6 +26,12 @@ impl App {
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER)
         {
             return None;
+        }
+        if let Some(area) = self.conversation_frame.panel_area()
+            && area.contains((mouse.column, mouse.row).into())
+            && let Some(pane) = self.sidebar()
+        {
+            return pane.visible_link_at(mouse.column, mouse.row);
         }
         let view = if let Some(panes) = self.conversation_frame.side_pane()
             && panes.passive.contains((mouse.column, mouse.row).into())
@@ -102,7 +108,14 @@ impl App {
                 TuiEvent::Mouse(mouse)
                     if matches!(mouse.kind, Drag(Left) | Up(Left) | ScrollUp | ScrollDown) =>
                 {
-                    self.refresh_owned_transcript(tui)?;
+                    if !matches!(mouse.kind, ScrollUp | ScrollDown)
+                        || !self
+                            .side_companions
+                            .get(&id)
+                            .is_some_and(SideCompanion::can_scroll_without_refresh)
+                    {
+                        self.refresh_owned_transcript(tui)?;
+                    }
                     if self
                         .conversation_frame
                         .side_pane()

@@ -216,7 +216,13 @@ fn disabled_thread_context_accepts_trace_calls_without_writing() -> anyhow::Resu
     let inference_trace =
         thread_trace.inference_trace_context("turn-1", "gpt-test", "test-provider");
     let inference_attempt = inference_trace.start_attempt();
-    inference_attempt.record_started(&serde_json::json!({ "kind": "inference" }));
+    let input = serde_json::json!({ "kind": "inference" });
+    inference_attempt.record_started(
+        serde_json::to_vec(&input)?,
+        std::sync::Arc::new(input),
+        Vec::new(),
+        || Ok(None),
+    );
     let token_usage: Option<codex_protocol::protocol::TokenUsage> = None;
     inference_attempt.record_completed("response-1", Some("req-1"), &token_usage, &[]);
     inference_attempt.record_failed("inference failed", /*upstream_request_id*/ None, &[]);

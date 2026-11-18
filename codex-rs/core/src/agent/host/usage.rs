@@ -15,11 +15,14 @@ pub struct AgentUsageReport {
     pub usage: TokenUsage,
 }
 
-/// Both decisions mean the host recorded the reported spending.
+/// Each decision means the host recorded the reported spending.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UsageAccountingDecision {
     Continue,
     Exhausted,
+    /// Fail the reporting response with `SessionBudgetExceeded` after recording its output and usage.
+    /// Background compaction fails only its job; later turns and peer threads remain eligible.
+    ExhaustedForTurn,
 }
 
 /// Replaces this runtime's `AgentControl::record_usage` and native rollout-budget reminders.

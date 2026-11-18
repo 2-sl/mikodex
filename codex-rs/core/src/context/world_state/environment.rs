@@ -38,6 +38,7 @@ pub(crate) struct EnvironmentsState {
     environments: BTreeMap<String, EnvironmentState>,
     shell_version: Option<String>,
     current_date: Option<String>,
+    current_date_is_utc: bool,
     timezone: Option<String>,
     network: Option<NetworkContext>,
     filesystem: Option<FileSystemContext>,
@@ -65,6 +66,11 @@ impl EnvironmentsState {
         Self {
             environments: environment_states(environments),
             shell_version,
+            current_date_is_utc: current_date.is_some()
+                && turn_context
+                    .config
+                    .features
+                    .enabled(Feature::UtcEnvironmentDate),
             current_date,
             timezone: turn_context
                 .timezone
@@ -103,6 +109,7 @@ impl EnvironmentsState {
             shell_version_removed: false,
             current_date: self.current_date.clone(),
             current_date_removed: false,
+            current_date_is_utc: self.current_date_is_utc,
             timezone: self.timezone.clone(),
             network: self.network.clone(),
             filesystem: self.filesystem.clone(),
@@ -138,6 +145,7 @@ impl WorldStateSection for EnvironmentsState {
                 .collect(),
             shell_version: self.shell_version.clone(),
             current_date: self.current_date.clone(),
+            current_date_is_utc: self.current_date_is_utc,
             timezone: self.timezone.clone(),
             network: self.network.as_ref().map(NetworkContext::render),
             filesystem: self.filesystem.as_ref().map(FileSystemContext::render),
@@ -152,6 +160,7 @@ impl WorldStateSection for EnvironmentsState {
             current.shell_version.is_some() && previous.shell_version.is_none();
         let turn_context_values_changed = current.shell_version != previous.shell_version
             || current.current_date != previous.current_date
+            || current.current_date_is_utc != previous.current_date_is_utc
             || current.timezone != previous.timezone
             || current.network != previous.network
             || current.filesystem != previous.filesystem;
@@ -192,6 +201,11 @@ impl WorldStateSection for EnvironmentsState {
                 current_date: self.current_date.clone(),
                 current_date_removed: self.current_date.is_none()
                     && previous.current_date.is_some(),
+                current_date_is_utc: if self.current_date.is_some() {
+                    self.current_date_is_utc
+                } else {
+                    previous.current_date_is_utc
+                },
                 timezone: self.timezone.clone(),
                 network: self.network.clone(),
                 filesystem: self.filesystem.clone(),
@@ -236,6 +250,7 @@ pub(crate) struct RenderedEnvironments {
     shell_version_removed: bool,
     current_date: Option<String>,
     current_date_removed: bool,
+    current_date_is_utc: bool,
     timezone: Option<String>,
     network: Option<NetworkContext>,
     filesystem: Option<FileSystemContext>,
@@ -304,10 +319,15 @@ impl ContextualUserFragment for RenderedEnvironments {
             let shell_version = self.shell_version.as_deref();
             push_optional_element(&mut rendered, "shell_version", shell_version);
         }
-        if self.current_date_removed {
-            rendered.push_str("  <current_date status=\"unavailable\" />\n");
+        let date_element = if self.current_date_is_utc {
+            "current_date_utc"
         } else {
-            push_optional_element(&mut rendered, "current_date", self.current_date.as_deref());
+            "current_date"
+        };
+        if self.current_date_removed {
+            rendered.push_str(&format!("  <{date_element} status=\"unavailable\" />\n"));
+        } else {
+            push_optional_element(&mut rendered, date_element, self.current_date.as_deref());
         }
         push_optional_element(&mut rendered, "timezone", self.timezone.as_deref());
         if let Some(network) = &self.network {
@@ -388,6 +408,9 @@ pub(crate) struct EnvironmentsSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     shell_version: Option<String>,
     current_date: Option<String>,
+    // Changing the time basis must emit an update even when the date stays the same.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    current_date_is_utc: bool,
     timezone: Option<String>,
     network: Option<String>,
     filesystem: Option<String>,
