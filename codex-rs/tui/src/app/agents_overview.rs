@@ -151,18 +151,21 @@ impl Drop for AgentsOverviewState {
 impl App {
     pub(super) fn handle_agents_overview_details_mouse(
         &mut self,
-        tui: &mut Tui,
+        tui: &mut crate::Tui,
         mouse: crossterm::event::MouseEvent,
-    ) -> anyhow::Result<bool> {
+    ) -> bool {
         use crossterm::event::MouseButton;
         use crossterm::event::MouseEventKind;
 
-        let viewport: Rect = tui.prepare_draw_size()?.into();
+        let viewport: Rect = match tui.prepare_draw_size() {
+            Ok(size) => size.into(),
+            Err(_) => return false,
+        };
         if let Some(drag) = self.agents_overview.details_divider_drag {
             if viewport != drag.screen {
                 self.agents_overview.cancel_details_divider_drag();
                 tui.frame_requester().schedule_frame();
-                return Ok(false);
+                return false;
             }
             match mouse.kind {
                 MouseEventKind::Drag(MouseButton::Left)
@@ -189,18 +192,18 @@ impl App {
                         view.docked_details_resizing = false;
                     }
                     tui.frame_requester().schedule_frame();
-                    return Ok(true);
+                    return true;
                 }
                 _ => {
                     self.agents_overview.cancel_details_divider_drag();
                     tui.frame_requester().schedule_frame();
-                    return Ok(false);
+                    return false;
                 }
             }
         }
 
         if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-            return Ok(false);
+            return false;
         }
         let (divider, initial_height, area_height) = {
             let view = self
@@ -215,13 +218,13 @@ impl App {
             )
         };
         let Some(divider) = divider else {
-            return Ok(false);
+            return false;
         };
         if !divider.contains((mouse.column, mouse.row).into()) {
-            return Ok(false);
+            return false;
         }
         let Some(initial_height) = initial_height else {
-            return Ok(false);
+            return false;
         };
         self.agents_overview.details_divider_drag = Some(DetailsDividerDrag {
             press_y: mouse.row,
@@ -236,8 +239,9 @@ impl App {
         view.docked_details_resizing = true;
         drop(view);
         tui.frame_requester().schedule_frame();
-        Ok(true)
+        true
     }
+
     pub(super) fn open_agents_overview(&mut self, app_server: &AppServerSession) {
         let threads = self
             .agents_overview

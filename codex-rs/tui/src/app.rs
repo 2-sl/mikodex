@@ -1156,7 +1156,7 @@ impl App {
             return Ok(AppRunControl::Continue);
         }
         if let TuiEvent::Mouse(mouse) = &event
-            && self.handle_agents_overview_details_mouse(tui, *mouse)?
+            && self.handle_agents_overview_details_mouse(tui, *mouse)
         {
             return Ok(AppRunControl::Continue);
         }
