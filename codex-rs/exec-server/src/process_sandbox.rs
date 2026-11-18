@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use crate::process_telemetry::ProcessTelemetry;
 use codex_exec_server_protocol::JSONRPCErrorError;
+use codex_exec_server_protocol::ProcessStartErrorData;
 use codex_file_system::WindowsSandboxSelection;
+use codex_network_proxy::CHILD_ONLY_CA_ENV_KEYS;
 use codex_network_proxy::CUSTOM_CA_ENV_KEYS;
 use codex_network_proxy::ManagedNetworkSandboxContext;
 use codex_network_proxy::ManagedProxyRouting;
@@ -37,7 +39,7 @@ use crate::rpc::invalid_params;
 use crate::sandbox_selection::sandbox_selection;
 
 #[tracing::instrument(
-    name = "mikodex.exec_server.process_prepare_sandbox",
+    name = "codex.exec_server.process_prepare_sandbox",
     skip_all,
     fields(process.id = trace_process_id(params.process_id.as_str())),
 )]
@@ -65,9 +67,11 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
             ));
         }
         if !codex_sandboxing::windows_mxc_available() {
-            return Err(invalid_params(
-                "native MXC is unavailable on this executor".to_owned(),
-            ));
+            return Err(
+                ProcessStartErrorData::SandboxUnavailable.attach_to(invalid_params(
+                    "native MXC is unavailable on this executor".to_owned(),
+                )),
+            );
         }
     }
     let (env, managed_network, proxy_handle) = prepare_managed_network(
@@ -200,7 +204,7 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
         })
         .map_err(|err| match err {
             codex_sandboxing::SandboxTransformError::SandboxUnavailable => {
-                invalid_params(err.to_string())
+                ProcessStartErrorData::SandboxUnavailable.attach_to(invalid_params(err.to_string()))
             }
             err => sandbox_preparation_error(err),
         })?;
@@ -211,7 +215,7 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
 async fn prepare_managed_network(
     params: &ExecParams,
     credential_brokers: &RemoteCredentialBrokerCache,
-    proxy_private_ips_via_upstream: bool,
+    runtime_paths: Option<&ExecServerRuntimeOptions>,
     env: HashMap<String, String>,
     network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
@@ -235,7 +239,7 @@ async fn prepare_managed_network(
         Ok((env, params.managed_network.clone(), None))
     };
     let Some(launch) = &params.network_proxy else {
-        return Ok((env, params.managed_network.clone(), None, None));
+        return without_executor_proxy(env);
     };
     #[cfg(windows)]
     let routing = match params
@@ -247,7 +251,7 @@ async fn prepare_managed_network(
             // Native Windows commands have no sandbox token SID for shared ingress.
             let mut native_env = env;
             codex_network_proxy::strip_managed_proxy_env(&mut native_env);
-            return Ok((native_env, params.managed_network.clone(), None, None));
+            return without_executor_proxy(native_env);
         }
         Some(WindowsSandboxSelection::Mxc) => ManagedProxyRouting::DedicatedListeners,
         Some(
@@ -274,7 +278,12 @@ async fn prepare_managed_network(
             ))
         })?
         .credential_broker;
-    state.set_proxy_private_ips_via_upstream(proxy_private_ips_via_upstream);
+    if let Some(paths) = runtime_paths {
+        state.set_proxy_private_ips_via_upstream(paths.proxy_private_ips_via_upstream);
+        if let Some(proxy) = &paths.tcp_upstream_proxy {
+            state.set_tcp_upstream_proxy(proxy.clone());
+        }
+    }
     if let Some(observer) = network_policy_audit_observer {
         state.set_policy_audit_observer(observer);
     }

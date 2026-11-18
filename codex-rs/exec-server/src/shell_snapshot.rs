@@ -16,6 +16,7 @@ use codex_network_proxy::CHILD_ONLY_CA_ENV_KEYS;
 use codex_network_proxy::NetworkProxy;
 use codex_network_proxy::PROXY_ACTIVE_ENV_KEY;
 use codex_network_proxy::RemoteCredentialBrokerCache;
+use codex_network_proxy::is_managed_mitm_ca_trust_bundle_path;
 use codex_network_proxy::strip_managed_proxy_env;
 use codex_protocol::config_types::ShellEnvironmentPolicyInherit;
 use codex_protocol::shell_environment;
@@ -109,7 +110,7 @@ pub(crate) fn validate_scope(scope_id: &str) -> Result<(), JSONRPCErrorError> {
 
 impl ShellSnapshotCache {
     #[tracing::instrument(
-        name = "mikodex.exec_server.process_prepare_shell_snapshot",
+        name = "codex.exec_server.process_prepare_shell_snapshot",
         skip_all,
         fields(
             process.id = crate::process_telemetry::trace_process_id(params.process_id.as_str()),
@@ -399,7 +400,7 @@ impl ShellSnapshotCache {
 }
 
 #[tracing::instrument(
-    name = "mikodex.exec_server.process_capture_shell_snapshot",
+    name = "codex.exec_server.process_capture_shell_snapshot",
     skip_all,
     fields(process.id = crate::process_telemetry::trace_process_id(params.process_id.as_str())),
 )]
