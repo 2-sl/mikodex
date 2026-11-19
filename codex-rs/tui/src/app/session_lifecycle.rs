@@ -1249,6 +1249,7 @@ impl App {
                 }
                 self.enqueue_primary_thread_session(started.session, started.turns)
                     .await?;
+                self.refresh_agents_overview_threads(app_server);
                 self.apply_backend_banner_fallback(app_server).await;
                 if let Some(model) = self.harness_overrides.model.as_deref()
                     && model == self.chat_widget.current_model()

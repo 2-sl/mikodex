@@ -1169,7 +1169,7 @@ See the Mikodex keymap documentation for supported actions and examples."
         }
         if start_in_agents_overview {
             app.open_agents_overview(&app_server);
-        } else {
+        } else if !pending_startup_thread_start && initial_started_thread.is_none() {
             app.refresh_agents_overview_threads(&app_server);
         }
         if let Some(entry) = startup_hooks_browser {
@@ -1202,6 +1202,7 @@ See the Mikodex keymap documentation for supported actions and examples."
                     return shutdown_on_startup_error(app_server, &mut other_backends, err).await;
                 }
             }
+            app.refresh_agents_overview_threads(&app_server);
             app.remember_attached_host_project(&app_server);
             if let Some(error) = provider_error {
                 app.chat_widget
