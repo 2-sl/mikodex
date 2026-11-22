@@ -466,6 +466,7 @@ impl App {
                     workspace_chat,
                 );
                 if drag.matches(viewport, self) && visible_split(self, tui, viewport).is_some()
+                {
                     let width = i32::from(drag.initial_width) + i32::from(drag.press)
                         - i32::from(mouse.column);
                     let total = drag.screen.width;
