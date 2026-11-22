@@ -8,18 +8,17 @@ pub use crate::guardian::prepare_review_prewarm;
 pub use crate::mcp_tool_call::conversation_history::conversation_history_tools;
 
 /// Retrieval guidance for the tools installed in a private verdict session.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum ReviewRetrieval {
     ConversationHistory,
-    Extension(&'static str),
+    Extension(std::sync::Arc<str>),
 }
 
 /// The result of checking a recorded call without executing it.
 #[derive(Debug, PartialEq, Eq)]
 pub struct GuardianReviewResult {
     pub call_id: String,
-    /// Absent when current policy or a remembered approval skips review.
-    pub assessment: Option<codex_guardian_reviewer::GuardianAssessment>,
+    pub assessment: codex_guardian_reviewer::GuardianAssessment,
 }
 
 /// Scope backend reviewer attribution to the provider-selected Guardian model.
