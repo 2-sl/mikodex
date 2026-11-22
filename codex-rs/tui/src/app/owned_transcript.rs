@@ -819,6 +819,8 @@ impl App {
             self.prompt_navigation_footer(area.width.saturating_sub(/*rhs*/ 2))
         };
         let unfocused = self.workspace_center_owns_input()
+            || self.agents_overview.sidebar_focused
+            || self.agents_overview.command_reference_focused
             || matches!(
                 self.conversation_frame.sidebar,
                 Some(sidebar::SidebarLayout::Panel {
@@ -835,16 +837,6 @@ impl App {
         // which can change the footer hint and the composer's measured height.
         let footer = view.footer_with_navigation(footer_width, motion, latest_navigation);
         let max_composer_height = side_pane::composer_height_limit(area.height);
-        let unfocused = self.workspace_center_owns_input()
-            || self.agents_overview.sidebar_focused
-            || self.agents_overview.command_reference_focused
-            || matches!(
-                self.conversation_frame.sidebar,
-                Some(sidebar::SidebarLayout::Panel {
-                    focus: PaneFocus::Sidebar,
-                    ..
-                })
-            );
         let options = |interacting| ComposerRenderOptions {
             unfocused,
             max_height: Some(max_composer_height),
