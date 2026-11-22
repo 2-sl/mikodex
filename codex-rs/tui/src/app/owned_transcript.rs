@@ -699,7 +699,6 @@ impl App {
             if let Some(center) = center {
                 self.paint_command_center(frame, center, available);
             }
-            }
             self.paint_centered_dialog(frame);
         })?;
         // A shortcut HUD is painted after the conversation and can move over a stationary pointer.
