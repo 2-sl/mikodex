@@ -64,6 +64,15 @@ impl ExecCell {
                     lines.push(result.into());
                 }
             }
+            if let Some(timestamp) = self.timestamp_for(&call.call_id) {
+                lines.push(
+                    Line::from(vec![
+                        "  \u{2022} ".dim(),
+                        crate::clock_format::format_local_timestamp(timestamp.clone()).dim(),
+                    ])
+                    .into(),
+                );
+            }
             lines.extend(self.group.details.lines_after(i + 1, width, mode));
         }
         lines

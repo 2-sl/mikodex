@@ -156,7 +156,7 @@ impl ChatWidget {
             cached_spawn_request.as_ref(),
             |thread_id| self.collab_agent_metadata(thread_id),
         ) {
-            self.on_collab_event(cell);
+            self.on_collab_event(cell.with_current_timestamp());
         }
     }
 

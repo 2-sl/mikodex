@@ -280,7 +280,16 @@ impl HistoryCell for ExecCell {
         if self.is_exploring_cell() {
             self.exploring_display_lines(width)
         } else {
-            self.command_display_lines(width)
+            let mut lines = self.command_display_lines(width);
+            if let Some(call) = self.group.calls.first()
+                && let Some(timestamp) = self.timestamp_for(&call.call_id)
+            {
+                lines.push(HyperlinkLine::new(Line::from(vec![
+                    "  \u{2022} ".dim(),
+                    crate::clock_format::format_local_timestamp(timestamp.clone()).dim(),
+                ])));
+            }
+            lines
         }
     }
 
@@ -326,6 +335,12 @@ impl HistoryCell for ExecCell {
                 };
                 let verb = if active { running } else { finished };
                 let mut label = format!("{verb} {target}");
+                if let Some(timestamp) = self.timestamp_for(&call.call_id) {
+                    label.push_str(&format!(
+                        " • {}",
+                        crate::clock_format::format_local_timestamp(timestamp.clone())
+                    ));
+                }
                 if let Some(output) = &call.output
                     && output.exit_code != 0
                 {
@@ -386,26 +401,14 @@ impl ExecCell {
                 .map(|output| output.exit_code)
                 .filter(|code| *code != 0)
         };
-        while let Some((call, remaining)) = calls.split_first() {
+        while let Some((call, _remaining)) = calls.split_first() {
             let exit_code = nonzero_exit(call);
             let reads_only = call
                 .parsed
                 .iter()
                 .all(|parsed| matches!(parsed, ParsedCommand::Read { .. }));
-            let group_len = if reads_only && exit_code.is_none() {
-                1 + remaining
-                    .iter()
-                    .take_while(|next| {
-                        nonzero_exit(next).is_none()
-                            && next
-                                .parsed
-                                .iter()
-                                .all(|parsed| matches!(parsed, ParsedCommand::Read { .. }))
-                    })
-                    .count()
-            } else {
-                1
-            };
+            // Keep each read invocation visible so its own start time can be shown.
+            let group_len = 1;
             let (group, remaining) = calls.split_at(group_len);
             calls = remaining;
 
@@ -473,6 +476,17 @@ impl ExecCell {
                         } else {
                             status.red()
                         },
+                    );
+                }
+                if index + 1 == line_count
+                    && let Some(timestamp) = self.timestamp_for(&call.call_id)
+                {
+                    line.push(
+                        format!(
+                            " • {}",
+                            crate::clock_format::format_local_timestamp(timestamp.clone())
+                        )
+                        .dim(),
                     );
                 }
                 let line = Line::from(line);

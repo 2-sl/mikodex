@@ -8,6 +8,7 @@
 //! compact display, while the expanded transcript retains its position between commands.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -97,13 +98,17 @@ pub(crate) struct ExecCall {
 #[derive(Debug)]
 pub(crate) struct ExecCell {
     pub(crate) group: ActivityGroup<ExecCall>,
+    timestamps: HashMap<String, chrono::DateTime<chrono::Local>>,
     animations_enabled: bool,
 }
 
 impl ExecCell {
     pub(crate) fn new(call: ExecCall, animations_enabled: bool) -> Self {
+        let mut timestamps = HashMap::new();
+        timestamps.insert(call.call_id.clone(), chrono::Local::now());
         Self {
             group: ActivityGroup::new(vec![call]),
+            timestamps,
             animations_enabled,
         }
     }
@@ -127,6 +132,8 @@ impl ExecCell {
             interaction_input,
         };
         if self.is_exploring_cell() && Self::is_exploring_call(&call) {
+            self.timestamps
+                .insert(call.call_id.clone(), chrono::Local::now());
             self.group.calls.push(call);
             true
         } else {
@@ -145,12 +152,30 @@ impl ExecCell {
         );
         self.group.details = newer.group.details;
         self.group.calls.append(&mut newer.group.calls);
+        self.timestamps
+            .extend(std::mem::take(&mut newer.timestamps));
         Ok(())
     }
 
     /// Preserve live clocks and pending output when a validated older page extends exploration.
     pub(crate) fn prepend(&mut self, older: Self) {
+        self.timestamps.extend(older.timestamps);
         self.group.prepend(older.group);
+    }
+
+    pub(crate) fn timestamp_for(&self, call_id: &str) -> Option<&chrono::DateTime<chrono::Local>> {
+        self.timestamps.get(call_id)
+    }
+
+    pub(crate) fn with_call_timestamp(
+        mut self,
+        call_id: &str,
+        timestamp: Option<chrono::DateTime<chrono::Local>>,
+    ) -> Self {
+        if let Some(timestamp) = timestamp {
+            self.timestamps.insert(call_id.to_owned(), timestamp);
+        }
+        self
     }
 
     /// Marks the most recently matching call as finished and returns whether a call was found.

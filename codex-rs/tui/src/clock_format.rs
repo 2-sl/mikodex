@@ -1,6 +1,7 @@
 //! Detects the TUI host's clock preference once. Unknown preferences preserve 12-hour output;
 //! detection never changes the process locale. Views capture the preference for consistent rendering.
 
+use chrono::{DateTime, Local, Utc};
 use std::sync::OnceLock;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,6 +29,18 @@ impl ClockFormat {
             Self::TwentyFourHour => "%H:%M",
         }
     }
+}
+
+pub(crate) fn format_local_timestamp(timestamp: DateTime<Local>) -> String {
+    timestamp
+        .format(ClockFormat::system().time_format())
+        .to_string()
+}
+
+pub(crate) fn local_timestamp_from_unix_ms(timestamp: Option<i64>) -> Option<DateTime<Local>> {
+    timestamp
+        .and_then(DateTime::<Utc>::from_timestamp_millis)
+        .map(|timestamp| timestamp.with_timezone(&Local))
 }
 
 #[cfg(any(target_os = "linux", target_os = "android", test))]

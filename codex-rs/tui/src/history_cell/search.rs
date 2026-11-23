@@ -42,6 +42,7 @@ pub(crate) struct WebSearchCell {
     query: String,
     action: Option<WebSearchAction>,
     start_time: Instant,
+    timestamp: String,
     completed: bool,
     animations_enabled: bool,
 }
@@ -58,9 +59,20 @@ impl WebSearchCell {
             query,
             action,
             start_time: Instant::now(),
+            timestamp: crate::clock_format::format_local_timestamp(chrono::Local::now()),
             completed: false,
             animations_enabled,
         }
+    }
+
+    pub(crate) fn with_timestamp(
+        mut self,
+        timestamp: Option<chrono::DateTime<chrono::Local>>,
+    ) -> Self {
+        if let Some(timestamp) = timestamp {
+            self.timestamp = crate::clock_format::format_local_timestamp(timestamp);
+        }
+        self
     }
 
     pub(crate) fn call_id(&self) -> &str {
@@ -120,6 +132,7 @@ impl WebSearchCell {
         if !detail.is_empty() {
             line.extend([separator.into(), detail.into()]);
         }
+        line.push_span(format!(" \u{2022} {}", self.timestamp).dim());
         line
     }
 }

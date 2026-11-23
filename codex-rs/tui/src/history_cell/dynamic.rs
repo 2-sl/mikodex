@@ -23,6 +23,7 @@ use std::sync::RwLock;
 pub(crate) struct DynamicToolCallCell {
     call_id: String,
     data: Arc<RwLock<DynamicToolCallData>>,
+    timestamp: String,
 }
 
 #[derive(Debug)]
@@ -41,7 +42,24 @@ impl DynamicToolCallCell {
         Some(Self {
             call_id,
             data: Arc::new(RwLock::new(data)),
+            timestamp: crate::clock_format::format_local_timestamp(chrono::Local::now()),
         })
+    }
+
+    pub(crate) fn with_timestamp(
+        mut self,
+        timestamp: Option<chrono::DateTime<chrono::Local>>,
+    ) -> Self {
+        if let Some(timestamp) = timestamp {
+            self.timestamp = crate::clock_format::format_local_timestamp(timestamp);
+        }
+        self
+    }
+
+    fn header(&self, data: &DynamicToolCallData) -> Line<'static> {
+        let mut line = data.header();
+        line.push_span(format!(" \u{2022} {}", self.timestamp).dim());
+        line
     }
 
     pub(crate) fn call_id(&self) -> &str {
@@ -179,7 +197,7 @@ impl HistoryCell for DynamicToolCallCell {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         vec![
-            data.header()
+            self.header(&data)
                 .to_string()
                 .trim_start_matches("• ")
                 .to_owned(),
@@ -203,7 +221,7 @@ impl HistoryCell for DynamicToolCallCell {
             .data
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut lines = vec![clipped_line(data.header(), width)];
+        let mut lines = vec![clipped_line(self.header(&data), width)];
         let (skip, output) = match &data.output {
             Some(output) if !output.is_empty() => {
                 let output = output.iter().flat_map(|text| text.split_terminator('\n'));
@@ -245,7 +263,7 @@ impl HistoryCell for DynamicToolCallCell {
             .data
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut lines = vec![data.header().into()];
+        let mut lines = vec![self.header(&data).into()];
         let args = serde_json::to_string_pretty(&data.arguments)
             .unwrap_or_else(|_| data.arguments.to_string());
         let details = raw_lines_from_source(&format!("Arguments: {args}"))
@@ -266,7 +284,7 @@ impl HistoryCell for DynamicToolCallCell {
             .data
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut lines = vec![data.header()];
+        let mut lines = vec![self.header(&data)];
         lines.extend(raw_lines_from_source(&format!(
             "Arguments: {}",
             data.arguments

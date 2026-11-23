@@ -16,12 +16,29 @@ pub(crate) struct PatchHistoryCell {
     activity_id: String,
     changes: HashMap<PathBuf, FileChange>,
     cwd: PathBuf,
+    timestamp: Option<String>,
 }
 
 impl PatchHistoryCell {
     pub(crate) fn with_activity_id(mut self, id: String) -> Self {
         self.activity_id = format!("patch:{id}");
         self
+    }
+
+    pub(crate) fn with_timestamp(
+        mut self,
+        timestamp: Option<chrono::DateTime<chrono::Local>>,
+    ) -> Self {
+        if let Some(timestamp) = timestamp {
+            self.timestamp = Some(crate::clock_format::format_local_timestamp(timestamp));
+        }
+        self
+    }
+
+    fn timestamp_line(&self) -> Option<Line<'static>> {
+        self.timestamp
+            .as_ref()
+            .map(|timestamp| Line::from(vec!["  \u{2022} ".dim(), timestamp.clone().dim()]))
     }
 }
 
@@ -45,12 +62,16 @@ impl HistoryCell for PatchHistoryCell {
     }
 
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        crate::diff_render::create_diff_preview_with_links(
+        let mut lines = crate::diff_render::create_diff_preview_with_links(
             &self.changes,
             &self.cwd,
             usize::from(width),
             super::activity_preview::DETAIL_PREVIEW_LINES,
-        )
+        );
+        if let Some(timestamp) = self.timestamp_line() {
+            lines.push(timestamp.into());
+        }
+        lines
     }
 
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -58,11 +79,15 @@ impl HistoryCell for PatchHistoryCell {
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        crate::diff_render::create_diff_summary_with_links(
+        let mut lines = crate::diff_render::create_diff_summary_with_links(
             &self.changes,
             &self.cwd,
             usize::from(width),
-        )
+        );
+        if let Some(timestamp) = self.timestamp_line() {
+            lines.push(timestamp.into());
+        }
+        lines
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -70,11 +95,11 @@ impl HistoryCell for PatchHistoryCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        plain_lines(create_diff_summary(
-            &self.changes,
-            &self.cwd,
-            RAW_DIFF_SUMMARY_WIDTH,
-        ))
+        let mut lines = create_diff_summary(&self.changes, &self.cwd, RAW_DIFF_SUMMARY_WIDTH);
+        if let Some(timestamp) = self.timestamp_line() {
+            lines.push(timestamp);
+        }
+        plain_lines(lines)
     }
 }
 /// Create a new `PendingPatch` cell that lists the file‑level summary of
@@ -88,6 +113,9 @@ pub(crate) fn new_patch_event(
         activity_id: format!("patch:{}", uuid::Uuid::new_v4()),
         changes,
         cwd: cwd.to_path_buf(),
+        timestamp: Some(crate::clock_format::format_local_timestamp(
+            chrono::Local::now(),
+        )),
     }
 }
 
@@ -95,6 +123,9 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PatchFailureCell {
     PatchFailureCell {
         activity_id: format!("patch-failure:{}", uuid::Uuid::new_v4()),
         stderr,
+        timestamp: Some(crate::clock_format::format_local_timestamp(
+            chrono::Local::now(),
+        )),
     }
 }
 
@@ -103,6 +134,25 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PatchFailureCell {
 pub(crate) struct PatchFailureCell {
     activity_id: String,
     stderr: String,
+    timestamp: Option<String>,
+}
+
+impl PatchFailureCell {
+    pub(crate) fn with_timestamp(
+        mut self,
+        timestamp: Option<chrono::DateTime<chrono::Local>>,
+    ) -> Self {
+        if let Some(timestamp) = timestamp {
+            self.timestamp = Some(crate::clock_format::format_local_timestamp(timestamp));
+        }
+        self
+    }
+
+    fn timestamp_line(&self) -> Option<Line<'static>> {
+        self.timestamp
+            .as_ref()
+            .map(|timestamp| Line::from(vec!["  \u{2022} ".dim(), timestamp.clone().dim()]))
+    }
 }
 
 impl HistoryCell for PatchFailureCell {
@@ -142,12 +192,18 @@ impl HistoryCell for PatchFailureCell {
                 .initial_indent("  └ ".dim().into())
                 .subsequent_indent("    ".into()),
         ));
+        if let Some(timestamp) = self.timestamp_line() {
+            lines.push(timestamp.into());
+        }
         lines
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
         let mut lines = vec![Line::from("Failed to apply patch")];
         lines.extend(plain_lines(ansi_escape(&self.stderr).lines));
+        if let Some(timestamp) = self.timestamp_line() {
+            lines.push(timestamp);
+        }
         lines
     }
 
@@ -173,6 +229,9 @@ impl HistoryCell for PatchFailureCell {
             lines.extend(output.lines);
         }
 
+        if let Some(timestamp) = self.timestamp_line() {
+            lines.push(timestamp);
+        }
         lines
     }
 }
@@ -183,9 +242,20 @@ pub(crate) struct ViewImageHistoryCell {
     filename: String,
     path_label: String,
     link: Option<TerminalHyperlink>,
+    timestamp: Option<String>,
 }
 
 impl ViewImageHistoryCell {
+    pub(crate) fn with_timestamp(
+        mut self,
+        timestamp: Option<chrono::DateTime<chrono::Local>>,
+    ) -> Self {
+        if let Some(timestamp) = timestamp {
+            self.timestamp = Some(crate::clock_format::format_local_timestamp(timestamp));
+        }
+        self
+    }
+
     pub(crate) fn link_local_image(&mut self) {
         let start = "Viewed image ".len();
         let end = start + crate::width::display_width(&self.path_label);
@@ -197,7 +267,10 @@ impl ViewImageHistoryCell {
 
 impl HistoryCell for ViewImageHistoryCell {
     fn tool_call_labels(&self) -> Vec<String> {
-        vec![format!("Viewed image {}", self.path_label)]
+        vec![match &self.timestamp {
+            Some(timestamp) => format!("Viewed image {} • {timestamp}", self.path_label),
+            None => format!("Viewed image {}", self.path_label),
+        }]
     }
 
     fn activity_ids(&self) -> Vec<String> {
@@ -215,15 +288,19 @@ impl HistoryCell for ViewImageHistoryCell {
             self.filename.replace(['\n', '\r', '\t'], " ").dim(),
         ]
         .into();
-        vec![truncate_line_with_ellipsis_if_overflow(
+        let mut lines = vec![truncate_line_with_ellipsis_if_overflow(
             line,
             width as usize,
-        )]
+        )];
+        if let Some(timestamp) = &self.timestamp {
+            lines.push(Line::from(vec!["  • ".dim(), timestamp.clone().dim()]));
+        }
+        lines
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines = plain_hyperlink_lines(self.display_lines(width));
-        if let ([line], Some(link)) = (lines.as_mut_slice(), &self.link) {
+        if let (Some(line), Some(link)) = (lines.first_mut(), &self.link) {
             let start = crate::width::display_width("• Viewed image ");
             if start < line.width() {
                 line.hyperlinks.push(link.with_columns(start..line.width()));
@@ -271,6 +348,9 @@ pub(crate) fn new_view_image_tool_call(
         filename,
         path_label: path.into_string(),
         link: None,
+        timestamp: Some(crate::clock_format::format_local_timestamp(
+            chrono::Local::now(),
+        )),
     }
 }
 
@@ -300,6 +380,9 @@ pub(crate) fn new_image_generation_call(
         lines,
         failed,
         saved_path: saved_path.filter(|_| status == "completed"),
+        timestamp: Some(crate::clock_format::format_local_timestamp(
+            chrono::Local::now(),
+        )),
     }
 }
 
@@ -309,9 +392,20 @@ pub(crate) struct ImageGenerationHistoryCell {
     failed: bool,
     lines: Vec<Line<'static>>,
     saved_path: Option<AbsolutePathBuf>,
+    timestamp: Option<String>,
 }
 
 impl ImageGenerationHistoryCell {
+    pub(crate) fn with_timestamp(
+        mut self,
+        timestamp: Option<chrono::DateTime<chrono::Local>>,
+    ) -> Self {
+        if let Some(timestamp) = timestamp {
+            self.timestamp = Some(crate::clock_format::format_local_timestamp(timestamp));
+        }
+        self
+    }
+
     /// A completed generation with a saved artifact belongs to the answer.
     pub(crate) fn is_turn_output(&self) -> bool {
         self.saved_path.is_some()
@@ -351,14 +445,21 @@ impl HistoryCell for ImageGenerationHistoryCell {
     }
 
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
-        self.lines.clone()
+        let mut lines = self.lines.clone();
+        if let Some(timestamp) = &self.timestamp {
+            lines.push(Line::from(vec!["  • ".dim(), timestamp.clone().dim()]));
+        }
+        lines
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines =
             crate::terminal_hyperlinks::plain_hyperlink_lines(self.display_lines(width));
+        let saved_line_index = lines
+            .len()
+            .saturating_sub(1 + usize::from(self.timestamp.is_some()));
         if let Some(path) = &self.saved_path
-            && let Some(line) = lines.last_mut()
+            && let Some(line) = lines.get_mut(saved_line_index)
             && let Some(span) = line.line.spans.last()
         {
             let width = crate::line_truncation::span_width(span);
@@ -387,7 +488,11 @@ impl HistoryCell for ImageGenerationHistoryCell {
                 location: None,
             },
         ));
-        vec![line]
+        let mut lines = vec![line];
+        if let Some(timestamp) = &self.timestamp {
+            lines.push(Line::from(vec!["  • ".dim(), timestamp.clone().dim()]).into());
+        }
+        lines
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -395,7 +500,11 @@ impl HistoryCell for ImageGenerationHistoryCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        plain_lines(self.lines.clone())
+        let mut lines = self.lines.clone();
+        if let Some(timestamp) = &self.timestamp {
+            lines.push(Line::from(vec!["  • ".dim(), timestamp.clone().dim()]));
+        }
+        plain_lines(lines)
     }
 
     fn image_path(&self) -> Option<AbsolutePathBuf> {

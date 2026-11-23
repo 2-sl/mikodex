@@ -8,8 +8,13 @@ use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::Turn;
 use std::sync::Arc;
 
-pub(super) fn append(group: &mut ComputerActivityCell, call: McpHistory) {
-    let cell = McpToolCallCell::new(call.id, call.invocation, /*animations_enabled*/ false);
+pub(super) fn append(
+    group: &mut ComputerActivityCell,
+    call: McpHistory,
+    timestamp: Option<chrono::DateTime<chrono::Local>>,
+) {
+    let cell = McpToolCallCell::new(call.id, call.invocation, /*animations_enabled*/ false)
+        .with_timestamp(timestamp);
     group.complete(cell, call.duration, call.result);
 }
 
@@ -99,7 +104,11 @@ pub(super) fn completed_group(
         if !call.invocation.is_computer_activity() {
             return None;
         }
-        append(group.get_or_insert_default(), call);
+        append(
+            group.get_or_insert_default(),
+            call,
+            crate::clock_format::local_timestamp_from_unix_ms(entry.started_at_ms),
+        );
     }
     group
 }

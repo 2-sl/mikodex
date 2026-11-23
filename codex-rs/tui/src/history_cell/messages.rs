@@ -609,6 +609,7 @@ pub(crate) struct AgentMarkdownCell {
     pub(crate) phase: Option<codex_protocol::models::MessagePhase>,
     markdown_source: String,
     copy_source: Option<String>,
+    timestamp: Option<String>,
     cwd: PathBuf,
     inline_visualization_context: Option<crate::inline_visualization::InlineVisualizationContext>,
     rendered_lines: Option<MarkdownRenderCache>,
@@ -632,6 +633,18 @@ impl AgentMarkdownCell {
     pub(crate) fn with_copy_source(mut self, source: Option<String>) -> Self {
         self.copy_source = source;
         self
+    }
+
+    pub(crate) fn with_timestamp(
+        mut self,
+        timestamp: Option<chrono::DateTime<chrono::Local>>,
+    ) -> Self {
+        self.timestamp = timestamp.map(crate::clock_format::format_local_timestamp);
+        self
+    }
+
+    pub(crate) fn with_current_timestamp(self) -> Self {
+        self.with_timestamp(Some(chrono::Local::now()))
     }
 
     /// Create a finalized source-backed assistant message cell.
@@ -662,6 +675,7 @@ impl AgentMarkdownCell {
             interrupted_item: None,
             markdown_source,
             copy_source: None,
+            timestamp: None,
             phase: None,
             cwd: cwd.to_path_buf(),
             inline_visualization_context,
@@ -761,7 +775,14 @@ impl AgentMarkdownCell {
                     markdown,
                 )
             };
-            normalize_whitespace_only_hyperlink_lines(lines)
+            let mut lines = normalize_whitespace_only_hyperlink_lines(lines);
+            if let Some(timestamp) = &self.timestamp {
+                lines.push(HyperlinkLine::new(Line::from(vec![
+                    "  \u{2022} ".dim(),
+                    timestamp.clone().dim(),
+                ])));
+            }
+            lines
         };
 
         if let Some(rendered_lines) = &self.rendered_lines {

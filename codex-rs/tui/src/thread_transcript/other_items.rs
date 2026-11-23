@@ -15,7 +15,11 @@ use ratatui::style::Stylize as _;
 use std::path::Path;
 use std::sync::Arc;
 
-pub(super) fn cells(item: ThreadItemPayload, cwd: &Path) -> TranscriptCells {
+pub(super) fn cells(
+    item: ThreadItemPayload,
+    cwd: &Path,
+    timestamp: Option<chrono::DateTime<chrono::Local>>,
+) -> TranscriptCells {
     let mut cells: TranscriptCells = Vec::new();
     match item {
         ThreadItemPayload::FileChange {
@@ -26,14 +30,16 @@ pub(super) fn cells(item: ThreadItemPayload, cwd: &Path) -> TranscriptCells {
             PatchApplyStatus::Completed if !changes.is_empty() => {
                 cells.push(Arc::new(
                     history_cell::new_patch_event(file_update_changes_to_display(changes), cwd)
-                        .with_activity_id(id),
+                        .with_activity_id(id)
+                        .with_timestamp(timestamp.clone()),
                 ));
             }
             PatchApplyStatus::Completed => {}
             PatchApplyStatus::Failed => {
-                cells.push(Arc::new(history_cell::new_patch_apply_failure(
-                    String::new(),
-                )));
+                cells.push(Arc::new(
+                    history_cell::new_patch_apply_failure(String::new())
+                        .with_timestamp(timestamp.clone()),
+                ));
             }
             PatchApplyStatus::InProgress | PatchApplyStatus::Declined => {
                 let message = if status == PatchApplyStatus::Declined {
@@ -47,16 +53,17 @@ pub(super) fn cells(item: ThreadItemPayload, cwd: &Path) -> TranscriptCells {
                 )));
             }
         },
-        ThreadItemPayload::WebSearch(item) => {
-            cells.push(Arc::new(history_cell::new_web_search_call(
+        ThreadItemPayload::WebSearch(item) => cells.push(Arc::new(
+            history_cell::new_web_search_call(
                 item.id,
                 item.query,
                 item.action.unwrap_or(WebSearchAction::Other),
-            )))
-        }
-        ThreadItemPayload::ImageView { id, path } => {
-            cells.push(Arc::new(history_cell::new_view_image_tool_call(id, path)))
-        }
+            )
+            .with_timestamp(timestamp.clone()),
+        )),
+        ThreadItemPayload::ImageView { id, path } => cells.push(Arc::new(
+            history_cell::new_view_image_tool_call(id, path).with_timestamp(timestamp.clone()),
+        )),
         ThreadItemPayload::ImageGeneration(item)
             if !matches!(item.status.as_str(), "completed" | "failed") =>
         {
@@ -71,12 +78,15 @@ pub(super) fn cells(item: ThreadItemPayload, cwd: &Path) -> TranscriptCells {
             )));
         }
         ThreadItemPayload::ImageGeneration(item) => {
-            cells.push(Arc::new(history_cell::new_image_generation_call(
-                item.id,
-                &item.status,
-                item.revised_prompt,
-                item.saved_path,
-            )));
+            cells.push(Arc::new(
+                history_cell::new_image_generation_call(
+                    item.id,
+                    &item.status,
+                    item.revised_prompt,
+                    item.saved_path,
+                )
+                .with_timestamp(timestamp.clone()),
+            ));
         }
         item @ ThreadItemPayload::CollabAgentToolCall { .. } => {
             if let Some(cell) = multi_agents::tool_call_history_cell(
@@ -84,7 +94,7 @@ pub(super) fn cells(item: ThreadItemPayload, cwd: &Path) -> TranscriptCells {
                 /*cached_spawn_request*/ None,
                 |_| multi_agents::AgentMetadata::default(),
             ) {
-                cells.push(Arc::new(cell));
+                cells.push(Arc::new(cell.with_timestamp(timestamp.clone())));
             }
         }
         item @ ThreadItemPayload::SubAgentActivity { .. } => {
@@ -127,7 +137,7 @@ pub(super) fn cells(item: ThreadItemPayload, cwd: &Path) -> TranscriptCells {
         }
         item @ ThreadItemPayload::DynamicToolCall { .. } => {
             if let Some(cell) = history_cell::DynamicToolCallCell::from_item(item) {
-                cells.push(Arc::new(cell));
+                cells.push(Arc::new(cell.with_timestamp(timestamp.clone())));
             }
         }
         ThreadItemPayload::UserMessage { .. }

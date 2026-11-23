@@ -65,7 +65,9 @@ pub(super) fn completed_group(items: &[codex_app_server_protocol::ThreadItem]) -
         if matches!(item, ThreadItemPayload::Reasoning { .. }) {
             continue;
         }
-        let call = CommandHistory::from_item(item.clone())?.into_cell();
+        let call = CommandHistory::from_item(item.clone())?.into_cell(
+            crate::clock_format::local_timestamp_from_unix_ms(entry.started_at_ms),
+        );
         if !call.is_exploring_cell() {
             return None;
         }

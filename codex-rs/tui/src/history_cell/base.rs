@@ -21,7 +21,11 @@ impl PlainHistoryCell {
     }
 
     pub(crate) fn with_tool_label(self, label: String) -> LabeledToolCell {
-        LabeledToolCell { cell: self, label }
+        LabeledToolCell {
+            cell: self,
+            label,
+            timestamp: None,
+        }
     }
 }
 
@@ -39,27 +43,67 @@ impl HistoryCell for PlainHistoryCell {
 pub(crate) struct LabeledToolCell<C = PlainHistoryCell> {
     cell: C,
     label: String,
+    timestamp: Option<String>,
+}
+
+impl<C: HistoryCell> LabeledToolCell<C> {
+    pub(crate) fn with_timestamp(
+        mut self,
+        timestamp: Option<chrono::DateTime<chrono::Local>>,
+    ) -> Self {
+        self.timestamp = timestamp.map(crate::clock_format::format_local_timestamp);
+        self
+    }
+
+    pub(crate) fn with_current_timestamp(self) -> Self {
+        self.with_timestamp(Some(chrono::Local::now()))
+    }
+
+    fn timestamp_line(&self) -> Option<Line<'static>> {
+        self.timestamp
+            .as_ref()
+            .map(|timestamp| Line::from(vec!["  \u{2022} ".dim(), timestamp.clone().dim()]))
+    }
 }
 
 impl<C: HistoryCell> HistoryCell for LabeledToolCell<C> {
     fn tool_call_labels(&self) -> Vec<String> {
-        vec![self.label.clone()]
+        vec![match &self.timestamp {
+            Some(timestamp) => format!("{} \u{2022} {timestamp}", self.label),
+            None => self.label.clone(),
+        }]
     }
 
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        self.cell.display_lines(width)
+        let mut lines = self.cell.display_lines(width);
+        if let Some(timestamp) = self.timestamp_line() {
+            lines.push(timestamp);
+        }
+        lines
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.cell.display_hyperlink_lines(width)
+        let mut lines = self.cell.display_hyperlink_lines(width);
+        if let Some(timestamp) = self.timestamp_line() {
+            lines.push(timestamp.into());
+        }
+        lines
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.cell.transcript_hyperlink_lines(width)
+        let mut lines = self.cell.transcript_hyperlink_lines(width);
+        if let Some(timestamp) = self.timestamp_line() {
+            lines.push(timestamp.into());
+        }
+        lines
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        self.cell.raw_lines()
+        let mut lines = self.cell.raw_lines();
+        if let Some(timestamp) = self.timestamp_line() {
+            lines.push(timestamp);
+        }
+        lines
     }
 }
 
@@ -90,7 +134,11 @@ impl WebHyperlinkHistoryCell {
     }
 
     pub(crate) fn with_tool_label(self, label: String) -> LabeledToolCell<Self> {
-        LabeledToolCell { cell: self, label }
+        LabeledToolCell {
+            cell: self,
+            label,
+            timestamp: None,
+        }
     }
 }
 

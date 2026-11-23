@@ -127,6 +127,15 @@ impl ExecCell {
                 lines.push(clipped_line(Line::from("  └ (no output)".dim()), width));
             }
         }
+        if let Some(timestamp) = self.timestamp_for(&call.call_id) {
+            lines.push(clipped_line(
+                Line::from(vec![
+                    "  \u{2022} ".dim(),
+                    crate::clock_format::format_local_timestamp(timestamp.clone()).dim(),
+                ]),
+                width,
+            ));
+        }
         lines
     }
 }

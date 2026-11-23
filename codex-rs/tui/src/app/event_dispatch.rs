@@ -1250,7 +1250,7 @@ impl App {
                 scrollback_reflow,
                 deferred_history_cell,
             } => {
-                let mut cell = history_cell::AgentMarkdownCell::new_with_inline_visualizations(source, &cwd, inline_visualization_context).with_copy_source(copy_source);
+                let mut cell = history_cell::AgentMarkdownCell::new_with_inline_visualizations(source, &cwd, inline_visualization_context).with_copy_source(copy_source).with_current_timestamp();
                 cell.interrupted_item = interrupted_item;
                 cell.phase = phase;
                 self.handle_consolidate_agent_message(

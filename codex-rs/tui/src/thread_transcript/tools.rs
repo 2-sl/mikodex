@@ -184,17 +184,19 @@ impl CommandHistory {
         })
     }
 
-    pub(crate) fn into_cell(self) -> ExecCell {
+    pub(crate) fn into_cell(self, timestamp: Option<chrono::DateTime<chrono::Local>>) -> ExecCell {
         let output = CommandOutput::new(self.exit_code, self.aggregated_output);
+        let id = self.id.clone();
         let mut cell = new_active_exec_command(
-            self.id.clone(),
+            id.clone(),
             self.command,
             self.parsed,
             self.source,
             /*interaction_input*/ None,
             /*animations_enabled*/ false,
-        );
-        let completed = cell.complete_call(&self.id, output, self.duration);
+        )
+        .with_call_timestamp(&id, timestamp);
+        let completed = cell.complete_call(&id, output, self.duration);
         debug_assert!(completed, "new exec cell should contain {}", self.id);
         cell
     }
@@ -253,9 +255,13 @@ impl McpHistory {
         })
     }
 
-    pub(crate) fn into_cell(self) -> McpToolCallCell {
+    pub(crate) fn into_cell(
+        self,
+        timestamp: Option<chrono::DateTime<chrono::Local>>,
+    ) -> McpToolCallCell {
         let mut cell =
-            new_active_mcp_tool_call(self.id, self.invocation, /*animations_enabled*/ false);
+            new_active_mcp_tool_call(self.id, self.invocation, /*animations_enabled*/ false)
+                .with_timestamp(timestamp);
         cell.complete(self.duration, self.result);
         cell
     }

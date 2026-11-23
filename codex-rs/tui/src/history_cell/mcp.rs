@@ -53,6 +53,7 @@ pub(crate) struct McpToolCallCell {
     call_id: String,
     invocation: McpInvocation,
     start_time: Instant,
+    timestamp: String,
     duration: Option<Duration>,
     result: Option<Result<McpToolResult, String>>,
     animations_enabled: bool,
@@ -96,10 +97,21 @@ impl McpToolCallCell {
             call_id,
             invocation,
             start_time: Instant::now(),
+            timestamp: crate::clock_format::format_local_timestamp(chrono::Local::now()),
             duration: None,
             result: None,
             animations_enabled,
         }
+    }
+
+    pub(crate) fn with_timestamp(
+        mut self,
+        timestamp: Option<chrono::DateTime<chrono::Local>>,
+    ) -> Self {
+        if let Some(timestamp) = timestamp {
+            self.timestamp = crate::clock_format::format_local_timestamp(timestamp);
+        }
+        self
     }
 
     pub(crate) fn call_id(&self) -> &str {
@@ -188,6 +200,7 @@ impl McpToolCallCell {
             compact_spans.extend([header_text.bold(), " ".into()]);
         }
         let mut compact_header = Line::from(compact_spans.clone());
+        compact_header.push_span(format!(" \u{2022} {}", self.timestamp).dim());
         let reserved = compact_header.width();
 
         let inline_invocation =
