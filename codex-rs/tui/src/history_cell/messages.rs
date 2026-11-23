@@ -776,11 +776,18 @@ impl AgentMarkdownCell {
                 )
             };
             let mut lines = normalize_whitespace_only_hyperlink_lines(lines);
+            while lines.last().is_some_and(|line| {
+                line.line
+                    .spans
+                    .iter()
+                    .all(|span| span.content.trim().is_empty())
+            }) {
+                lines.pop();
+            }
             if let Some(timestamp) = &self.timestamp {
-                lines.push(HyperlinkLine::new(Line::from(vec![
-                    "  \u{2022} ".dim(),
-                    timestamp.clone().dim(),
-                ])));
+                crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(
+                    &mut lines, timestamp,
+                );
             }
             lines
         };

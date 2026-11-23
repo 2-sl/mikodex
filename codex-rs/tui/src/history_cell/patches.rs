@@ -34,12 +34,6 @@ impl PatchHistoryCell {
         }
         self
     }
-
-    fn timestamp_line(&self) -> Option<Line<'static>> {
-        self.timestamp
-            .as_ref()
-            .map(|timestamp| Line::from(vec!["  \u{2022} ".dim(), timestamp.clone().dim()]))
-    }
 }
 
 impl HistoryCell for PatchHistoryCell {
@@ -68,8 +62,8 @@ impl HistoryCell for PatchHistoryCell {
             usize::from(width),
             super::activity_preview::DETAIL_PREVIEW_LINES,
         );
-        if let Some(timestamp) = self.timestamp_line() {
-            lines.push(timestamp.into());
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(&mut lines, timestamp);
         }
         lines
     }
@@ -84,8 +78,8 @@ impl HistoryCell for PatchHistoryCell {
             &self.cwd,
             usize::from(width),
         );
-        if let Some(timestamp) = self.timestamp_line() {
-            lines.push(timestamp.into());
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(&mut lines, timestamp);
         }
         lines
     }
@@ -96,8 +90,8 @@ impl HistoryCell for PatchHistoryCell {
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
         let mut lines = create_diff_summary(&self.changes, &self.cwd, RAW_DIFF_SUMMARY_WIDTH);
-        if let Some(timestamp) = self.timestamp_line() {
-            lines.push(timestamp);
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_lines(&mut lines, timestamp);
         }
         plain_lines(lines)
     }
@@ -147,12 +141,6 @@ impl PatchFailureCell {
         }
         self
     }
-
-    fn timestamp_line(&self) -> Option<Line<'static>> {
-        self.timestamp
-            .as_ref()
-            .map(|timestamp| Line::from(vec!["  \u{2022} ".dim(), timestamp.clone().dim()]))
-    }
 }
 
 impl HistoryCell for PatchFailureCell {
@@ -167,6 +155,19 @@ impl HistoryCell for PatchFailureCell {
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines = self.transcript_hyperlink_lines(width);
         lines.truncate(1 + super::activity_preview::DETAIL_PREVIEW_LINES);
+        if let Some(timestamp) = &self.timestamp {
+            let suffix = format!(" \u{2022} {timestamp}");
+            if let Some(last) = lines.last_mut()
+                && last
+                    .line
+                    .spans
+                    .last()
+                    .is_some_and(|span| span.content.ends_with(&suffix))
+            {
+                last.line.spans.pop();
+            }
+            crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(&mut lines, timestamp);
+        }
         lines
             .into_iter()
             .map(|line| super::activity_preview::clipped_line(line.line, width))
@@ -192,8 +193,8 @@ impl HistoryCell for PatchFailureCell {
                 .initial_indent("  └ ".dim().into())
                 .subsequent_indent("    ".into()),
         ));
-        if let Some(timestamp) = self.timestamp_line() {
-            lines.push(timestamp.into());
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(&mut lines, timestamp);
         }
         lines
     }
@@ -201,8 +202,8 @@ impl HistoryCell for PatchFailureCell {
     fn raw_lines(&self) -> Vec<Line<'static>> {
         let mut lines = vec![Line::from("Failed to apply patch")];
         lines.extend(plain_lines(ansi_escape(&self.stderr).lines));
-        if let Some(timestamp) = self.timestamp_line() {
-            lines.push(timestamp);
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_lines(&mut lines, timestamp);
         }
         lines
     }
@@ -229,8 +230,8 @@ impl HistoryCell for PatchFailureCell {
             lines.extend(output.lines);
         }
 
-        if let Some(timestamp) = self.timestamp_line() {
-            lines.push(timestamp);
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_lines(&mut lines, timestamp);
         }
         lines
     }
@@ -288,12 +289,17 @@ impl HistoryCell for ViewImageHistoryCell {
             self.filename.replace(['\n', '\r', '\t'], " ").dim(),
         ]
         .into();
+        let timestamp_width = self
+            .timestamp
+            .as_ref()
+            .map(|timestamp| crate::width::display_width(&format!(" \u{2022} {timestamp}")))
+            .unwrap_or_default();
         let mut lines = vec![truncate_line_with_ellipsis_if_overflow(
             line,
-            width as usize,
+            (width as usize).saturating_sub(timestamp_width),
         )];
         if let Some(timestamp) = &self.timestamp {
-            lines.push(Line::from(vec!["  • ".dim(), timestamp.clone().dim()]));
+            crate::terminal_hyperlinks::append_timestamp_to_lines(&mut lines, timestamp);
         }
         lines
     }
@@ -302,8 +308,14 @@ impl HistoryCell for ViewImageHistoryCell {
         let mut lines = plain_hyperlink_lines(self.display_lines(width));
         if let (Some(line), Some(link)) = (lines.first_mut(), &self.link) {
             let start = crate::width::display_width("• Viewed image ");
-            if start < line.width() {
-                line.hyperlinks.push(link.with_columns(start..line.width()));
+            let timestamp_width = self
+                .timestamp
+                .as_ref()
+                .map(|timestamp| crate::width::display_width(&format!(" \u{2022} {timestamp}")))
+                .unwrap_or_default();
+            let end = line.width().saturating_sub(timestamp_width);
+            if start < end {
+                line.hyperlinks.push(link.with_columns(start..end));
             }
         }
         lines
@@ -322,16 +334,24 @@ impl HistoryCell for ViewImageHistoryCell {
             self.path_label.clone().dim(),
         ]));
         line.hyperlinks.extend(self.link.iter().cloned());
-        adaptive_wrap_hyperlink_lines(
+        let mut lines = adaptive_wrap_hyperlink_lines(
             &[line],
             RtOptions::new(usize::from(width))
                 .initial_indent("• ".dim().into())
                 .subsequent_indent("  ".into()),
-        )
+        );
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(&mut lines, timestamp);
+        }
+        lines
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        vec![Line::from(format!("Viewed image {}", self.path_label))]
+        let mut lines = vec![Line::from(format!("Viewed image {}", self.path_label))];
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_lines(&mut lines, timestamp);
+        }
+        lines
     }
 }
 
@@ -447,17 +467,14 @@ impl HistoryCell for ImageGenerationHistoryCell {
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         let mut lines = self.lines.clone();
         if let Some(timestamp) = &self.timestamp {
-            lines.push(Line::from(vec!["  • ".dim(), timestamp.clone().dim()]));
+            crate::terminal_hyperlinks::append_timestamp_to_lines(&mut lines, timestamp);
         }
         lines
     }
 
-    fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let mut lines =
-            crate::terminal_hyperlinks::plain_hyperlink_lines(self.display_lines(width));
-        let saved_line_index = lines
-            .len()
-            .saturating_sub(1 + usize::from(self.timestamp.is_some()));
+    fn display_hyperlink_lines(&self, _width: u16) -> Vec<HyperlinkLine> {
+        let mut lines = crate::terminal_hyperlinks::plain_hyperlink_lines(self.lines.clone());
+        let saved_line_index = lines.len().saturating_sub(1);
         if let Some(path) = &self.saved_path
             && let Some(line) = lines.get_mut(saved_line_index)
             && let Some(span) = line.line.spans.last()
@@ -472,6 +489,9 @@ impl HistoryCell for ImageGenerationHistoryCell {
                         location: None,
                     },
                 ));
+        }
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(&mut lines, timestamp);
         }
         lines
     }
@@ -490,7 +510,7 @@ impl HistoryCell for ImageGenerationHistoryCell {
         ));
         let mut lines = vec![line];
         if let Some(timestamp) = &self.timestamp {
-            lines.push(Line::from(vec!["  • ".dim(), timestamp.clone().dim()]).into());
+            crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(&mut lines, timestamp);
         }
         lines
     }
@@ -502,7 +522,7 @@ impl HistoryCell for ImageGenerationHistoryCell {
     fn raw_lines(&self) -> Vec<Line<'static>> {
         let mut lines = self.lines.clone();
         if let Some(timestamp) = &self.timestamp {
-            lines.push(Line::from(vec!["  • ".dim(), timestamp.clone().dim()]));
+            crate::terminal_hyperlinks::append_timestamp_to_lines(&mut lines, timestamp);
         }
         plain_lines(lines)
     }

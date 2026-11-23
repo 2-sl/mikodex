@@ -396,6 +396,30 @@ impl HyperlinkLine {
     }
 }
 
+pub(crate) fn append_timestamp_to_hyperlink_lines(lines: &mut Vec<HyperlinkLine>, timestamp: &str) {
+    let suffix = Span::styled(
+        format!(" \u{2022} {timestamp}"),
+        ratatui::style::Style::default().add_modifier(Modifier::DIM),
+    );
+    if let Some(line) = lines.last_mut() {
+        line.push_span(suffix, None);
+    } else {
+        lines.push(HyperlinkLine::new(Line::from(vec![suffix])));
+    }
+}
+
+pub(crate) fn append_timestamp_to_lines(lines: &mut Vec<Line<'static>>, timestamp: &str) {
+    let suffix = Span::styled(
+        format!(" \u{2022} {timestamp}"),
+        ratatui::style::Style::default().add_modifier(Modifier::DIM),
+    );
+    if let Some(line) = lines.last_mut() {
+        line.push_span(suffix);
+    } else {
+        lines.push(Line::from(vec![suffix]));
+    }
+}
+
 impl From<Line<'static>> for HyperlinkLine {
     fn from(line: Line<'static>) -> Self {
         Self::new(line)

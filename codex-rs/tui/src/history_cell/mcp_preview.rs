@@ -134,6 +134,10 @@ impl McpToolCallCell {
                 width,
             ));
         }
+        crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(
+            &mut lines,
+            &self.timestamp,
+        );
         lines
     }
 }

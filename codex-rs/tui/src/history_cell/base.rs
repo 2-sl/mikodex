@@ -58,12 +58,6 @@ impl<C: HistoryCell> LabeledToolCell<C> {
     pub(crate) fn with_current_timestamp(self) -> Self {
         self.with_timestamp(Some(chrono::Local::now()))
     }
-
-    fn timestamp_line(&self) -> Option<Line<'static>> {
-        self.timestamp
-            .as_ref()
-            .map(|timestamp| Line::from(vec!["  \u{2022} ".dim(), timestamp.clone().dim()]))
-    }
 }
 
 impl<C: HistoryCell> HistoryCell for LabeledToolCell<C> {
@@ -76,32 +70,32 @@ impl<C: HistoryCell> HistoryCell for LabeledToolCell<C> {
 
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut lines = self.cell.display_lines(width);
-        if let Some(timestamp) = self.timestamp_line() {
-            lines.push(timestamp);
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_lines(&mut lines, timestamp);
         }
         lines
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines = self.cell.display_hyperlink_lines(width);
-        if let Some(timestamp) = self.timestamp_line() {
-            lines.push(timestamp.into());
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(&mut lines, timestamp);
         }
         lines
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines = self.cell.transcript_hyperlink_lines(width);
-        if let Some(timestamp) = self.timestamp_line() {
-            lines.push(timestamp.into());
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(&mut lines, timestamp);
         }
         lines
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
         let mut lines = self.cell.raw_lines();
-        if let Some(timestamp) = self.timestamp_line() {
-            lines.push(timestamp);
+        if let Some(timestamp) = &self.timestamp {
+            crate::terminal_hyperlinks::append_timestamp_to_lines(&mut lines, timestamp);
         }
         lines
     }

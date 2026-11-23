@@ -57,9 +57,7 @@ impl DynamicToolCallCell {
     }
 
     fn header(&self, data: &DynamicToolCallData) -> Line<'static> {
-        let mut line = data.header();
-        line.push_span(format!(" \u{2022} {}", self.timestamp).dim());
-        line
+        data.header()
     }
 
     pub(crate) fn call_id(&self) -> &str {
@@ -196,12 +194,13 @@ impl HistoryCell for DynamicToolCallCell {
             .data
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        vec![
-            self.header(&data)
-                .to_string()
-                .trim_start_matches("• ")
-                .to_owned(),
-        ]
+        let mut label = self
+            .header(&data)
+            .to_string()
+            .trim_start_matches("• ")
+            .to_owned();
+        label.push_str(&format!(" \u{2022} {}", self.timestamp));
+        vec![label]
     }
 
     fn has_stable_transcript_height(&self) -> bool {
@@ -255,6 +254,10 @@ impl HistoryCell for DynamicToolCallCell {
             );
             lines.push(clipped_line(line.dim(), width));
         }
+        crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(
+            &mut lines,
+            &self.timestamp,
+        );
         lines
     }
 
@@ -276,6 +279,10 @@ impl HistoryCell for DynamicToolCallCell {
                 .initial_indent("  └ ".dim().into())
                 .subsequent_indent("    ".into()),
         ));
+        crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(
+            &mut lines,
+            &self.timestamp,
+        );
         lines
     }
 
@@ -290,6 +297,7 @@ impl HistoryCell for DynamicToolCallCell {
             data.arguments
         )));
         lines.extend(data.output_lines());
+        crate::terminal_hyperlinks::append_timestamp_to_lines(&mut lines, &self.timestamp);
         super::plain_lines(lines)
     }
 }

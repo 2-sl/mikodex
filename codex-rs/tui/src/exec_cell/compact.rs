@@ -128,13 +128,10 @@ impl ExecCell {
             }
         }
         if let Some(timestamp) = self.timestamp_for(&call.call_id) {
-            lines.push(clipped_line(
-                Line::from(vec![
-                    "  \u{2022} ".dim(),
-                    crate::clock_format::format_local_timestamp(timestamp.clone()).dim(),
-                ]),
-                width,
-            ));
+            crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(
+                &mut lines,
+                &crate::clock_format::format_local_timestamp(timestamp.clone()),
+            );
         }
         lines
     }

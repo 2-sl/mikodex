@@ -200,7 +200,6 @@ impl McpToolCallCell {
             compact_spans.extend([header_text.bold(), " ".into()]);
         }
         let mut compact_header = Line::from(compact_spans.clone());
-        compact_header.push_span(format!(" \u{2022} {}", self.timestamp).dim());
         let reserved = compact_header.width();
 
         let inline_invocation =
@@ -242,6 +241,10 @@ impl McpToolCallCell {
                 "    ".into(),
             ));
         }
+        crate::terminal_hyperlinks::append_timestamp_to_hyperlink_lines(
+            &mut lines,
+            &self.timestamp,
+        );
         lines
     }
 
