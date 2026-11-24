@@ -120,7 +120,12 @@ impl AgentsOverviewView {
         } else {
             0
         };
-        let widths = Some((status_width.min(11) as u16, updated_width));
+        let status_width = if state.list_width >= STATUS_COLUMNS_MIN_WIDTH {
+            status_width.min(11) as u16
+        } else {
+            0
+        };
+        let widths = Some((status_width, updated_width));
         if padding > 0 && self.dock_focused.is_none() {
             let (title, status, updated) = columns(row(area, /*offset*/ 0, /*height*/ 1), widths);
             line("Tasks".dim(), title, buf);
@@ -277,7 +282,7 @@ impl AgentsOverviewView {
             if state.grouping == AgentsOverviewGrouping::Status && self.is_pinned(index) {
                 prefix.push_str("📌 ");
             }
-            // On narrow rows the result dot shares the only slot for the working or alert icon.
+            // Preserve the activity label when an unread marker takes the dot's slot.
             if task.unread && !idle && status_area.is_empty() {
                 prefix.push_str(status);
                 prefix.push_str(": ");
