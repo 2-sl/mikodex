@@ -56,9 +56,9 @@ impl LocalSettings {
         system_motion: crate::motion::MotionMode,
         screen_reader_default: crate::motion::MotionMode,
     ) -> Self {
-        let sidebar: codex_config::types::TuiSidebar = config
-            .config_layer_stack
-            .effective_user_config()
+        let user_config = config.config_layer_stack.effective_user_config();
+        let sidebar: codex_config::types::TuiSidebar = user_config
+            .as_ref()
             .and_then(|config| config.get("tui"))
             .and_then(|tui| tui.get("sidebar"))
             .and_then(|sidebar| sidebar.clone().try_into().ok())
