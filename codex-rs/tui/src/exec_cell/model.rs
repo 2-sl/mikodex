@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use std::time::Instant;
 
+use super::command_output_line;
 use super::live_output::LiveCommandOutput;
 use crate::history_cell::ActivityGroup;
 use codex_app_server_protocol::CommandExecutionSource as ExecCommandSource;
@@ -70,7 +71,7 @@ impl CommandOutput {
     pub(super) fn lines(&self) -> impl DoubleEndedIterator<Item = Cow<'_, str>> {
         match self.live_output.as_ref() {
             Some(output) => Either::Left(output.lines()),
-            None => Either::Right(self.aggregated_output.lines().map(Cow::Borrowed)),
+            None => Either::Right(self.aggregated_output.lines().map(command_output_line)),
         }
     }
 
@@ -78,7 +79,7 @@ impl CommandOutput {
     pub(super) fn transcript_lines(&self) -> impl Iterator<Item = Cow<'_, str>> {
         match self.live_output.as_ref() {
             Some(output) => Either::Left(output.transcript_lines()),
-            None => Either::Right(self.aggregated_output.lines().map(Cow::Borrowed)),
+            None => Either::Right(self.aggregated_output.lines().map(command_output_line)),
         }
     }
 }

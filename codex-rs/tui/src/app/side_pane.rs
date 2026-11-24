@@ -34,6 +34,7 @@ use std::time::Duration;
 pub(super) const GAP: u16 = 1;
 const MIN_SIDEBAR_WIDTH: u16 = 36;
 const MIN_MAIN_PANE_WIDTH: u16 = 48;
+pub(super) const MIN_SPLIT_WIDTH: u16 = 100;
 pub(super) const RESIZE_HINT: &str = "Resize · ←/h →/l · Shift+←/→ 10 cols · Enter/Esc done";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -119,7 +120,7 @@ fn visible_split(app: &App, tui: &Tui, area: Rect) -> Option<SidebarLayout> {
 pub(super) fn split_layout(app: &App, tui: &Tui, area: Rect) -> Option<SidebarLayout> {
     let area = app.workspace_chat_area(area);
     let content = app.sidebar()?.visible_content()?;
-    if area.width < 100
+    if area.width < MIN_SPLIT_WIDTH
         || app.conversation_frame.has_caller_inset()
         || !app.side_retention_enabled(tui)
     {
@@ -187,9 +188,9 @@ pub(super) fn sidebar_areas(app: &App, tui: &Tui, area: Rect, fraction: f64) -> 
         })
         .map(|drag| drag.width);
     let saved = app.local_settings.tui.sidebar_width_percent;
-    let default_width = if target.is_some_and(|target| {
-        matches!(target.content, sidebar::SidebarContent::Chat(_))
-    }) {
+    let default_width = if target
+        .is_some_and(|target| matches!(target.content, sidebar::SidebarContent::Chat(_)))
+    {
         area.width / 2
     } else {
         area.width / 3
@@ -436,8 +437,7 @@ impl App {
                     // The painted divider still owns this press while it moves.
                     return Ok(true);
                 }
-                let screen =
-                    super::agents_overview_dock::conversation_viewport(self, screen);
+                let screen = super::agents_overview_dock::conversation_viewport(self, screen);
                 let Some(target) = self.sidebar_resize_target() else {
                     return Ok(false);
                 };
@@ -461,12 +461,9 @@ impl App {
                 };
                 let screen = tui.terminal.last_known_screen_size.into();
                 let workspace_chat = self.workspace_chat_area(screen);
-                let viewport = super::agents_overview_dock::conversation_viewport(
-                    self,
-                    workspace_chat,
-                );
-                if drag.matches(viewport, self) && visible_split(self, tui, viewport).is_some()
-                {
+                let viewport =
+                    super::agents_overview_dock::conversation_viewport(self, workspace_chat);
+                if drag.matches(viewport, self) && visible_split(self, tui, viewport).is_some() {
                     let width = i32::from(drag.initial_width) + i32::from(drag.press)
                         - i32::from(mouse.column);
                     let total = drag.screen.width;
