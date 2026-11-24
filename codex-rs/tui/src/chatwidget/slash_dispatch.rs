@@ -9,6 +9,7 @@ use super::*;
 use crate::app::WindowsSandboxHost;
 use crate::app_event::ManagedWorktreeMode;
 use crate::app_event::ThreadGoalSetMode;
+use crate::app_event::TuiPreference;
 use crate::bottom_pane::prompt_args::parse_slash_name;
 use crate::bottom_pane::prompt_args::slash_args_elements;
 use crate::bottom_pane::slash_commands::BuiltinCommandFlags;
@@ -643,6 +644,21 @@ impl ChatWidget {
             SlashCommand::Theme => {
                 self.open_theme_picker();
             }
+            SlashCommand::Render => {
+                let status = if self.local_settings.tui.rendering.tables { "on" } else { "off" };
+                self.add_info_message(
+                    format!("Markdown table rendering is {status}. Use /render table on|off."),
+                    /*hint*/ None,
+                );
+            }
+            SlashCommand::Sidebar => {
+                let agent_center = if self.local_settings.tui.sidebar.agent_command_center { "on" } else { "off" };
+                let command_list = if self.local_settings.tui.sidebar.command_list { "on" } else { "off" };
+                self.add_info_message(
+                    format!("Agent Command Center sidebar: {agent_center}; command list sidebar: {command_list}. Use /sidebar agent-command-center|acs on|off or /sidebar command-list|cl on|off."),
+                    /*hint*/ None,
+                );
+            }
             SlashCommand::Background => {
                 let (status, image) = {
                     let animation = self.empty_state_animation.borrow();
@@ -1243,6 +1259,82 @@ impl ChatWidget {
             SlashCommand::Pets if !trimmed.is_empty() => {
                 self.select_pet_by_id(args);
             }
+            SlashCommand::Render => {
+                let mut parts = trimmed.split_whitespace();
+                let target = parts.next().unwrap_or_default().to_ascii_lowercase();
+                let action = parts.next().map(str::to_ascii_lowercase);
+                let valid = parts.next().is_none();
+                match (valid, target.as_str(), action.as_deref()) {
+                    (true, "table", None) => {
+                        let status = if self.local_settings.tui.rendering.tables { "on" } else { "off" };
+                        self.add_info_message(
+                            format!("Markdown table rendering is {status}. Use /render table on|off."),
+                            /*hint*/ None,
+                        );
+                    }
+                    (true, "table", Some("on")) => {
+                        self.app_event_tx.send(AppEvent::UpdateTuiPreference(TuiPreference::RenderTables(true)));
+                    }
+                    (true, "table", Some("off")) => {
+                        self.app_event_tx.send(AppEvent::UpdateTuiPreference(TuiPreference::RenderTables(false)));
+                    }
+                    _ => self.add_error_message("Usage: /render table [on|off]".to_string()),
+                }
+            }
+            SlashCommand::Sidebar => {
+                let mut parts = trimmed.split_whitespace();
+                let target = parts.next().unwrap_or_default().to_ascii_lowercase();
+                let action = parts.next().map(str::to_ascii_lowercase);
+                let valid = parts.next().is_none();
+                let preference = match target.as_str() {
+                    "agent-command-center" | "acs" => Some((
+                        true,
+                        self.local_settings.tui.sidebar.agent_command_center,
+                    )),
+                    "command-list" | "cl" => {
+                        Some((false, self.local_settings.tui.sidebar.command_list))
+                    }
+                    _ => None,
+                };
+                match (valid, preference, action.as_deref()) {
+                    (true, Some((agent_center, current)), None) => {
+                        let label = if agent_center {
+                            "Agent Command Center sidebar"
+                        } else {
+                            "Command list sidebar"
+                        };
+                        let status = if current { "on" } else { "off" };
+                        self.add_info_message(
+                            format!("{label} is {status}. Use /sidebar agent-command-center|acs on|off or /sidebar command-list|cl on|off."),
+                            /*hint*/ None,
+                        );
+                    }
+                    (true, Some((true, _)), Some("on")) => {
+                        self.app_event_tx.send(AppEvent::UpdateTuiPreference(
+                            TuiPreference::AgentCommandCenterSidebar(true),
+                        ));
+                    }
+                    (true, Some((true, _)), Some("off")) => {
+                        self.app_event_tx.send(AppEvent::UpdateTuiPreference(
+                            TuiPreference::AgentCommandCenterSidebar(false),
+                        ));
+                    }
+                    (true, Some((false, _)), Some("on")) => {
+                        self.app_event_tx.send(AppEvent::UpdateTuiPreference(
+                            TuiPreference::CommandListSidebar(true),
+                        ));
+                    }
+                    (true, Some((false, _)), Some("off")) => {
+                        self.app_event_tx.send(AppEvent::UpdateTuiPreference(
+                            TuiPreference::CommandListSidebar(false),
+                        ));
+                    }
+                    _ => self.add_error_message(
+                        "Usage: /sidebar agent-command-center|acs on|off or /sidebar command-list|cl on|off"
+                            .to_string(),
+                    ),
+                }
+            }
             SlashCommand::Background => {
                 let action = trimmed.to_ascii_lowercase();
                 if matches!(action.as_str(), "off" | "disable" | "disabled") {
@@ -1532,6 +1624,8 @@ impl ChatWidget {
             | SlashCommand::Config
             | SlashCommand::Theme
             | SlashCommand::Background
+            | SlashCommand::Render
+            | SlashCommand::Sidebar
             | SlashCommand::Tui
             | SlashCommand::Pets => QueueDrain::Stop,
         }

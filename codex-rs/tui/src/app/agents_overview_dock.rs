@@ -115,46 +115,55 @@ pub(super) fn layout(app: &App, viewport: Rect) -> Option<AgentsOverviewDockLayo
     if viewport.width < 3 {
         return None;
     }
-    let has_command_reference = viewport.width >= 120;
+    let show_agent_command_center = app.local_settings.tui.sidebar.agent_command_center;
+    let show_command_list = app.local_settings.tui.sidebar.command_list && viewport.width >= 120;
+    if !show_agent_command_center && !show_command_list {
+        return None;
+    }
+    let separator_count = show_agent_command_center as u16 + show_command_list as u16;
     let default_left = (viewport.width / 5).clamp(MIN_LEFT_WIDTH, 36);
     let default_right = (viewport.width / 5).clamp(MIN_RIGHT_WIDTH, 40);
-    let right_minimum = if has_command_reference {
-        MIN_RIGHT_WIDTH
+    let right_minimum = if show_command_list { MIN_RIGHT_WIDTH } else { 0 };
+    let left_maximum = viewport
+        .width
+        .saturating_sub(separator_count + MIN_CONVERSATION_WIDTH + right_minimum)
+        .min(MAX_DOCK_WIDTH)
+        .max(1);
+    let mut left_width = if show_agent_command_center {
+        configured_width(
+            viewport.width,
+            app.local_settings.tui.agents_overview_width_percent,
+            default_left,
+            MIN_LEFT_WIDTH,
+            left_maximum,
+        )
     } else {
         0
     };
-    let left_maximum = viewport
-        .width
-        .saturating_sub(2 + MIN_CONVERSATION_WIDTH + right_minimum)
-        .min(MAX_DOCK_WIDTH)
-        .max(1);
-    let mut left_width = configured_width(
-        viewport.width,
-        app.local_settings.tui.agents_overview_width_percent,
-        default_left,
-        MIN_LEFT_WIDTH,
-        left_maximum,
-    );
-    let left_preview = app
-        .agents_overview_dock_drag
-        .filter(|drag| drag.divider == DockDivider::AgentsOverview)
-        .map(|drag| drag.width)
-        .or_else(|| {
-            app.agents_overview_dock_resize
-                .filter(|mode| mode.divider == DockDivider::AgentsOverview)
-                .map(|mode| mode.preview_width)
-        });
+    let left_preview = if show_agent_command_center {
+        app.agents_overview_dock_drag
+            .filter(|drag| drag.divider == DockDivider::AgentsOverview)
+            .map(|drag| drag.width)
+            .or_else(|| {
+                app.agents_overview_dock_resize
+                    .filter(|mode| mode.divider == DockDivider::AgentsOverview)
+                    .map(|mode| mode.preview_width)
+            })
+    } else {
+        None
+    };
     if let Some(width) = left_preview {
         left_width = clamp_dock_width(width, MIN_LEFT_WIDTH, left_maximum);
     }
 
-    if has_command_reference {
+    let mut right_width = 0;
+    if show_command_list {
         let right_maximum = viewport
             .width
-            .saturating_sub(left_width + 2 + MIN_CONVERSATION_WIDTH)
+            .saturating_sub(left_width + separator_count + MIN_CONVERSATION_WIDTH)
             .min(MAX_DOCK_WIDTH)
             .max(1);
-        let mut right_width = configured_width(
+        right_width = configured_width(
             viewport.width,
             app.local_settings.tui.command_reference_width_percent,
             default_right,
@@ -173,41 +182,58 @@ pub(super) fn layout(app: &App, viewport: Rect) -> Option<AgentsOverviewDockLayo
         if let Some(width) = right_preview {
             right_width = clamp_dock_width(width, MIN_RIGHT_WIDTH, right_maximum);
         }
-        let [
-            sidebar,
-            divider,
-            conversation,
-            command_divider,
-            command_reference,
-        ] = Layout::horizontal([
-            Constraint::Length(left_width),
-            Constraint::Length(1),
-            Constraint::Fill(1),
-            Constraint::Length(1),
-            Constraint::Length(right_width),
-        ])
-        .areas(viewport);
-        Some(AgentsOverviewDockLayout {
-            sidebar,
-            divider,
-            conversation,
-            command_divider,
-            command_reference,
-        })
-    } else {
-        let [sidebar, divider, conversation] = Layout::horizontal([
-            Constraint::Length(left_width),
-            Constraint::Length(1),
-            Constraint::Fill(1),
-        ])
-        .areas(viewport);
-        Some(AgentsOverviewDockLayout {
-            sidebar,
-            divider,
-            conversation,
-            command_divider: Rect::default(),
-            command_reference: Rect::default(),
-        })
+    }
+
+    match (show_agent_command_center, show_command_list) {
+        (true, true) => {
+            let [sidebar, divider, conversation, command_divider, command_reference] =
+                Layout::horizontal([
+                    Constraint::Length(left_width),
+                    Constraint::Length(1),
+                    Constraint::Fill(1),
+                    Constraint::Length(1),
+                    Constraint::Length(right_width),
+                ])
+                .areas(viewport);
+            Some(AgentsOverviewDockLayout {
+                sidebar,
+                divider,
+                conversation,
+                command_divider,
+                command_reference,
+            })
+        }
+        (true, false) => {
+            let [sidebar, divider, conversation] = Layout::horizontal([
+                Constraint::Length(left_width),
+                Constraint::Length(1),
+                Constraint::Fill(1),
+            ])
+            .areas(viewport);
+            Some(AgentsOverviewDockLayout {
+                sidebar,
+                divider,
+                conversation,
+                command_divider: Rect::default(),
+                command_reference: Rect::default(),
+            })
+        }
+        (false, true) => {
+            let [conversation, command_divider, command_reference] = Layout::horizontal([
+                Constraint::Fill(1),
+                Constraint::Length(1),
+                Constraint::Length(right_width),
+            ])
+            .areas(viewport);
+            Some(AgentsOverviewDockLayout {
+                sidebar: Rect::default(),
+                divider: Rect::default(),
+                conversation,
+                command_divider,
+                command_reference,
+            })
+        }
+        (false, false) => None,
     }
 }
 

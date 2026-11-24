@@ -915,6 +915,26 @@ pub enum BuiltinStatusLine {
     Default,
 }
 
+/// Visibility preferences for the persistent TUI side rails.
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, JsonSchema)]
+#[serde(default)]
+#[schemars(deny_unknown_fields)]
+pub struct TuiSidebar {
+    /// Show the Agent Command Center rail.
+    pub agent_command_center: bool,
+    /// Show the slash-command reference rail when the terminal is wide enough.
+    pub command_list: bool,
+}
+
+impl Default for TuiSidebar {
+    fn default() -> Self {
+        Self {
+            agent_command_center: true,
+            command_list: true,
+        }
+    }
+}
+
 /// Collection of settings that are specific to the TUI.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -938,6 +958,10 @@ pub struct Tui {
     /// Individual visual effects. Each also requires animations to be enabled.
     #[serde(default)]
     pub effects: TuiEffects,
+
+    /// Persistent side-rail visibility preferences.
+    #[serde(default)]
+    pub sidebar: TuiSidebar,
 
     /// Rich content rendering. Independent of animations and visual effects.
     #[serde(default)]

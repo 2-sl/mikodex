@@ -1462,6 +1462,7 @@ fn config_toml_deserializes_model_availability_nux() {
     assert_eq!(
         cfg.tui.expect("tui config should deserialize"),
         Tui {
+            sidebar: Default::default(),
             default_hosts: Default::default(),
             notification_settings: TuiNotificationSettings::default(),
             animations: true,
@@ -4811,6 +4812,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
     assert_eq!(
         tui,
         Tui {
+            sidebar: Default::default(),
             default_hosts: Default::default(),
             notification_settings: TuiNotificationSettings::default(),
             animations: true,
@@ -4953,6 +4955,7 @@ async fn runtime_config_resolves_terminal_resize_reflow_defaults_and_overrides()
     let cfg = Config::load_from_base_config_with_overrides(
         ConfigToml {
             tui: Some(Tui {
+                sidebar: Default::default(),
                 terminal_resize_reflow_max_rows: Some(9000),
                 ..Default::default()
             }),
@@ -4972,6 +4975,7 @@ async fn runtime_config_resolves_terminal_resize_reflow_defaults_and_overrides()
     let cfg = Config::load_from_base_config_with_overrides(
         ConfigToml {
             tui: Some(Tui {
+                sidebar: Default::default(),
                 terminal_resize_reflow_max_rows: Some(0),
                 ..Default::default()
             }),
@@ -5074,6 +5078,7 @@ async fn runtime_config_resolves_session_picker_view_default_and_override() {
     let cfg = Config::load_from_base_config_with_overrides(
         ConfigToml {
             tui: Some(Tui {
+                sidebar: Default::default(),
                 session_picker_view: Some(SessionPickerViewMode::Comfortable),
                 ..Default::default()
             }),
@@ -5106,6 +5111,7 @@ async fn runtime_config_resolves_resume_cwd_default_and_override() {
     let cfg = Config::load_from_base_config_with_overrides(
         ConfigToml {
             tui: Some(Tui {
+                sidebar: Default::default(),
                 resume_cwd: Some(ResumeCwdMode::Session),
                 ..Default::default()
             }),

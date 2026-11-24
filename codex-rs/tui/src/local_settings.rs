@@ -56,6 +56,13 @@ impl LocalSettings {
         system_motion: crate::motion::MotionMode,
         screen_reader_default: crate::motion::MotionMode,
     ) -> Self {
+        let sidebar: codex_config::types::TuiSidebar = config
+            .config_layer_stack
+            .effective_user_config()
+            .and_then(|config| config.get("tui"))
+            .and_then(|tui| tui.get("sidebar"))
+            .and_then(|sidebar| sidebar.clone().try_into().ok())
+            .unwrap_or_default();
         let mut settings = Self {
             audio: Ok(Default::default()),
             transcript_mode: TranscriptMode::resolve(
@@ -68,6 +75,7 @@ impl LocalSettings {
                 animations: config.animations,
                 screen_reader_detection_done: None,
                 effects: config.tui_effects,
+                sidebar,
                 rendering: config.tui_rendering,
                 show_tooltips: config.show_tooltips,
                 show_server_version_notice: config.tui_show_server_version_notice,

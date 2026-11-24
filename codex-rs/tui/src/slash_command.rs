@@ -66,6 +66,8 @@ pub enum SlashCommand {
     Title,
     Statusline,
     Theme,
+    Render,
+    Sidebar,
     #[strum(to_string = "background", serialize = "bga")]
     Background,
     #[strum(to_string = "pets", serialize = "pet")]
@@ -134,6 +136,8 @@ impl SlashCommand {
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
             SlashCommand::Theme => "choose a syntax highlighting theme",
+            SlashCommand::Render => "toggle rich Markdown renderers such as tables",
+            SlashCommand::Sidebar => "show or hide the Agent Command Center and command list rails",
             SlashCommand::Background => {
                 "set, clear, or toggle the animated chat background; /bga is an alias"
             }
@@ -210,6 +214,8 @@ impl SlashCommand {
                 | SlashCommand::Resume
                 | SlashCommand::Rc
                 | SlashCommand::Background
+                | SlashCommand::Render
+                | SlashCommand::Sidebar
         )
     }
 
@@ -232,6 +238,8 @@ impl SlashCommand {
                 | SlashCommand::Ide
                 | SlashCommand::Rename
                 | SlashCommand::Background
+                | SlashCommand::Render
+                | SlashCommand::Sidebar
         )
     }
 
@@ -261,6 +269,8 @@ impl SlashCommand {
                 | SlashCommand::Copy
                 | SlashCommand::Raw
                 | SlashCommand::Background
+                | SlashCommand::Render
+                | SlashCommand::Sidebar
         )
     }
 
@@ -326,7 +336,9 @@ impl SlashCommand {
             | SlashCommand::Exit
             | SlashCommand::Side
             | SlashCommand::Btw
-            | SlashCommand::Background => true,
+            | SlashCommand::Background
+            | SlashCommand::Render
+            | SlashCommand::Sidebar => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
             SlashCommand::Agents | SlashCommand::MultiAgents => true,

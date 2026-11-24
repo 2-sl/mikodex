@@ -6,6 +6,9 @@
 
 use super::*;
 use codex_config::ConfigLayerSource;
+use crate::app_event::TuiPreference;
+use crate::legacy_core::config::edit::ConfigEdit;
+use crate::legacy_core::config::edit::ConfigEditsBuilder;
 
 async fn build_config_on_runtime_worker(
     builder: ConfigBuilder,
@@ -2227,5 +2230,60 @@ theme = "dracula"
             app.chat_widget.local_settings.tui.pet.as_deref(),
             Some(crate::pets::DISABLED_PET_ID)
         );
+    }
+}
+
+impl App {
+    pub(super) async fn persist_tui_preference(
+        &mut self,
+        preference: TuiPreference,
+    ) -> Result<(), String> {
+        let edit = match preference {
+            TuiPreference::RenderTables(enabled) => ConfigEdit::SetPath {
+                segments: vec!["tui".into(), "rendering".into(), "tables".into()],
+                value: enabled.into(),
+            },
+            TuiPreference::AgentCommandCenterSidebar(enabled) => ConfigEdit::SetPath {
+                segments: vec!["tui".into(), "sidebar".into(), "agent_command_center".into()],
+                value: enabled.into(),
+            },
+            TuiPreference::CommandListSidebar(enabled) => ConfigEdit::SetPath {
+                segments: vec!["tui".into(), "sidebar".into(), "command_list".into()],
+                value: enabled.into(),
+            },
+        };
+        ConfigEditsBuilder::for_config_path(self.local_settings.user_config_path.as_path())
+            .with_edits([edit])
+            .apply()
+            .await
+            .map_err(|error| error.to_string())?;
+
+        match preference {
+            TuiPreference::RenderTables(enabled) => {
+                self.local_settings.tui.rendering.tables = enabled;
+                self.chat_widget.local_settings.tui.rendering.tables = enabled;
+                crate::markdown_render::preferences::init(self.local_settings.tui.rendering);
+                self.transcript_view.invalidate_render_layouts();
+            }
+            TuiPreference::AgentCommandCenterSidebar(enabled) => {
+                self.local_settings.tui.sidebar.agent_command_center = enabled;
+                self.chat_widget.local_settings.tui.sidebar.agent_command_center = enabled;
+                if !enabled {
+                    self.agents_overview.sidebar_focused = false;
+                    self.agents_overview_dock_drag = None;
+                    self.agents_overview_dock_resize = None;
+                }
+            }
+            TuiPreference::CommandListSidebar(enabled) => {
+                self.local_settings.tui.sidebar.command_list = enabled;
+                self.chat_widget.local_settings.tui.sidebar.command_list = enabled;
+                if !enabled {
+                    self.agents_overview.command_reference_focused = false;
+                    self.agents_overview_dock_drag = None;
+                    self.agents_overview_dock_resize = None;
+                }
+            }
+        }
+        Ok(())
     }
 }

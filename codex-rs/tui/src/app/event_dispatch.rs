@@ -94,6 +94,7 @@ impl App {
                     | AppEvent::TestConfigNotification
                     | AppEvent::SendConfigTestNotification { .. }
                     | AppEvent::SaveConfigPreference(_)
+                    | AppEvent::UpdateTuiPreference(_)
                     | AppEvent::SaveReasoningSummary { .. }
                     | AppEvent::RefreshConfigReasoningSummary
                     | AppEvent::CopyWarning(_)
@@ -4162,6 +4163,29 @@ impl App {
             }
             AppEvent::SaveConfigPreference(preference) => {
                 self.save_config_preference(tui, preference).await;
+            }
+            AppEvent::UpdateTuiPreference(preference) => {
+                let saved_message = match preference {
+                    crate::app_event::TuiPreference::RenderTables(enabled) => format!(
+                        "Markdown table rendering turned {} and saved.",
+                        if enabled { "on" } else { "off" }
+                    ),
+                    crate::app_event::TuiPreference::AgentCommandCenterSidebar(enabled) => format!(
+                        "Agent Command Center sidebar turned {} and saved.",
+                        if enabled { "on" } else { "off" }
+                    ),
+                    crate::app_event::TuiPreference::CommandListSidebar(enabled) => format!(
+                        "Command list sidebar turned {} and saved.",
+                        if enabled { "on" } else { "off" }
+                    ),
+                };
+                match self.persist_tui_preference(preference).await {
+                    Ok(()) => self.chat_widget.add_info_message(saved_message, /*hint*/ None),
+                    Err(error) => self.chat_widget.add_error_message(format!(
+                        "Could not save TUI preference: {error}"
+                    )),
+                }
+                tui.frame_requester().schedule_frame();
             }
             AppEvent::SaveReasoningSummary { backend, summary } => {
                 if backend == app_server.backend_id() {

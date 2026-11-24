@@ -47,6 +47,7 @@ fn connected_server_version_notice_snapshot() {
         },
     };
     let settings = codex_config::types::Tui {
+        sidebar: Default::default(),
         show_server_version_notice: true,
         ..Default::default()
     };
@@ -76,6 +77,7 @@ fn local_daemon_version_notice_snapshot() {
         },
     };
     let settings = codex_config::types::Tui {
+        sidebar: Default::default(),
         show_server_version_notice: true,
         ..Default::default()
     };

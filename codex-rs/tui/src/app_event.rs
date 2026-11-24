@@ -351,6 +351,13 @@ impl CapturedSideWork {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TuiPreference {
+    RenderTables(bool),
+    AgentCommandCenterSidebar(bool),
+    CommandListSidebar(bool),
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, IntoStaticStr)]
 pub(crate) enum AppEvent {
@@ -1970,6 +1977,8 @@ pub(crate) enum AppEvent {
 
     /// Requests saving a local `/config` preference and refreshing its effective value.
     SaveConfigPreference(crate::config_panel::ConfigPreference),
+    /// Persist and apply a rendering or sidebar visibility preference.
+    UpdateTuiPreference(TuiPreference),
 
     /// Save the connected server's reasoning-summary default for new chats.
     SaveReasoningSummary {

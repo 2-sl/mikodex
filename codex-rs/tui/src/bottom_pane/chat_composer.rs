@@ -537,6 +537,8 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
             | SlashCommand::Statusline
             | SlashCommand::Rc
             | SlashCommand::Background
+            | SlashCommand::Render
+            | SlashCommand::Sidebar
     ) {
         return true;
     }

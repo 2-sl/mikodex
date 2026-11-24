@@ -44,6 +44,7 @@ fn palette<T>(render: impl FnOnce() -> T) -> T {
 
 fn enabled() -> Tui {
     Tui {
+        sidebar: Default::default(),
         animations: true,
         effects: Default::default(),
         ..Tui::default()
@@ -1069,6 +1070,7 @@ fn focus_startup_work_and_configuration_do_not_extend_a_started_deadline() {
 
         for settings in [
             Tui {
+                sidebar: Default::default(),
                 effects: codex_config::types::TuiEffects {
                     starfield: false,
                     ..Default::default()
@@ -1076,6 +1078,7 @@ fn focus_startup_work_and_configuration_do_not_extend_a_started_deadline() {
                 ..enabled()
             },
             Tui {
+                sidebar: Default::default(),
                 animations: false,
                 ..enabled()
             },

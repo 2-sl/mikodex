@@ -275,6 +275,7 @@ fn search_matches_displayed_values() {
     let (tx, mut rx) = unbounded_channel();
     let mut panel = ConfigPanel::new(
         &Tui {
+            sidebar: Default::default(),
             theme: Some("Dracula".to_string()),
             ..Default::default()
         },
@@ -365,6 +366,7 @@ fn mouse_scroll_speed_picker_preserves_a_custom_value_and_saves_a_preset() {
     let (tx, mut rx) = unbounded_channel();
     let keymap = RuntimeKeymap::defaults().list;
     let tui = Tui {
+        sidebar: Default::default(),
         mouse_scroll_speed: Some(1.75),
         ..Default::default()
     };
@@ -426,6 +428,7 @@ fn unavailable_right_click_paste_remains_editable() {
     let (tx, mut rx) = unbounded_channel();
     let mut panel = ConfigPanel::new(
         &Tui {
+            sidebar: Default::default(),
             right_click_paste: RightClickPaste::On,
             ..Tui::default()
         },
@@ -524,6 +527,7 @@ fn refresh_preserves_search_and_updates_visible_state() {
     keymap.move_right.clear();
     panel.update_config_panel(&ConfigPanelUpdate {
         tui: Tui {
+            sidebar: Default::default(),
             show_tooltips: true,
             ..Default::default()
         },

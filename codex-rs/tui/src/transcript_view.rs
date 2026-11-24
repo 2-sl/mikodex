@@ -641,6 +641,19 @@ impl TranscriptView {
         self.mode = mode;
     }
 
+    /// Drop layouts whose geometry or content depends on the current Markdown preferences.
+    pub(crate) fn invalidate_render_layouts(&mut self) {
+        self.cache.clear();
+        self.live = None;
+        self.live_separated = None;
+        self.live_key = None;
+        self.visible.clear();
+        self.selection = None;
+        self.select_mode = None;
+        self.copy_mode = None;
+        self.restart_search();
+    }
+
     pub(crate) fn has_active_interaction(&self) -> bool {
         self.select_mode.is_some()
             || self.selection.is_some()
