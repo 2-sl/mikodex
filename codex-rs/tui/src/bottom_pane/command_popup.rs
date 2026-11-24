@@ -222,7 +222,7 @@ impl CommandPopup {
             .iter()
             .filter(|command| {
                 !matches!(command, CommandItem::Builtin(cmd) if ALIAS_COMMANDS.contains(cmd))
-                    && !self.is_unavailable(command)
+                    && self.unavailable_reason(command).is_none()
             })
             .map(|item| {
                 let description = if matches!(item, CommandItem::Builtin(SlashCommand::Daybreak)) {

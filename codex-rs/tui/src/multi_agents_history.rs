@@ -50,6 +50,23 @@ pub(crate) fn tool_call_history_cell(
 }
 
 impl CollabHistoryCell {
+    pub(crate) fn with_timestamp(
+        self,
+        timestamp: Option<chrono::DateTime<chrono::Local>>,
+    ) -> Self {
+        Self {
+            rendered: self.rendered.with_timestamp(timestamp),
+            unresolved: self.unresolved,
+        }
+    }
+
+    pub(crate) fn with_current_timestamp(self) -> Self {
+        Self {
+            rendered: self.rendered.with_current_timestamp(),
+            unresolved: self.unresolved,
+        }
+    }
+
     pub(crate) fn needs_names(&self) -> bool {
         self.unresolved.is_some()
     }

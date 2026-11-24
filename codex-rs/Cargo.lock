@@ -4717,7 +4717,7 @@ dependencies = [
 
 [[package]]
 name = "codex-plugin-archive-verification"
-version = "0.0.0"
+version = "0.172.0"
 dependencies = [
  "aws-lc-rs",
  "base64 0.22.1",
@@ -5204,7 +5204,7 @@ dependencies = [
 
 [[package]]
 name = "codex-statsig"
-version = "0.0.0"
+version = "0.172.0"
 dependencies = [
  "anyhow",
  "bytes",

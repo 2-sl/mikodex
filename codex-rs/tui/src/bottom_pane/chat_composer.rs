@@ -773,7 +773,7 @@ impl ChatComposer {
 
     pub(crate) fn command_reference_items(&self) -> Vec<(String, String)> {
         self.slash_input()
-            .command_popup("/")
+            .command_popup("/", false)
             .command_reference_items()
     }
 
