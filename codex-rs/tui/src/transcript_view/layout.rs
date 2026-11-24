@@ -20,6 +20,34 @@ pub(crate) struct ActivityTranscriptLines {
     pub(crate) disclosure: Option<ActivityDisclosure>,
 }
 
+fn take_trailing_timestamp(lines: &mut Vec<HyperlinkLine>) -> Option<String> {
+    let (timestamp, remove_blank_line) = {
+        let line = lines.last_mut()?;
+        let suffix = line
+            .line
+            .spans
+            .last()?
+            .content
+            .as_ref()
+            .strip_prefix(" \u{2022} ")?;
+        if suffix.is_empty() {
+            return None;
+        }
+        let timestamp = line.line.spans.pop()?.content.to_string();
+        let remove_blank_line = line.source.is_none()
+            && line
+                .line
+                .spans
+                .iter()
+                .all(|span| span.content.trim().is_empty());
+        (timestamp, remove_blank_line)
+    };
+    if remove_blank_line {
+        lines.pop();
+    }
+    Some(timestamp)
+}
+
 /// Keep disclosure controls outside selectable source without rendering hidden details.
 pub(super) fn activity_layout(
     mut lines: ActivityTranscriptLines,
@@ -27,6 +55,16 @@ pub(super) fn activity_layout(
     expanded: bool,
     shortcut: Option<ShortcutHint>,
 ) -> TextLayout {
+    let disclosure_timestamp = if !expanded
+        && matches!(
+            lines.disclosure,
+            Some(ActivityDisclosure::OutputLines(_))
+        )
+    {
+        take_trailing_timestamp(&mut lines.activity)
+    } else {
+        None
+    };
     let has_details = !lines.activity.is_empty() && (expanded || lines.disclosure.is_some());
     let source_offset = (!lines.auxiliary.is_empty())
         .then(|| TextLayout::new(lines.activity.clone(), width).text().len());
@@ -43,10 +81,16 @@ pub(super) fn activity_layout(
             let mut label = format!("+ {count} {noun}");
             if let Some(shortcut) = shortcut {
                 let hint = format!(" ({} to expand)", shortcut.display_label());
-                let indent = usize::from(width / 4).min(/*other*/ 4);
-                if Line::from(format!("{label}{hint}")).width() + indent <= usize::from(width) {
+                let timestamp = disclosure_timestamp.as_deref().unwrap_or_default();
+                let indent = usize::from(width / 4).min(4);
+                if Line::from(format!("{label}{hint}{timestamp}")).width() + indent
+                    <= usize::from(width)
+                {
                     label.push_str(&hint);
                 }
+            }
+            if let Some(timestamp) = &disclosure_timestamp {
+                label.push_str(timestamp);
             }
             label
         }

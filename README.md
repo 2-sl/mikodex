@@ -31,6 +31,9 @@ state with an installed Codex.
   with a Korean 2-set keyboard layout active. For example, `/벼ㅑㅅ` and `/ㄷ턋`
   are accepted as `/quit` and `/exit`; the same conversion works for other
   built-in commands.
+- **Inline activity timestamps.** Assistant timestamps stay on their message line.
+  Collapsed tool-output timestamps appear beside the `+ N lines (Ctrl+T to expand)`
+  control.
 - **Animated chat backgrounds.** The built-in Codex logo animation runs when no
   personal background image is configured. During chat sessions, the animation
   or selected image remains visible as a subtle watermark in unused transcript
