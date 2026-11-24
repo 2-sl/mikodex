@@ -11,7 +11,6 @@ pub(super) const STATUS_COLUMNS_MIN_WIDTH: u16 = 57;
 pub(super) enum TaskListRow {
     Group(usize),
     Task(usize),
-    Context(usize),
     Gap,
     ShowMore,
 }
@@ -26,7 +25,7 @@ impl TaskListRow {
         match self {
             Self::Task(index) => Some(*index),
             Self::ShowMore => Some(usize::MAX),
-            Self::Group(_) | Self::Context(_) | Self::Gap => None,
+            Self::Group(_) | Self::Gap => None,
         }
     }
 }
@@ -48,8 +47,7 @@ pub(super) fn visible_page(
             start -= 1;
         }
     }
-    let context = height > 1 && matches!(entries.get(selected + 1), Some(TaskListRow::Context(_)));
-    start = start.max((selected + 1 + usize::from(context)).saturating_sub(height));
+    start = start.max((selected + 1).saturating_sub(height));
     state.scroll = start;
     (selected, start..(start + height).min(entries.len()))
 }
@@ -75,9 +73,6 @@ impl AgentsOverviewView {
                 entries.push(TaskListRow::Group(index));
             }
             entries.push(TaskListRow::Task(index));
-            if state.list_width < STATUS_COLUMNS_MIN_WIDTH && state.page_height > 1 {
-                entries.push(TaskListRow::Context(index));
-            }
             previous = Some(index);
         }
         entries
@@ -103,10 +98,7 @@ impl AgentsOverviewView {
                 TaskListRow::ShowMore if self.selected == usize::MAX => {
                     current = Some(sections.len())
                 }
-                TaskListRow::Task(_)
-                | TaskListRow::Context(_)
-                | TaskListRow::Gap
-                | TaskListRow::ShowMore => {}
+                TaskListRow::Task(_) | TaskListRow::Gap | TaskListRow::ShowMore => {}
             }
         }
         let target = current.and_then(|current| match direction {
@@ -165,8 +157,6 @@ impl AgentsOverviewView {
             .max(1);
         let next = if action == ListAction::PageDown {
             let end = (page.end + page.len()).min(entries.len());
-            // Keep a task's detail row with it when the next page ends at its title.
-            let end = end - usize::from(matches!(entries.get(end), Some(TaskListRow::Context(_))));
             entries[selected + 1..end]
                 .iter()
                 .filter_map(TaskListRow::selection_index)

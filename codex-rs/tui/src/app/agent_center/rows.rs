@@ -1,5 +1,5 @@
 //! Grouped live tasks with shared identity colors and stable title, status and age columns.
-//! Narrow lists put status and branch on a second row.
+//! Task status stays on the title row in a right-aligned column.
 //! The final cell stays blank inside the full-width selection highlight.
 
 use super::navigation::STATUS_COLUMNS_MIN_WIDTH;
@@ -15,7 +15,7 @@ use crate::status::format_directory_display;
 fn columns(area: Rect, widths: Option<(u16, u16)>) -> (Rect, Rect, Rect) {
     let gutter = area.width.min(/*other*/ 4);
     let (status_width, updated_width, gap) = match widths {
-        Some((status, updated)) => (status, updated, 2),
+        Some((status, updated)) => (status, updated, if updated > 0 { 2 } else { 0 }),
         None => (0, 0, 0),
     };
     let updated = Rect::new(
@@ -109,19 +109,24 @@ impl AgentsOverviewView {
                 chrono::DateTime::from_timestamp(sort.timestamp(&task.thread), /*nsecs*/ 0),
             )
         };
-        let widths = (state.list_width >= STATUS_COLUMNS_MIN_WIDTH).then(|| {
-            let mut status_width = "Status".width();
-            let mut updated_width = sort.label().width();
-            for task in indices.iter().filter_map(|&index| self.rows.get(index)) {
-                status_width = status_width.max(status_for(task).0.width());
-                updated_width = updated_width.max(age(task).width());
-            }
-            (status_width.min(11) as u16, updated_width.min(9) as u16)
-        });
+        let mut status_width = "Status".width();
+        let mut updated_width = sort.label().width();
+        for task in indices.iter().filter_map(|&index| self.rows.get(index)) {
+            status_width = status_width.max(status_for(task).0.width());
+            updated_width = updated_width.max(age(task).width());
+        }
+        let updated_width = if state.list_width >= STATUS_COLUMNS_MIN_WIDTH {
+            updated_width.min(9) as u16
+        } else {
+            0
+        };
+        let widths = Some((status_width.min(11) as u16, updated_width));
         if padding > 0 && self.dock_focused.is_none() {
             let (title, status, updated) = columns(row(area, /*offset*/ 0, /*height*/ 1), widths);
             line("Tasks".dim(), title, buf);
-            line("Status".dim(), status, buf);
+            Line::from("Status".dim())
+                .right_aligned()
+                .render(status, buf);
             Line::from(sort.label().dim())
                 .right_aligned()
                 .render(updated, buf);
@@ -137,30 +142,6 @@ impl AgentsOverviewView {
             };
             let index = match entry {
                 TaskListRow::Group(index) | TaskListRow::Task(index) => *index,
-                TaskListRow::Context(index) => {
-                    let task = &self.rows[*index];
-                    state
-                        .row_hits
-                        .push((RowTarget::Thread(task.thread_id), background));
-                    let style = if *index == self.selected {
-                        selected_style
-                    } else {
-                        Style::default().dim()
-                    };
-                    buf.set_style(background, style);
-                    let (status, _) = status_for(task);
-                    let branch = task
-                        .thread
-                        .git_info
-                        .as_ref()
-                        .and_then(|git| git.branch.as_deref());
-                    let detail = match branch {
-                        Some(branch) => format!("    {status} · {branch}"),
-                        None => format!("    {status}"),
-                    };
-                    line(Line::from(detail).style(style), rect, buf);
-                    continue;
-                }
                 TaskListRow::Gap => continue,
                 TaskListRow::ShowMore => {
                     state.row_hits.push((RowTarget::ShowMore, background));
@@ -311,7 +292,10 @@ impl AgentsOverviewView {
                 task_title.spans.insert(0, prefix);
             }
             line(task_title, title, buf);
-            line(Line::from(status).style(style), status_area, buf);
+            Line::from(status)
+                .style(style)
+                .right_aligned()
+                .render(status_area, buf);
             if !updated.is_empty() {
                 Line::from(age(task))
                     .style(if index == self.selected {

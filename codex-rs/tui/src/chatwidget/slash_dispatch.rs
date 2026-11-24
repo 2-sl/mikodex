@@ -710,7 +710,7 @@ impl ChatWidget {
                 let agent_center = if self.local_settings.tui.sidebar.agent_command_center { "on" } else { "off" };
                 let command_list = if self.local_settings.tui.sidebar.command_list { "on" } else { "off" };
                 self.add_info_message(
-                    format!("Agent Command Center sidebar: {agent_center}; command list sidebar: {command_list}. Use /sidebar agent-command-center|acs on|off or /sidebar command-list|cl on|off."),
+                    format!("Agent Command Center sidebar: {agent_center}; command list sidebar: {command_list}. Use /sidebar agent-command-center|acc on|off or /sidebar command-list|cl on|off."),
                     /*hint*/ None,
                 );
             }
@@ -1342,7 +1342,7 @@ impl ChatWidget {
                 let action = parts.next().map(str::to_ascii_lowercase);
                 let valid = parts.next().is_none();
                 let preference = match target.as_str() {
-                    "agent-command-center" | "acs" => Some((
+                    "agent-command-center" | "acc" => Some((
                         true,
                         self.local_settings.tui.sidebar.agent_command_center,
                     )),
@@ -1360,7 +1360,7 @@ impl ChatWidget {
                         };
                         let status = if current { "on" } else { "off" };
                         self.add_info_message(
-                            format!("{label} is {status}. Use /sidebar agent-command-center|acs on|off or /sidebar command-list|cl on|off."),
+                            format!("{label} is {status}. Use /sidebar agent-command-center|acc on|off or /sidebar command-list|cl on|off."),
                             /*hint*/ None,
                         );
                     }
@@ -1385,7 +1385,7 @@ impl ChatWidget {
                         ));
                     }
                     _ => self.add_error_message(
-                        "Usage: /sidebar agent-command-center|acs on|off or /sidebar command-list|cl on|off"
+                        "Usage: /sidebar agent-command-center|acc on|off or /sidebar command-list|cl on|off"
                             .to_string(),
                     ),
                 }

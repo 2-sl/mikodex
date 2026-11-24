@@ -118,7 +118,7 @@ Arrow keys edit a nonempty draft normally while chat has focus.
 Use these commands during a session; each change is saved in your user config and takes effect immediately.
 
 - /render table on|off enables or disables rich Markdown table rendering. /render or /render table shows the current setting.
-- /sidebar agent-command-center on|off (alias: acs) controls the left Agent Command Center rail.
+- /sidebar agent-command-center on|off (alias: acc) controls the left Agent Command Center rail.
 - /sidebar command-list on|off (alias: cl) controls the right command reference rail. /sidebar shows both settings.
 
 The two rails can be toggled independently. The command list still requires a wide terminal.

@@ -53,7 +53,7 @@ Use `/title` to choose what appears in your terminal’s title.
 Use `/theme` to choose a syntax highlighting theme.
 Use `/background` or `/bga` to enable the animated background or select a custom image.
 Use `/render table on|off` to choose rich or raw Markdown tables; the setting persists.
-Use `/sidebar acs on|off` and `/sidebar cl on|off` to show or hide either Mikodex sidebar.
+Use `/sidebar acc on|off` and `/sidebar cl on|off` to show or hide either Mikodex sidebar.
 When plugins are enabled, use `/plugins` to browse plugins.
 Press {key:global.open_transcript} to open the full transcript.
 Press {key:global.find_transcript} to search this conversation.
