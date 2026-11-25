@@ -342,11 +342,12 @@ impl App {
             }
         }
         if conversation.is_some() {
-            for y in center.y..center.bottom() {
-                frame.buffer[(center.right(), y)]
-                    .set_symbol("│")
-                    .set_style(Style::default().dim());
-            }
+            super::panel_separators::draw_vertical(
+                frame.buffer,
+                Rect::new(center.right(), center.y, 1, center.height),
+                Style::default().dim(),
+                &[],
+            );
         }
     }
 }

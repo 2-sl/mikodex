@@ -278,6 +278,7 @@ mod right_click_paste;
 mod status_line_settings;
 mod statusline_picker;
 pub(crate) use right_click_paste::PasteEnvironment;
+mod panel_separators;
 mod pane_motion;
 mod safety_buffering;
 mod safety_recourse;
@@ -1760,10 +1761,15 @@ impl App {
                 rendered_area = conversation_area;
                 chat_widget.render(conversation_area, frame.buffer);
                 if let Some(dock) = dock {
-                    if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
-                        view.render_docked(dock.sidebar, frame.buffer);
-                    }
-                    dock.render_divider(frame.buffer, self);
+                    let left_junction_rows =
+                        if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
+                            let rows = view.docked_separator_rows(dock.sidebar);
+                            view.render_docked(dock.sidebar, frame.buffer);
+                            rows
+                        } else {
+                            Vec::new()
+                        };
+                    dock.render_divider(frame.buffer, self, &left_junction_rows);
                     if !dock.command_reference.is_empty() {
                         command_reference::render(
                             dock.command_reference,

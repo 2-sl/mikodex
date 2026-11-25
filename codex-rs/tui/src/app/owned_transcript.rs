@@ -678,12 +678,16 @@ impl App {
                 self.conversation_frame.close_buttons = buttons;
             }
             if let Some(dock) = agents_dock {
-                if !dock.sidebar.is_empty()
+                let left_junction_rows = if !dock.sidebar.is_empty()
                     && let Some(view) = self.agents_overview.sidebar_view.as_ref()
                 {
+                    let rows = view.docked_separator_rows(dock.sidebar);
                     view.render_docked(dock.sidebar, frame.buffer);
-                }
-                dock.render_divider(frame.buffer, self);
+                    rows
+                } else {
+                    Vec::new()
+                };
+                dock.render_divider(frame.buffer, self, &left_junction_rows);
                 if !dock.command_reference.is_empty() {
                     command_reference::render(
                         dock.command_reference,

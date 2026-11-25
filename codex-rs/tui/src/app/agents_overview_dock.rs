@@ -3,6 +3,7 @@
 use super::App;
 use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
 use super::agents_overview_view::AgentsOverviewView;
+use super::panel_separators::{self, VerticalJunction};
 use crate::key_hint::KeyBindingListExt;
 use crate::legacy_core::config::edit::ConfigEdit;
 use crate::legacy_core::config::edit::ConfigEditsBuilder;
@@ -67,7 +68,12 @@ pub(super) struct AgentsOverviewDockLayout {
 }
 
 impl AgentsOverviewDockLayout {
-    pub(super) fn render_divider(&self, buf: &mut Buffer, app: &App) {
+    pub(super) fn render_divider(
+        &self,
+        buf: &mut Buffer,
+        app: &App,
+        left_junction_rows: &[u16],
+    ) {
         let left_style = if app.agents_overview.sidebar_focused
             || app
                 .agents_overview_dock_resize
@@ -82,11 +88,12 @@ impl AgentsOverviewDockLayout {
         } else {
             Style::default().dim()
         };
-        for y in self.divider.y..self.divider.bottom() {
-            buf[(self.divider.x, y)]
-                .set_symbol("|")
-                .set_style(left_style);
-        }
+        let left_junctions = left_junction_rows
+            .iter()
+            .copied()
+            .map(|y| (y, VerticalJunction::FromLeft))
+            .collect::<Vec<_>>();
+        panel_separators::draw_vertical(buf, self.divider, left_style, &left_junctions);
         let right_style = if app.agents_overview.command_reference_focused
             || app
                 .agents_overview_dock_resize
@@ -101,13 +108,7 @@ impl AgentsOverviewDockLayout {
         } else {
             Style::default().dim()
         };
-        for y in self.command_divider.y..self.command_divider.bottom() {
-            if !self.command_divider.is_empty() {
-                buf[(self.command_divider.x, y)]
-                    .set_symbol("|")
-                    .set_style(right_style);
-            }
-        }
+        panel_separators::draw_vertical(buf, self.command_divider, right_style, &[]);
     }
 }
 
