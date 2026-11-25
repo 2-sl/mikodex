@@ -224,23 +224,15 @@ impl App {
         let activity = self.agents_overview.activity.get(&thread_id).filter(|_| {
             channel.is_none_or(|channel| channel.attachment() == ThreadEventAttachment::Live)
         });
-        let latest_activity = if matches!(source.status, ThreadStatus::Active { .. }) {
-            activity
+        if matches!(source.status, ThreadStatus::Active { .. })
+            && let Some(header) = activity
                 .and_then(|activity| activity.reasoning.as_ref())
                 .and_then(|reasoning| reasoning.header.as_ref())
-                .filter(|header| !header.trim().is_empty())
-                .cloned()
-        } else {
-            None
-        };
-        if !is_child {
-            lines.push(Line::default());
-        }
-        lines.push("Latest activity".dim().into());
-        if let Some(header) = latest_activity {
-            lines.push(header.into());
-        } else {
-            lines.push("No recent activity.".dim().into());
+        {
+            if !is_child {
+                lines.push(Line::default());
+            }
+            lines.extend(["Latest activity".dim().into(), header.clone().into()]);
         }
         let last_message = activity
             .and_then(|activity| activity.last_message.as_ref())

@@ -23,9 +23,8 @@ state with an installed Codex.
 - **Consistent panel separators.** Agent Command Center, command reference,
   and side-conversation boundaries use Unicode box drawing, with connected
   junctions where a horizontal divider meets a vertical panel edge.
-- **Always-present latest activity.** Agent Command Center task details keep
-  the Latest activity heading and one content line visible; empty activity
-  shows a short placeholder.
+- **Current activity preview.** Agent Command Center task details show a
+  Latest activity heading and reasoning summary when an active task has one.
 - **Keyboard focus across panes.** With an empty chat draft, use the left and
   right arrows to move through the Agent Command Center, main chat, optional
   side chat, and command reference. The right reference scrolls with Up and
