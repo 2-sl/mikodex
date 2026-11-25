@@ -1146,7 +1146,11 @@ async fn dispatch_cli(
         profile_v2_for_subcommand(&interactive, subcommand)?;
     }
 
-    let launch_tui = move |interactive, remote, auth_token_env, arg0_paths| async move {
+    let launch_tui = move |interactive: TuiCli, remote: Option<String>, auth_token_env, arg0_paths| async move {
+        #[cfg(windows)]
+        if remote.is_none() && !interactive.no_daemon {
+            rolling_update::sync_managed_daemon_after_rolling_update().await;
+        }
         let exit_info =
             run_interactive_tui(interactive, remote, auth_token_env, arg0_paths).await?;
         handle_app_exit(exit_info, daemon_cli_executable.as_deref()).await

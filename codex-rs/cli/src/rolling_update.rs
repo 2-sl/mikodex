@@ -78,6 +78,79 @@ pub async fn run_if_supported() -> anyhow::Result<bool> {
     Ok(true)
 }
 
+#[cfg(windows)]
+pub async fn sync_managed_daemon_after_rolling_update() {
+    let Some(install) = current_install() else {
+        return;
+    };
+    let receipt = fs::read(install.root.join(RECEIPT_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<UpdateReceipt>(&bytes).ok());
+    let Some(receipt) = receipt else {
+        return;
+    };
+    if receipt.tag_name != ROLLING_TAG
+        || receipt.package_version != install.version
+        || receipt.asset_sha256.len() != 64
+        || !receipt.asset_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return;
+    }
+
+    let Ok(log_path) = update_log_path() else {
+        return;
+    };
+    let Some(log_dir) = log_path.parent() else {
+        return;
+    };
+    let attempt_path = log_dir.join(format!(
+        "daemon-sync-{}.attempted",
+        receipt.asset_sha256.to_ascii_lowercase()
+    ));
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&attempt_path)
+    {
+        Ok(mut marker) => {
+            let _ = writeln!(marker, "{}", install.version);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return,
+        Err(error) => {
+            eprintln!("warning: failed to record managed daemon sync attempt: {error}");
+            return;
+        }
+    }
+
+    let append_log = |message: &str| {
+        if let Ok(mut log) = fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+            let _ = writeln!(log, "{message}");
+        }
+    };
+    let notice = format!(
+        "Synchronizing the managed app-server daemon to Mikodex {}.",
+        install.version
+    );
+    append_log(&notice);
+    match codex_app_server_daemon::update_from_cli(|_| Ok(true)).await {
+        Ok(_) => {
+            append_log(&format!(
+                "Managed app-server daemon sync completed for Mikodex {}.",
+                install.version
+            ));
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&attempt_path);
+            let message = format!(
+                "Managed daemon sync failed for Mikodex {}: {error}. Retry with mikodex app-server daemon update --from-cli --yes.",
+                install.version
+            );
+            eprintln!("warning: {message}");
+            append_log(&message);
+        }
+    }
+}
+
 fn current_install() -> Option<Install> {
     let layout = codex_install_context::InstallContext::current()
         .package_layout

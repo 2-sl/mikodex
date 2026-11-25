@@ -89,8 +89,12 @@ ZIP replaces the rolling release asset even if its version number is unchanged.
 It verifies the release checksum and the complete package before installing.
 Windows keeps a running executable locked, so a helper finishes the package swap
 after the update command exits, without showing a completion dialog.
-Start Mikodex again after the update command exits. This updater currently supports the
-canonical Windows x64 package layout.
+Start Mikodex again after the update command exits. On that next launch, Mikodex
+synchronizes the managed local app-server daemon to the updated CLI package. This
+can restart a running daemon and interrupt active or queued work. The result is
+recorded in %LOCALAPPDATA%\Mikodex\update.log; if synchronization fails, retry
+with `mikodex app-server daemon update --from-cli --yes`. This updater currently
+supports the canonical Windows x64 package layout.
 
 ## Resizing the sidebars
 
