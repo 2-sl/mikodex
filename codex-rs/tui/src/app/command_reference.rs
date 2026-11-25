@@ -1,3 +1,4 @@
+use super::panel_separators;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;
@@ -69,8 +70,11 @@ pub(super) fn render(
             .render(Rect::new(inner.x, inner.y + 1, inner.width, 1), buf);
     }
     if inner.height > 2 {
-        Line::from("-".repeat(usize::from(inner.width)).dim())
-            .render(Rect::new(inner.x, inner.y + 2, inner.width, 1), buf);
+        panel_separators::draw_horizontal(
+            buf,
+            Rect::new(inner.x, inner.y + 2, inner.width, 1),
+            ratatui::style::Style::default().dim(),
+        );
     }
     let content = content_area(area);
     let entries = entries(items, content.width);
