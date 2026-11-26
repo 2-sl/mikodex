@@ -18,19 +18,10 @@ pub async fn load_config(
     config_overrides: &CliConfigOverrides,
     loader_overrides: LoaderOverrides,
 ) -> Result<Config> {
-    load_config_with_resolution(config_overrides, loader_overrides, /*resolution*/ None).await
-}
-
-pub(crate) async fn load_config_with_resolution(
-    config_overrides: &CliConfigOverrides,
-    loader_overrides: LoaderOverrides,
-    resolution: Option<&codex_config::ConfigServerResolution>,
-) -> Result<Config> {
     let mut config = config_builder(
         config_overrides,
         loader_overrides,
         ConfigOverrides::default(),
-        resolution,
     )
     .await?
     .build()
@@ -45,7 +36,6 @@ pub async fn config_builder(
     config_overrides: &CliConfigOverrides,
     loader_overrides: LoaderOverrides,
     harness_overrides: ConfigOverrides,
-    resolution: Option<&codex_config::ConfigServerResolution>,
 ) -> Result<ConfigBuilder> {
     let network_policy = EmbeddedNetworkPolicy::load(&loader_overrides).await;
     let cli_overrides = config_overrides
@@ -76,7 +66,6 @@ pub async fn config_builder(
         ),
         bootstrap_config.config_layer_stack.requirements_toml(),
         /*enable_codex_api_key_env*/ false,
-        resolution,
     )
     .await
     .context("failed to initialize cloud configuration authentication")?;

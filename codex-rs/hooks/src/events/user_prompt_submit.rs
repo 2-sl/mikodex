@@ -490,7 +490,6 @@ mod tests {
 
     fn run_result(exit_code: Option<i32>, stdout: &str, stderr: &str) -> HandlerRunResult {
         HandlerRunResult {
-            encrypted_context: Vec::new(),
             structured_content: None,
             context_metadata: codex_protocol::models::ContentItemMetadata::harness(),
             started_at: 1,

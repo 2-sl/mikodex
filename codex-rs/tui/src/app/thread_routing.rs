@@ -116,31 +116,16 @@ impl App {
         }
     }
 
-    pub(super) fn active_thread_rx(&self) -> Option<&mpsc::Receiver<ThreadBufferedEvent>> {
-        Some(
-            &self
-                .thread_event_channels
-                .get(&self.active_thread_id?)?
-                .receiver,
-        )
-    }
-
-    pub(super) fn active_thread_rx_mut(
-        &mut self,
-    ) -> Option<&mut mpsc::Receiver<ThreadBufferedEvent>> {
-        Some(
-            &mut self
-                .thread_event_channels
-                .get_mut(&self.active_thread_id?)?
-                .receiver,
-        )
-    }
-
     pub(super) async fn activate_thread_channel(&mut self, thread_id: ThreadId) {
         if self.active_thread_id.is_some() {
             return;
         }
         self.set_thread_active(thread_id, /*active*/ true).await;
+        let receiver = if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
+            channel.receiver.take()
+        } else {
+            None
+        };
         if let Some(startup_pane) = self.sidebars.remove(&None)
             && let std::collections::hash_map::Entry::Vacant(entry) =
                 self.sidebars.entry(Some(thread_id))
@@ -153,10 +138,11 @@ impl App {
             }
         }
         self.active_thread_id = Some(thread_id);
+        self.active_thread_rx = receiver;
         self.refresh_pending_thread_approvals().await;
     }
 
-    pub(super) async fn save_active_thread_state(&mut self) {
+    pub(super) async fn store_active_thread_receiver(&mut self) {
         let Some(active_id) = self.active_thread_id else {
             return;
         };
@@ -167,6 +153,7 @@ impl App {
         let input_state = self.chat_widget.capture_thread_input_state();
         let recap_progress = self.recap.progress();
         if let Some(channel) = self.thread_event_channels.get_mut(&active_id) {
+            let receiver = self.active_thread_rx.take();
             let mut store = channel.store.lock().await;
             if store.active {
                 store.replay_may_have_output = false;
@@ -174,6 +161,9 @@ impl App {
             store.active = false;
             store.input_state = input_state;
             store.merge_recap_progress(recap_progress);
+            if let Some(receiver) = receiver {
+                channel.receiver = Some(receiver);
+            }
         }
     }
 
@@ -202,17 +192,20 @@ impl App {
     pub(super) async fn activate_thread_for_replay(
         &mut self,
         thread_id: ThreadId,
-    ) -> Option<ThreadEventSnapshot> {
-        let channel = self.thread_event_channels.get(&thread_id)?;
+    ) -> Option<(mpsc::Receiver<ThreadBufferedEvent>, ThreadEventSnapshot)> {
+        let channel = self.thread_event_channels.get_mut(&thread_id)?;
+        let receiver = channel.receiver.take()?;
         let mut store = channel.store.lock().await;
         store.active = true;
-        Some(store.snapshot())
+        let snapshot = store.snapshot();
+        Some((receiver, snapshot))
     }
 
     pub(super) async fn clear_active_thread(&mut self) {
         if let Some(active_id) = self.active_thread_id.take() {
             self.set_thread_active(active_id, /*active*/ false).await;
         }
+        self.active_thread_rx = None;
         self.refresh_pending_thread_approvals().await;
     }
 
@@ -1143,51 +1136,11 @@ impl App {
     pub(super) async fn enqueue_thread_notification(
         &mut self,
         thread_id: ThreadId,
-        mut notification: ServerNotification,
+        notification: ServerNotification,
     ) -> Result<()> {
         self.deliver_background_voice_notification(thread_id, &notification);
         if self.abandoned_side_threads.contains(&thread_id) {
             return Ok(());
-        }
-        // Cloud attaches before reading history. The live stream can repeat events
-        // from the snapshot, including a completion that would release queued input.
-        if matches!(self.app_server_target, AppServerTarget::Cloud)
-            && matches!(
-                notification,
-                ServerNotification::TurnStarted(_)
-                    | ServerNotification::TurnCompleted(_)
-                    | ServerNotification::ItemCompleted(_)
-            )
-            && self.active_thread_id == Some(thread_id)
-            && let Some(channel) = self.thread_event_channels.get(&thread_id)
-            && channel.recovered_cloud_history
-        {
-            let store = channel.store.lock().await;
-            if store.turns.iter().any(|turn| match &mut notification {
-                ServerNotification::TurnStarted(event) => turn.id == event.turn.id,
-                ServerNotification::TurnCompleted(event) => {
-                    turn.id == event.turn.id
-                        && turn.status != TurnStatus::InProgress
-                        && turn.status == event.turn.status
-                }
-                ServerNotification::ItemCompleted(event) if turn.id == event.turn_id => {
-                    match &mut event.item.payload {
-                        ThreadItemPayload::UserMessage { .. } => {
-                            turn.items.iter().any(|item| item.id() == event.item.id())
-                        }
-                        ThreadItemPayload::AgentMessage { questions, .. }
-                            if turn.status != TurnStatus::InProgress =>
-                        {
-                            *questions = None;
-                            false
-                        }
-                        _ => false,
-                    }
-                }
-                _ => false,
-            }) {
-                return Ok(());
-            }
         }
         self.track_side_chat_title(thread_id, &notification);
         self.notice_sidebar_file_item(thread_id, &notification);
@@ -1272,9 +1225,6 @@ impl App {
                 started.thread.agent_role.clone(),
                 /*is_closed*/ false,
             );
-            if started.thread.agent_nickname.is_some() {
-                self.refresh_collab_history();
-            }
             self.agent_navigation.set_agent_path(
                 thread_id,
                 crate::app_server_session::source_agent_path(&started.thread.source),
@@ -1897,7 +1847,12 @@ impl App {
         tui: &mut tui::Tui,
         frame_deadline: Instant,
     ) -> Result<()> {
-        while let Some(rx) = self.active_thread_rx_mut() {
+        let Some(mut rx) = self.active_thread_rx.take() else {
+            return Ok(());
+        };
+
+        let mut disconnected = false;
+        loop {
             match rx.try_recv() {
                 Ok(event) => {
                     self.handle_thread_event_now_recovering_file_changes(event)
@@ -1905,13 +1860,19 @@ impl App {
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
-                    self.clear_active_thread().await;
+                    disconnected = true;
                     break;
                 }
             }
             if Instant::now() >= frame_deadline {
                 break;
             }
+        }
+
+        if !disconnected {
+            self.active_thread_rx = Some(rx);
+        } else {
+            self.clear_active_thread().await;
         }
 
         if self.backtrack_render_pending {

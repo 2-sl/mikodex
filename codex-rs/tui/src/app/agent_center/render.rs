@@ -5,10 +5,6 @@ use super::super::super::panel_separators;
 use super::*;
 use crate::bottom_pane::render_filled_tab_bar;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
-use crate::motion::LOADING_FRAME_INTERVAL;
-use crate::motion::loading_glyph_with_delay;
-use crate::style::accent_style;
-use crate::style::secondary_text_style;
 use crossterm::cursor::SetCursorStyle;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
@@ -361,43 +357,10 @@ impl Renderable for AgentsOverviewView {
                 (failed && !state.loading).then(|| "Error loading tasks".to_owned())
             })
             .or_else(|| state.server_version_notice.clone());
-        let footer = inset(layout.footer);
-        let progress = if state.help || state.connection_notice.is_some() || footer.is_empty() {
-            None
-        } else if let Some(opening) = state.opening_task {
-            Some(("Opening task…", opening.started_at))
-        } else if self.dock_motion.is_some() && history.is_none() && notice.is_none() {
-            let full_label = "Loading additional tasks…";
-            // Reserve a column each for the spinner and its trailing space.
-            let label = if full_label.width() + 2 <= usize::from(footer.width) {
-                full_label
-            } else {
-                "Loading tasks…"
-            };
-            state
-                .initial_discovery_started_at
-                .map(|started_at| (label, started_at))
+        if let Some(notice) = notice.filter(|_| !state.help) {
+            line(notice.dim(), inset(layout.footer), buf);
         } else {
-            None
-        };
-        if let Some((label, started_at)) = progress {
-            let glyph = self.dock_motion.as_ref().map_or("", |(motion, frames)| {
-                loading_glyph_with_delay(started_at, LOADING_FRAME_INTERVAL, *motion, frames)
-            });
-            let glyph = if glyph.is_empty() { " " } else { glyph };
-            line(
-                vec![
-                    Span::styled(glyph, accent_style()),
-                    " ".into(),
-                    Span::styled(label, secondary_text_style()),
-                ],
-                footer,
-                buf,
-            );
-        } else if let Some(notice) = notice.filter(|_| !state.help) {
-            line(notice.dim(), footer, buf);
-        } else {
-            line(hint_line(&footer_hints), footer, buf);
+            line(hint_line(&footer_hints), inset(layout.footer), buf);
         }
         let help = state.help;
         drop(state);
@@ -425,11 +388,7 @@ impl Renderable for AgentsOverviewView {
                 &[],
             );
         }
-        self.render_center_rows(
-            layout.list,
-            buf,
-            /*progress_in_footer*/ progress.is_some(),
-        );
+        self.render_center_rows(layout.list, buf);
         if !layout.details.is_empty() {
             self.render_details(layout.details, buf);
         }

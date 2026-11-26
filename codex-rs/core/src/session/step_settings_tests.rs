@@ -304,7 +304,6 @@ fn configured_settings() -> StepSettings {
         },
         reasoning_summary: Some(ReasoningSummary::Concise),
         service_tier: None,
-        spawn_service_tier_override: None,
         personality: Some(Personality::Friendly),
         approval_policy: Constrained::allow_any(AskForApproval::OnRequest),
         approvals_reviewer: ApprovalsReviewer::User,

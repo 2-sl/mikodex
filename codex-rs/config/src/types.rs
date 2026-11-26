@@ -1216,13 +1216,16 @@ pub struct PluginsConfigToml {
 
 impl PluginsConfigToml {
     /// Whether configuration permits a source-enabled plugin to remain active.
-    /// Only plugins without an explicit `enabled` setting inherit `_default`.
+    /// Without `_default`, preserve legacy source and account enablement.
+    /// Otherwise, an explicit enablement setting overrides the configured default.
     pub fn allows_plugin(&self, plugin_id: &str) -> bool {
+        let Some(default) = &self.default else {
+            return true;
+        };
         self.plugins
             .get(plugin_id)
             .and_then(|plugin| plugin.enabled)
-            .or(self.default.as_ref().map(|default| default.enabled))
-            .unwrap_or(true)
+            .unwrap_or(default.enabled)
     }
 }
 

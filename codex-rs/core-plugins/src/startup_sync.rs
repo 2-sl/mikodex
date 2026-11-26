@@ -960,7 +960,7 @@ async fn fetch_github_bytes(
             "{context} from {url} failed with status {status}: {body_text}"
         ));
     }
-    Ok(Vec::from(body))
+    Ok(body.to_vec())
 }
 
 async fn fetch_public_text(
@@ -1007,7 +1007,7 @@ async fn fetch_public_bytes(
             "{context} from {url} failed with status {status}: {body_text}"
         ));
     }
-    Ok(Vec::from(body))
+    Ok(body.to_vec())
 }
 
 fn github_request(http_clients: &StartupSyncHttpClient, url: &str) -> RequestBuilder {

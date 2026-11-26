@@ -941,7 +941,6 @@ interrupt_message = false
         };
 
         let requirements_toml = ConfigRequirementsToml {
-            gateway: None,
             config_server: None,
             application: None,
             allowed_login_methods: None,

@@ -4,7 +4,7 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
-fn receipt_preserves_submission_identity_image_and_app_mention() {
+fn image_receipt_preserves_submission_identity_and_attachment() {
     let label = "[Image #1]";
     let actual = item_summary(cloud::ItemSummary::UserMessage {
         id: "item-1".into(),
@@ -21,10 +21,6 @@ fn receipt_preserves_submission_identity_image_and_app_mention() {
                     end: label.len(),
                     placeholder: Some(label.into()),
                 }],
-            },
-            cloud::UserMessageInput::Mention {
-                name: "Example App".into(),
-                path: "app://connector_example".into(),
             },
         ],
     });
@@ -50,10 +46,6 @@ fn receipt_preserves_submission_identity_image_and_app_mention() {
                             },
                             Some(label.into()),
                         )],
-                    },
-                    protocol::UserInput::Mention {
-                        name: "Example App".into(),
-                        path: "app://connector_example".into(),
                     },
                 ],
             },

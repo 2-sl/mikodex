@@ -2,8 +2,9 @@
 source: tui/src/app/sidebar_document_tests.rs
 expression: visible
 ---
-‹  1:f…ld/g…d ×   2:f…ld/g…d ×       +
-↑
+‹  1:f…ld/g…d×  2:f…ld/g…d×          +
+Before the fold.                     ↑
+
 Before the fold.
 
 Before the fold.
@@ -12,5 +13,4 @@ Before the fold.
 
 Updated ending.
 
-esc close · c copy path · p show path
 ↑/↓ read · f3 find · Tab link …

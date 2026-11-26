@@ -17,10 +17,8 @@ const LOOPBACK: &str = "127.0.0.2";
 
 fn sandbox_unavailable(stderr: &str) -> Result<bool> {
     #[cfg(target_os = "linux")]
-    if stderr.contains("bubblewrap is unavailable")
-        || stderr.contains("bwrap: Failed to make / slave: Permission denied")
-    {
-        eprintln!("skipping network proxy sandbox test: {stderr}");
+    if stderr.contains("bubblewrap is unavailable") {
+        eprintln!("skipping network proxy sandbox test: bubblewrap is unavailable");
         return Ok(true);
     }
     #[cfg(target_os = "macos")]

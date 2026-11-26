@@ -3,7 +3,6 @@ use crate::plugin_bundle_archive::PluginBundleUnpackError;
 use crate::plugin_bundle_archive::unpack_plugin_bundle_tar_gz;
 use crate::remote::REMOTE_GLOBAL_MARKETPLACE_NAME;
 use crate::remote::RemotePluginServiceConfig;
-use crate::remote::prepare_signing_key_request;
 use crate::store::PluginInstallResult;
 use crate::store::PluginStore;
 use crate::store::PluginStoreError;
@@ -11,7 +10,6 @@ use crate::store::error_context_sub_error_type;
 use crate::store::validate_plugin_version_segment;
 use codex_http_client::HttpResponse;
 use codex_http_client::RouteAwareRequestError;
-use codex_login::CodexAuth;
 use codex_plugin::PluginId;
 use codex_plugin::PluginIdError;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -30,9 +28,6 @@ use std::time::Duration;
 use url::Host;
 use url::Url;
 
-use codex_plugin_archive_verification::ArchiveVerificationFailure;
-use codex_plugin_archive_verification::RemotePluginArchiveDownload;
-
 const REMOTE_PLUGIN_BUNDLE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 const REMOTE_PLUGIN_BUNDLE_MAX_DOWNLOAD_BYTES: u64 = 100 * 1024 * 1024;
 const REMOTE_PLUGIN_BUNDLE_ERROR_BODY_MAX_BYTES: u64 = 8 * 1024;
@@ -49,7 +44,6 @@ pub struct ValidatedRemotePluginBundle {
     remote_plugin_id: String,
     app_manifest: Option<JsonValue>,
     bundle_download_url: String,
-    archive_download: RemotePluginArchiveDownload,
 }
 
 impl std::fmt::Debug for ValidatedRemotePluginBundle {
@@ -135,16 +129,6 @@ pub enum RemotePluginBundleInstallError {
     UnsupportedBundleDownloadFinalUrl { host: String, scheme: String },
 
     #[error(
-        "plugin `{plugin_id}` version `{plugin_version}` failed archive verification: {source}"
-    )]
-    ArchiveVerification {
-        plugin_id: String,
-        plugin_version: String,
-        #[source]
-        source: ArchiveVerificationFailure,
-    },
-
-    #[error(
         "remote plugin bundle extracted size would be {bytes} bytes, exceeding the maximum total size of {max_bytes} bytes"
     )]
     ExtractedBundleTooLarge { bytes: u64, max_bytes: u64 },
@@ -170,7 +154,6 @@ impl RemotePluginBundleInstallError {
 
     pub fn sub_error_type(&self) -> Option<String> {
         match self {
-            Self::ArchiveVerification { source, .. } => Some(source.as_str().to_owned()),
             Self::Io { context, .. } => Some(error_context_sub_error_type(context)),
             Self::Store(err) => err.sub_error_type(),
             Self::DownloadStatus { status, .. } => {
@@ -197,7 +180,7 @@ pub fn validate_remote_plugin_bundle(
     remote_marketplace_name: &str,
     plugin_name: &str,
     release_version: Option<&str>,
-    archive_download: &RemotePluginArchiveDownload,
+    bundle_download_url: Option<&str>,
     app_manifest: Option<JsonValue>,
 ) -> Result<ValidatedRemotePluginBundle, RemotePluginBundleInstallError> {
     let plugin_id = PluginId::new(plugin_name.to_string(), remote_marketplace_name.to_string())
@@ -218,9 +201,7 @@ pub fn validate_remote_plugin_bundle(
             message,
         }
     })?;
-    let bundle_download_url = archive_download
-        .bundle_download_url
-        .as_deref()
+    let bundle_download_url = bundle_download_url
         .map(str::trim)
         .filter(|url| !url.is_empty())
         .ok_or_else(
@@ -253,7 +234,6 @@ pub fn validate_remote_plugin_bundle(
         remote_plugin_id: remote_plugin_id.to_string(),
         app_manifest,
         bundle_download_url,
-        archive_download: archive_download.clone(),
     })
 }
 
@@ -287,11 +267,10 @@ fn is_loopback_url(url: &Url) -> bool {
 
 pub async fn download_and_install_remote_plugin_bundle(
     config: &RemotePluginServiceConfig,
-    auth: Option<&CodexAuth>,
     codex_home: PathBuf,
     bundle: ValidatedRemotePluginBundle,
 ) -> Result<PluginInstallResult, RemotePluginBundleInstallError> {
-    let bundle_bytes = download_remote_plugin_bundle(config, auth, &bundle).await?;
+    let bundle_bytes = download_remote_plugin_bundle(config, &bundle).await?;
     tokio::task::spawn_blocking(move || {
         install_remote_plugin_bundle(codex_home, bundle, bundle_bytes)
     })
@@ -305,11 +284,10 @@ pub async fn download_and_install_remote_plugin_bundle(
 
 pub(crate) async fn download_and_extract_remote_plugin_bundle_to_path(
     config: &RemotePluginServiceConfig,
-    auth: Option<&CodexAuth>,
     bundle: ValidatedRemotePluginBundle,
     destination: AbsolutePathBuf,
 ) -> Result<AbsolutePathBuf, RemotePluginBundleInstallError> {
-    let bundle_bytes = download_remote_plugin_bundle(config, auth, &bundle).await?;
+    let bundle_bytes = download_remote_plugin_bundle(config, &bundle).await?;
     tokio::task::spawn_blocking(move || {
         extract_remote_plugin_bundle_to_path(bundle, bundle_bytes, destination)
     })
@@ -323,32 +301,14 @@ pub(crate) async fn download_and_extract_remote_plugin_bundle_to_path(
 
 pub(crate) async fn download_remote_plugin_bundle(
     config: &RemotePluginServiceConfig,
-    auth: Option<&CodexAuth>,
     bundle: &ValidatedRemotePluginBundle,
 ) -> Result<Vec<u8>, RemotePluginBundleInstallError> {
-    let bytes = download_remote_plugin_bundle_with_limit(
+    download_remote_plugin_bundle_with_limit(
         config,
         &bundle.bundle_download_url,
         /*max_bytes*/ REMOTE_PLUGIN_BUNDLE_MAX_DOWNLOAD_BYTES,
     )
-    .await?;
-    bundle
-        .archive_download
-        .verify(
-            bytes,
-            &config.chatgpt_base_url,
-            &config.signing_key_cache,
-            |url| prepare_signing_key_request(config, url, auth),
-        )
-        .await
-        .map(|(bytes, _)| bytes)
-        .map_err(
-            |source| RemotePluginBundleInstallError::ArchiveVerification {
-                plugin_id: bundle.plugin_id.as_key(),
-                plugin_version: bundle.plugin_version.clone(),
-                source,
-            },
-        )
+    .await
 }
 
 async fn download_remote_plugin_bundle_with_limit(
@@ -736,7 +696,7 @@ mod tests {
             "openai-curated-remote",
             "linear",
             Some("1.2.3"),
-            &archive_download("https://example.com/linear.tar.gz?sig=signed-token"),
+            Some("https://example.com/linear.tar.gz?sig=signed-token"),
             /*app_manifest*/ None,
         )
         .expect("valid install plan");
@@ -758,7 +718,7 @@ mod tests {
             "openai-curated-remote",
             "linear",
             /*release_version*/ None,
-            &archive_download("https://example.com/linear.tar.gz"),
+            Some("https://example.com/linear.tar.gz"),
             /*app_manifest*/ None,
         )
         .expect_err("missing release version should be rejected");
@@ -776,7 +736,7 @@ mod tests {
             "openai-curated-remote",
             "linear",
             Some("../1.2.3"),
-            &archive_download("https://example.com/linear.tar.gz"),
+            Some("https://example.com/linear.tar.gz"),
             /*app_manifest*/ None,
         )
         .expect_err("invalid release version should be rejected");
@@ -794,7 +754,7 @@ mod tests {
             "openai-curated-remote",
             "linear",
             Some("1.2.3"),
-            &RemotePluginArchiveDownload::default(),
+            /*bundle_download_url*/ None,
             /*app_manifest*/ None,
         )
         .expect_err("missing bundle download URL should be rejected");
@@ -812,7 +772,7 @@ mod tests {
             "openai-curated-remote",
             "linear",
             Some("1.2.3"),
-            &archive_download("http://example.com/linear.tar.gz"),
+            Some("http://example.com/linear.tar.gz"),
             /*app_manifest*/ None,
         )
         .expect_err("plain HTTP URLs should be rejected before cloud install");
@@ -943,7 +903,7 @@ mod tests {
             "workspace-shared-with-me",
             "linear",
             Some("backend-version"),
-            &archive_download("https://example.com/linear.tar.gz"),
+            Some("https://example.com/linear.tar.gz"),
             Some(serde_json::json!({
                 "apps": {
                     "remote": {
@@ -1118,17 +1078,13 @@ mod tests {
         assert_eq!(mode, 0o755);
     }
 
-    fn archive_download(url: &str) -> RemotePluginArchiveDownload {
-        RemotePluginArchiveDownload::new(Some(url.to_owned()))
-    }
-
     fn valid_remote_plugin_bundle() -> ValidatedRemotePluginBundle {
         validate_remote_plugin_bundle(
             REMOTE_PLUGIN_ID,
             "openai-curated-remote",
             "linear",
             Some("1.2.3"),
-            &archive_download("https://example.com/linear.tar.gz"),
+            Some("https://example.com/linear.tar.gz"),
             /*app_manifest*/ None,
         )
         .expect("valid install plan")
@@ -1196,7 +1152,3 @@ mod tests {
 #[cfg(test)]
 #[path = "remote_bundle_runtime_auth_tests.rs"]
 mod runtime_auth_tests;
-
-#[cfg(test)]
-#[path = "remote_bundle_signing_key_cache_tests.rs"]
-mod signing_key_cache_tests;

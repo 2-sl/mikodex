@@ -2376,12 +2376,8 @@ impl HookMcpExecutor for StaticMcpExecutor {
                 .clone();
             self.calls.lock().expect("lock MCP calls").push(call);
             Ok(HookMcpOutput {
-                result: codex_protocol::mcp::CallToolResult {
-                    content: vec![serde_json::json!({"type":"text","text":output})],
-                    structured_content: None,
-                    meta: None,
-                    is_error: None,
-                },
+                text: output,
+                structured_content: None,
                 source_tool_namespace: None,
             })
         }
@@ -2928,12 +2924,8 @@ async fn executor_stop_hooks_do_not_delay_stop_completion() {
                 self.started.notify_one();
                 self.release.notified().await;
                 Ok(HookMcpOutput {
-                    result: codex_protocol::mcp::CallToolResult {
-                        content: vec![serde_json::json!({"type":"text","text":String::new()})],
-                        structured_content: None,
-                        meta: None,
-                        is_error: None,
-                    },
+                    text: String::new(),
+                    structured_content: None,
                     source_tool_namespace: None,
                 })
             }

@@ -33,7 +33,7 @@ pub(super) enum SlashValidation {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum SlashPopupInputMode {
     Normal,
-    Restricted,
+    UnavailableThread,
 }
 
 pub(super) enum SubmissionValidation {
@@ -172,10 +172,9 @@ impl<'a> SlashInput<'a> {
         has_slash_command_prefix(name, self.command_flags, self.service_tier_commands)
     }
 
-    pub(super) fn command_popup(&self, filter_text: &str, disconnected: bool) -> CommandPopup {
+    pub(super) fn command_popup(&self, filter_text: &str) -> CommandPopup {
         let mut command_popup = CommandPopup::new(
             CommandPopupFlags {
-                disconnected,
                 collaboration_modes_enabled: self.command_flags.collaboration_modes_enabled,
                 connectors_enabled: self.command_flags.connectors_enabled,
                 plugins_command_enabled: self.command_flags.plugins_command_enabled,
@@ -334,7 +333,7 @@ impl ChatComposer {
                 if has_visible_items && !has_selectable_item {
                     return (InputResult::None, true);
                 }
-                if self.is_task_running && mode == SlashPopupInputMode::Normal {
+                if self.is_task_running {
                     return self.handle_submission(/*should_queue*/ true);
                 }
                 (InputResult::None, true)
@@ -422,10 +421,7 @@ impl ChatComposer {
                         true,
                     );
                 }
-                // A selection lost on disconnect must not submit the raw draft after reconnect.
-                if popup.blocks_submit_fallback() {
-                    return (InputResult::None, true);
-                }
+                // Fallback to default newline handling if no command selected.
                 self.handle_key_event_without_popup(key_event)
             }
             input => self.handle_input_basic(input),
@@ -565,7 +561,7 @@ pub(super) fn command_popup_filter_text(first_line: &str, cursor: usize) -> Opti
 
 /// If the cursor is currently within a slash command on the first line,
 /// extract the command fragment before the cursor and the rest of the line after it.
-pub(super) fn command_under_cursor(first_line: &str, cursor: usize) -> Option<(&str, &str)> {
+fn command_under_cursor(first_line: &str, cursor: usize) -> Option<(&str, &str)> {
     if !first_line.starts_with('/') {
         return None;
     }

@@ -29,6 +29,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
@@ -56,10 +57,12 @@ struct DescriptionUpdate {
 }
 
 /// One serial housekeeper for an append-only root history and its private board.
-/// The worker owns the model conversation. Its tree retains progress across worker replacement.
+/// The worker owns the model conversation and drains accepted writes before shutdown. After an
+/// error, stop this worker; restart/replay and concurrent board writers are unsupported.
 pub struct Housekeeper {
     board: Arc<dyn AgentMessageBoard>,
     owner: ThreadId,
+    cursor: EvidenceCursor,
     sampler: HousekeeperSampler,
     batch_timeout: Duration,
     stopped: bool,
@@ -70,20 +73,23 @@ impl Housekeeper {
     /// Opens a separate model conversation for this board and its root's evidence cursor.
     pub async fn new(
         board: Arc<dyn AgentMessageBoard>,
+        cursor: EvidenceCursor,
         delivery: Arc<LiveDelivery>,
         parent: &Arc<CodexThread>,
         manager: &codex_core::ThreadManager,
         settings: &GuardianV3HousekeeperConfigToml,
     ) -> anyhow::Result<Self> {
-        let owner = delivery.root;
+        let owner = cursor.thread_id();
         ensure!(
             board.identity() == SessionId::from(owner)
-                && parent.startup_metadata().thread_id == owner,
+                && parent.startup_metadata().thread_id == owner
+                && delivery.root == owner,
             "housekeeper root mismatch"
         );
         Ok(Self {
             board,
             owner,
+            cursor,
             sampler: HousekeeperSampler::new(
                 parent,
                 manager,
@@ -101,8 +107,8 @@ impl Housekeeper {
     }
 
     /// Use this position to capture the next unread range. Reads do not advance it.
-    pub fn cursor(&self) -> EvidenceCursor {
-        self.delivery.cursor()
+    pub fn cursor(&self) -> &EvidenceCursor {
+        &self.cursor
     }
 
     /// Route one batch from this fixed capture and refresh its channel descriptions
@@ -118,7 +124,6 @@ impl Housekeeper {
         self.stopped = true;
         let deadline = ReviewDeadline::from_timeout(Some(self.batch_timeout));
         let active = cancellation.child_token();
-        let account_stop = CancellationToken::new();
         let account_changed = self.sampler.account_changed();
         let cancellation = &active;
         let routing = async {
@@ -127,10 +132,10 @@ impl Housekeeper {
                 snapshot.thread_id() == self.owner,
                 "housekeeper snapshot owner mismatch"
             );
-            let pending = self.cursor().pending(snapshot)?;
+            let pending = self.cursor.pending(snapshot)?;
             if pending.is_empty() {
                 // Advance past records intentionally excluded from evidence selection.
-                self.delivery.acknowledge(snapshot, /*count*/ 0)?;
+                self.cursor.acknowledge(snapshot, /*count*/ 0)?;
                 return Ok(0);
             }
             let mut catalog = BTreeMap::new();
@@ -241,15 +246,16 @@ impl Housekeeper {
                         anyhow::anyhow!("upserting housekeeper channel: {reason:?}")
                     })??;
             }
+            // The local board finishes an accepted append in its own task. Await it even
+            // during shutdown so the root joins the last write before releasing this worker.
             for ((source, destinations), mut text) in sources.iter().zip(output.routes).zip(texts) {
-                // Drain this original on graceful unload. Account changes and the batch
-                // deadline still apply to each destination.
-                check_active(deadline, cancellation)?;
+                let mut recipients = HashMap::new();
                 let mut remaining: BTreeSet<_> = destinations.iter().collect();
                 for channel in &destinations {
                     if !remaining.remove(channel) {
                         continue;
                     }
+                    check_active(deadline, cancellation)?;
                     let request = AppendRequest {
                         request_id: source.id.request_id(channel)?,
                         destination: PostDestination::Channel(channel.clone()),
@@ -260,18 +266,19 @@ impl Housekeeper {
                             text.clone()
                         },
                     };
-                    self.delivery
-                        .append(
-                            self.board.as_ref(),
-                            request,
-                            source.id,
-                            deadline,
-                            &account_stop,
-                        )
+                    let (post, subscribers) = self
+                        .board
+                        .append_with_subscribers(self.owner, request)
                         .await?;
+                    for actor in subscribers {
+                        recipients.entry(actor).or_insert(post.message_id);
+                    }
                 }
-                self.delivery.acknowledge(snapshot, /*count*/ 1)?;
+                self.delivery.publish(source.id, recipients)?;
             }
+            // Acknowledge only after every write succeeds. Returned errors leave this batch
+            // unread and stop this instance; no replay is attempted.
+            self.cursor.acknowledge(snapshot, sources.len())?;
             self.sampler.commit(batch);
             Ok(sources.len())
         };
@@ -282,7 +289,6 @@ impl Housekeeper {
                 () = account_changed => {
                     // Let an already accepted append finish after the account changes.
                     active.cancel();
-                    account_stop.cancel();
                     routing.await
                 }
                 result = &mut routing => result,
@@ -308,10 +314,7 @@ fn routing_schema(source_count: usize) -> serde_json::Value {
     })
 }
 
-pub(super) fn check_active(
-    deadline: ReviewDeadline,
-    cancellation: &CancellationToken,
-) -> anyhow::Result<()> {
+fn check_active(deadline: ReviewDeadline, cancellation: &CancellationToken) -> anyhow::Result<()> {
     ensure!(!cancellation.is_cancelled(), "housekeeping cancelled");
     ensure!(
         !matches!(deadline, ReviewDeadline::At(at) if Instant::now() >= at),

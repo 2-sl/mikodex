@@ -97,11 +97,7 @@ impl HookOutputSpiller {
     ) -> Vec<HookContext> {
         let mut spilled = Vec::with_capacity(contexts.len());
         for AdditionalContext { mut context, limit } in contexts {
-            if let crate::HookContextPayload::Text(text) = &mut context.payload {
-                *text = self
-                    .maybe_spill_text_with_limit(std::mem::take(text), limit)
-                    .await;
-            }
+            context.text = self.maybe_spill_text_with_limit(context.text, limit).await;
             spilled.push(context);
         }
         spilled

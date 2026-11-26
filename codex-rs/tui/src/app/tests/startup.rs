@@ -437,7 +437,8 @@ async fn queued_startup_requests_block_terminal_input_after_draft_handoff() -> R
         app.enqueue_primary_thread_request(request).await?;
 
         assert!(
-            app.active_thread_rx()
+            app.active_thread_rx
+                .as_ref()
                 .is_some_and(|receiver| !receiver.is_empty())
         );
         assert!(
@@ -456,7 +457,8 @@ async fn queued_startup_requests_block_terminal_input_after_draft_handoff() -> R
         }
 
         let event = app
-            .active_thread_rx_mut()
+            .active_thread_rx
+            .as_mut()
             .expect("primary thread receiver should be active")
             .try_recv()
             .expect("protected request should be queued on the active thread");
@@ -516,7 +518,8 @@ async fn queued_startup_requests_block_draft_restore_until_drained() -> Result<(
     assert!(app.chat_widget.composer_is_empty());
 
     let event = app
-        .active_thread_rx_mut()
+        .active_thread_rx
+        .as_mut()
         .expect("primary thread receiver should be active")
         .try_recv()
         .expect("protected request should be queued on the active thread");
@@ -559,7 +562,8 @@ async fn startup_draft_handoff_keeps_approval_shortcuts_in_recently_active_compo
         .note_server_request(&approval_request);
     app.enqueue_primary_thread_request(approval_request).await?;
     let approval_event = app
-        .active_thread_rx_mut()
+        .active_thread_rx
+        .as_mut()
         .expect("primary thread receiver should be active")
         .try_recv()
         .expect("approval should be queued on the active thread");
@@ -623,7 +627,8 @@ async fn startup_draft_delayed_approval_becomes_protected_on_redraw() -> Result<
         .note_server_request(&approval_request);
     app.enqueue_primary_thread_request(approval_request).await?;
     let approval_event = app
-        .active_thread_rx_mut()
+        .active_thread_rx
+        .as_mut()
         .expect("primary thread receiver should be active")
         .try_recv()
         .expect("approval should be queued on the active thread");
@@ -762,7 +767,8 @@ async fn later_thread_approval_preserves_input_after_startup_boundary_ends() -> 
         .note_server_request(&approval_request);
     app.enqueue_primary_thread_request(approval_request).await?;
     let approval_event = app
-        .active_thread_rx_mut()
+        .active_thread_rx
+        .as_mut()
         .expect("primary thread receiver should be active")
         .try_recv()
         .expect("approval should be queued on the active thread");
@@ -852,32 +858,13 @@ async fn unattended_modals_survive_unfinished_terminal_input() -> Result<()> {
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let mut app_server =
         crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
-    // A rewind must not advertise an editable prompt while typeahead is still draining.
-    crossterm::event::buffer_input(b"\x1b[200~unfinished")?;
-    let transition = ThreadTransition::PromptReverted(thread_id);
-    app.finish_thread_input_drain(&mut tui, transition);
-    assert!(!app.can_read_terminal_after_thread_switch(&tui, &app_event_rx));
-    assert!(
-        !std::iter::from_fn(|| app_event_rx.try_recv().ok())
-            .any(|event| matches!(event, AppEvent::InsertHistoryCell(_))),
-        "premature rewind notice"
-    );
-    crossterm::event::buffer_input(b"\x1b[201~\r")?;
-    app.finish_thread_input_drain(&mut tui, transition);
-    assert!(
-        std::iter::from_fn(|| app_event_rx.try_recv().ok())
-            .any(|event| matches!(event, AppEvent::InsertHistoryCell(_))),
-        "missing rewind notice"
-    );
-    assert!(app.can_read_terminal_after_thread_switch(&tui, &app_event_rx));
-
     crossterm::event::buffer_input(b"\x1b]10;")?;
     let request = exec_approval_request(thread_id, "turn-1", "call-1", /*approval_id*/ None);
     let _ = app
         .pending_app_server_requests
         .note_server_request(&request);
     app.enqueue_primary_thread_request(request).await?;
-    let event = app.active_thread_rx_mut().unwrap().try_recv()?;
+    let event = app.active_thread_rx.as_mut().unwrap().try_recv()?;
     app.handle_active_thread_event(&mut tui, &mut app_server, event)
         .await?;
     assert!(app.chat_widget.has_active_modal());
@@ -1104,7 +1091,7 @@ async fn auto_declined_mcp_elicitations_do_not_leave_startup_quarantine_armed() 
 }
 
 #[tokio::test]
-async fn startup_draft_handoff_protects_delayed_question_until_resolved() -> Result<()> {
+async fn startup_draft_handoff_recognizes_late_user_input_as_new_protected_view() -> Result<()> {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let thread_id = ThreadId::new();
     app.enqueue_primary_thread_session(
@@ -1139,7 +1126,8 @@ async fn startup_draft_handoff_protects_delayed_question_until_resolved() -> Res
         .note_server_request(&request);
     app.enqueue_primary_thread_request(request).await?;
     let event = app
-        .active_thread_rx_mut()
+        .active_thread_rx
+        .as_mut()
         .expect("primary thread receiver should be active")
         .try_recv()
         .expect("user input request should be queued on the active thread");
@@ -1147,25 +1135,12 @@ async fn startup_draft_handoff_protects_delayed_question_until_resolved() -> Res
     assert!(!app.chat_widget.has_active_view());
     app.handle_thread_event_now(event);
 
-    assert!(!app.chat_widget.has_active_view());
-    assert!(app.chat_widget.has_pending_protected_request());
-    app.chat_widget.dismiss_app_server_request(
-        &crate::app::app_server_requests::ResolvedAppServerRequest::UserInput {
-            call_id: "call-1".to_string(),
-        },
-    );
-    assert!(!app.chat_widget.has_pending_protected_request());
+    assert!(app.chat_widget.has_active_view());
     assert_eq!(app.chat_widget.composer_text_with_pending(), "x");
     while let Ok(event) = app_event_rx.try_recv() {
         assert!(
-            !matches!(
-                event,
-                AppEvent::SubmitThreadOp {
-                    op: Op::UserInputAnswer { .. },
-                    ..
-                }
-            ),
-            "dismissing the delayed question must not submit an answer: {event:?}"
+            !matches!(event, AppEvent::CodexOp(Op::UserInputAnswer { .. })),
+            "showing the protected user input request must not submit an answer: {event:?}"
         );
     }
 
@@ -1211,7 +1186,8 @@ async fn fresh_startup_thread_drains_buffered_approval_before_draft_handoff() ->
 
     assert!(matches!(control, AppRunControl::Continue));
     assert!(
-        app.active_thread_rx()
+        app.active_thread_rx
+            .as_ref()
             .is_some_and(|receiver| !receiver.is_empty())
     );
     assert!(!app.chat_widget.has_active_view());
@@ -1630,7 +1606,8 @@ async fn startup_thread_started_discards_another_threads_buffered_events() {
 
     assert!(app.pending_primary_events.is_empty());
     assert!(
-        app.active_thread_rx_mut()
+        app.active_thread_rx
+            .as_mut()
             .is_some_and(|rx| rx.try_recv().is_err())
     );
 }

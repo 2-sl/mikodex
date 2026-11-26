@@ -47,7 +47,6 @@ async fn discover_session(
         bootstrap.config_layer_stack.requirements_toml(),
     )
     .await
-    .map(|session| session.and_then(|(_, manager)| manager))
     .map_err(|_| config_server_login_failed("Could not initialize configuration server sign-in"))
 }
 

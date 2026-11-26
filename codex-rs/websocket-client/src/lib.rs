@@ -162,25 +162,6 @@ impl WebSocketConnector {
         .await
     }
 
-    // Build the boxed dial future here so proxy routes and callers share its poll code.
-    fn dial(
-        &self,
-        request: Request,
-        config: WebSocketConfig,
-        proxy_route: OutboundProxyRoute,
-        loopback_direct: bool,
-    ) -> BoxFuture<'static, Result<(ConnectionInner, Response), WebSocketError>> {
-        dialer::connect(
-            request,
-            config,
-            self.tls_config.clone(),
-            proxy_route,
-            self.tcp_nodelay,
-            loopback_direct,
-        )
-        .boxed()
-    }
-
     async fn connect_with_route(
         &self,
         mut request: Request,
@@ -207,9 +188,16 @@ impl WebSocketConnector {
                 request.headers_mut().insert(COOKIE, cookies);
             }
             let proxy_route = route.await.map_err(WebSocketError::Io)?;
-            let result = self
-                .dial(request, config, proxy_route, loopback_direct)
-                .await;
+            let result = dialer::connect(
+                request,
+                config,
+                self.tls_config.clone(),
+                proxy_route,
+                self.tcp_nodelay,
+                loopback_direct,
+            )
+            .boxed()
+            .await;
             // Like HTTP responses, rejected upgrades can also refresh infrastructure cookies.
             match &result {
                 Ok((_, response)) => self

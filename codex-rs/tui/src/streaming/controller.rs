@@ -589,7 +589,7 @@ impl StreamCore {
 /// Wraps [`StreamCore`] and adds `AgentMessageCell` emission styling.
 pub(crate) struct StreamController {
     core: StreamCore,
-    emitted_cells: usize,
+    header_emitted: bool,
 }
 
 impl StreamController {
@@ -622,7 +622,7 @@ impl StreamController {
     ) -> Self {
         Self {
             core: StreamCore::new(width, cwd, render_mode, inline_visualization_context),
-            emitted_cells: 0,
+            header_emitted: false,
         }
     }
 
@@ -676,17 +676,12 @@ impl StreamController {
 
     #[inline]
     pub(crate) fn tail_starts_stream(&self) -> bool {
-        self.emitted_cells == 0 && self.core.enqueued_stable_len == 0
+        !self.header_emitted && self.core.enqueued_stable_len == 0
     }
 
     #[inline]
     pub(crate) fn has_live_tail(&self) -> bool {
         self.core.has_tail()
-    }
-
-    /// Includes the final fragment, if any, after `finalize`.
-    pub(crate) fn emitted_cells(&self) -> usize {
-        self.emitted_cells
     }
 
     /// Include the unterminated line when handing an in-flight answer to another view.
@@ -734,9 +729,12 @@ impl StreamController {
         if lines.is_empty() {
             return None;
         }
-        self.emitted_cells += 1;
         Some(Box::new(
-            history_cell::AgentMessageCell::new_hyperlink_lines(lines, self.emitted_cells == 1),
+            history_cell::AgentMessageCell::new_hyperlink_lines(lines, {
+                let header_emitted = self.header_emitted;
+                self.header_emitted = true;
+                !header_emitted
+            }),
         ))
     }
 }

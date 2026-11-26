@@ -10,7 +10,6 @@ use crate::script_attribution::PluginMeasurementTarget;
 use codex_features::RuntimeAuthMode;
 use codex_login::CodexAuth;
 use codex_plugin::PluginId;
-use codex_plugin_archive_verification::SigningKeyCache;
 use codex_runtime_agent_instance::RuntimeAuthSlot;
 use codex_utils_path_uri::PathConvention;
 use std::sync::Arc;
@@ -68,7 +67,6 @@ fn is_preparing(cell: &ReferenceCell) -> bool {
 #[derive(Default)]
 pub struct RemotePluginMeasurementCache {
     references: Mutex<Vec<(ReferenceKey, ReferenceCell)>>,
-    signing_key_cache: Arc<SigningKeyCache>,
 }
 
 impl RemotePluginMeasurementCache {
@@ -98,10 +96,7 @@ impl RemotePluginMeasurementCache {
         // GLOBAL plugins have already passed server-side admission; local
         // marketplace product policy and skill capability loading are separate.
         let service = config
-            .remote_plugin_service_config_with_signing_key_cache(
-                runtime_auth,
-                Arc::clone(&self.signing_key_cache),
-            )
+            .remote_plugin_service_config(runtime_auth)
             .for_current_account();
         let Some((remote_id, bundle)) = fetch_measurement_reference_bundle(&service, auth, target)
             .await
@@ -201,7 +196,6 @@ impl RemotePluginMeasurementCache {
             return Ok(None);
         };
         if let Some(sender) = initializer {
-            let auth = auth.clone();
             // The cache keeps the receiver alive when individual callers cancel.
             // Once the cache and all callers disappear, stop waiting/downloading.
             tokio::spawn(async move {
@@ -209,7 +203,7 @@ impl RemotePluginMeasurementCache {
                     biased;
                     _ = sender.closed() => return,
                     reference = async {
-                        let bytes = download_remote_plugin_bundle(&service, Some(&auth), &bundle).await?;
+                        let bytes = download_remote_plugin_bundle(&service, &bundle).await?;
                         // Blocking extraction cannot be aborted once started. Its
                         // owner must keep the store alive even if this task stops.
                         tokio::task::spawn_blocking(move || {

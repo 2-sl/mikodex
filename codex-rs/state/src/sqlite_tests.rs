@@ -272,8 +272,7 @@ async fn open_read_write_pool_initializes_fresh_database_settings() -> anyhow::R
         // Hold connections open so the assertions cover lazy pool connections too.
         let mut connections = Vec::new();
         let mut settings = Vec::new();
-        let connection_count = usize::try_from(pool.options().get_max_connections())?;
-        for _ in 0..connection_count {
+        for _ in 0..5 {
             let mut connection = pool.acquire().await?;
             let current: (String, i64, i64) = sqlx::query_as(
                 "SELECT journal_mode, auto_vacuum, synchronous
@@ -292,7 +291,7 @@ async fn open_read_write_pool_initializes_fresh_database_settings() -> anyhow::R
                     SqliteAutoVacuum::Incremental as i64,
                     if nfs { 3 } else { 1 },
                 );
-                connection_count
+                5
             ]
         );
         drop(connections);
@@ -412,8 +411,7 @@ async fn open_read_write_pool_preserves_delete_under_write_lock() -> anyhow::Res
     // Keep each acquired connection open to test connections that the pool initializes later.
     let mut connections = Vec::new();
     let mut settings = Vec::new();
-    let connection_count = usize::try_from(pool.options().get_max_connections())?;
-    for _ in 0..connection_count {
+    for _ in 0..5 {
         let mut connection = pool.acquire().await?;
         let journal: String = sqlx::query_scalar("PRAGMA journal_mode")
             .fetch_one(&mut *connection)
@@ -424,7 +422,7 @@ async fn open_read_write_pool_preserves_delete_under_write_lock() -> anyhow::Res
         settings.push((journal, synchronous));
         connections.push(connection);
     }
-    assert_eq!(settings, vec![("delete".to_string(), 3); connection_count]);
+    assert_eq!(settings, vec![("delete".to_string(), 3); 5]);
     drop(connections);
     sqlx::query("ROLLBACK").execute(&mut *lock_holder).await?;
     drop(lock_holder);

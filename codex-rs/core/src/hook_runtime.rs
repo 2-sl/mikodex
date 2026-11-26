@@ -833,7 +833,7 @@ pub(crate) async fn drain_async_hook_results(
             .iter()
             .filter(|entry| entry.kind == HookOutputEntryKind::Context)
             .map(|entry| codex_hooks::HookContext {
-                payload: codex_hooks::HookContextPayload::Text(entry.text.clone()),
+                text: entry.text.clone(),
                 metadata: codex_protocol::models::ContentItemMetadata::command_hook(),
             })
             .collect::<Vec<_>>();
@@ -914,34 +914,8 @@ fn additional_context_messages(
 ) -> Vec<ResponseItem> {
     additional_contexts
         .into_iter()
-        .map(|context| match context.payload {
-            codex_hooks::HookContextPayload::Text(text) => {
-                ContextualUserFragment::into(HookAdditionalContext::new(text, context.metadata))
-            }
-            codex_hooks::HookContextPayload::EncryptedToolOutput {
-                name,
-                namespace,
-                encrypted_content,
-            } => ResponseItem::FunctionCallOutput {
-                id: None,
-                call_id: None,
-                name: Some(name),
-                namespace,
-                output: codex_protocol::models::FunctionCallOutputPayload::from_content_items(
-                    vec![
-                        codex_protocol::models::FunctionCallOutputContentItem::EncryptedContent {
-                            encrypted_content,
-                        },
-                    ],
-                ),
-                internal_chat_message_metadata_passthrough: Some(
-                    codex_protocol::models::InternalChatMessageMetadataPassthrough {
-                        content_item_metadata: Some(vec![context.metadata]),
-                        ..Default::default()
-                    },
-                ),
-            },
-        })
+        .map(HookAdditionalContext::new)
+        .map(ContextualUserFragment::into)
         .collect()
 }
 

@@ -38,12 +38,8 @@ impl HookMcpExecutor for McpResult {
         async move {
             match self.0 {
                 Ok(text) => Ok(HookMcpOutput {
-                    result: codex_protocol::mcp::CallToolResult {
-                        content: vec![json!({"type": "text", "text": text})],
-                        structured_content: None,
-                        meta: None,
-                        is_error: None,
-                    },
+                    text: text.to_string(),
+                    structured_content: None,
                     source_tool_namespace: None,
                 }),
                 Err(error) => anyhow::bail!(error),

@@ -46,8 +46,6 @@ pub enum UserMessageInput {
         image: ImageReference,
         detail: Option<ImageDetail>,
     },
-    /// A named resource in existing conversation history.
-    Mention { name: String, path: String },
 }
 /// A placeholder span in the UTF-8 bytes of a text input part.
 #[derive(Clone, PartialEq, Eq)]
@@ -139,7 +137,6 @@ impl Client {
             || !request.input.iter().any(|input| match input {
                 UserMessageInput::Text { text, .. } => !text.trim().is_empty(),
                 UserMessageInput::Image { .. } => true,
-                UserMessageInput::Mention { .. } => false,
             })
             || request.input.iter().any(|input| match input {
                 UserMessageInput::Text {
@@ -159,7 +156,6 @@ impl Client {
                     }
                     ImageReference::FileId(value) => value.trim().is_empty(),
                 },
-                UserMessageInput::Mention { .. } => true,
             })
         {
             return Err(MutationError::InvalidRequest);
@@ -214,11 +210,6 @@ impl Client {
                                     }
                                 };
                                 wire::Value::Image(wire::Image { value: Some(value) })
-                            }
-                            UserMessageInput::Mention { .. } => {
-                                unreachable!(
-                                    "history mentions are rejected by submission validation"
-                                )
                             }
                         }),
                     })

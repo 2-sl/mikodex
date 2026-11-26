@@ -1000,7 +1000,7 @@ impl ChatWidget {
     }
 
     /// Returns the cached metadata for a thread, defaulting to empty if none has been registered.
-    pub(crate) fn collab_agent_metadata(&self, thread_id: ThreadId) -> AgentMetadata {
+    fn collab_agent_metadata(&self, thread_id: ThreadId) -> AgentMetadata {
         self.collab_agent_metadata
             .get(&thread_id)
             .cloned()
@@ -1173,8 +1173,8 @@ impl ChatWidget {
     }
 
     fn sync_context_window_visibility(&mut self) {
-        let hidden = self.read_only_history || self.token_usage_pending;
-        self.bottom_pane.set_context_window_hidden(hidden);
+        self.bottom_pane
+            .set_context_window_hidden(self.read_only_history || self.token_usage_pending);
     }
 
     pub(crate) fn set_token_info(&mut self, info: Option<TokenUsageInfo>) {
@@ -1559,7 +1559,7 @@ impl ChatWidget {
             .iter()
             .map(|process| history_cell::UnifiedExecProcessDetails {
                 command_display: process.command_display.clone(),
-                recent_chunks: process.recent_lines(),
+                recent_chunks: process.recent_chunks.clone(),
             })
             .collect();
         self.add_to_history(history_cell::new_unified_exec_processes_output(processes));

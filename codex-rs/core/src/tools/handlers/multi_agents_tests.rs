@@ -543,13 +543,9 @@ async fn spawn_agent_service_tier_uses_root_preference_when_root_model_cannot_su
     assert_eq!(root.thread.config_snapshot().await.service_tier, None);
 
     config.model = Some("gpt-5.5".to_string());
-    apply_spawn_agent_service_tier(
-        root.thread.session.as_ref(),
-        &mut config,
-        /*requested*/ None,
-    )
-    .await
-    .expect("root preference should be resolved against the child model");
+    apply_spawn_agent_service_tier(root.thread.session.as_ref(), &mut config)
+        .await
+        .expect("root preference should be resolved against the child model");
 
     assert_eq!(
         config.service_tier,
@@ -598,13 +594,10 @@ async fn spawn_agent_service_tier_inheritance_uses_root_preference_and_child_mod
                 Arc::new(session),
                 Arc::new(turn),
                 "spawn_agent",
-                function_payload(json!({
-                    "message": "inspect this repo",
-                    "service_tier": "default"
-                })),
+                function_payload(json!({"message": "inspect this repo"})),
             ))
             .await
-            .expect("spawn_agent should ignore a tier argument by default");
+            .expect("spawn_agent should inherit a supported parent service tier");
         let (content, _) = expect_text_output(output);
         let result: SpawnAgentResult =
             serde_json::from_str(&content).expect("spawn_agent result should be json");

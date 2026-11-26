@@ -22,7 +22,6 @@ use crate::onboarding::keys;
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
 use crate::tui::FrameRequester;
-use crate::tui::TuiEvent;
 
 use super::onboarding_screen::StepState;
 
@@ -87,13 +86,7 @@ impl WelcomeWidget {
         self.presentation.set(presentation);
     }
 
-    pub(super) fn handle_draw_event(&self, event: &TuiEvent, focused: bool) {
-        if matches!(event, TuiEvent::Resize(_) | TuiEvent::Resume) {
-            self.animation.borrow_mut().invalidate_window_size();
-        }
-        if matches!(event, TuiEvent::Resume) {
-            self.set_presentation(Presentation::Hidden);
-        }
+    pub(crate) fn set_focused(&self, focused: bool) {
         self.focused.set(focused);
     }
 }
@@ -182,7 +175,7 @@ mod tests {
 
         let welcome_row = row_containing(&buf, "Welcome");
         assert_eq!(welcome_row, Some(ANIMATION_HEIGHT + 1));
-        widget.handle_draw_event(&TuiEvent::FocusLost, /*focused*/ false);
+        widget.set_focused(/*focused*/ false);
         (&widget).render_ref(area, &mut buf);
         assert_eq!(row_containing(&buf, "Welcome"), welcome_row);
     }

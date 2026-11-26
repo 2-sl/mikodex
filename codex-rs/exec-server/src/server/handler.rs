@@ -39,8 +39,6 @@ use crate::protocol::FsCopyParams;
 use crate::protocol::FsCopyResponse;
 use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsCreateDirectoryResponse;
-use crate::protocol::FsGetMetadataBatchParams;
-use crate::protocol::FsGetMetadataBatchResponse;
 use crate::protocol::FsGetMetadataParams;
 use crate::protocol::FsGetMetadataResponse;
 use crate::protocol::FsOpenParams;
@@ -419,14 +417,6 @@ impl ExecServerHandler {
         })
         .await
         .map_err(|error| crate::rpc::internal_error(error.to_string()))?
-    }
-
-    pub(crate) async fn fs_get_metadata_batch(
-        &self,
-        params: FsGetMetadataBatchParams,
-    ) -> Result<FsGetMetadataBatchResponse, JSONRPCErrorError> {
-        self.require_initialized_for("filesystem")?;
-        self.file_system.get_metadata_batch(params).await
     }
 
     pub(crate) async fn fs_get_metadata(

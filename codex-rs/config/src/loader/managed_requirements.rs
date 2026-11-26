@@ -153,7 +153,6 @@ pub async fn load_guardian_policy_snapshot(
                             | "guardian_policy_config"
                             | "guardian_extra_policy"
                             | "config_server"
-                            | "gateway"
                     )
                 });
             }

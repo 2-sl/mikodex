@@ -377,7 +377,7 @@ async fn http_reprepares_request_when_account_switches_during_budget_check(mode:
 #[test_case(RuntimeAuthMode::DualHeader, true; "dual_header_with_gateway")]
 #[test_case(RuntimeAuthMode::AssertionOnly, true; "assertion_only_with_gateway")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn websocket_reuses_connection_until_credentials_or_account_change(
+async fn websocket_reconnects_for_replacement_and_account_switch_within_a_turn(
     mode: RuntimeAuthMode,
     gateway: bool,
 ) {
@@ -395,8 +395,12 @@ async fn websocket_reuses_connection_until_credentials_or_account_change(
     ];
     let server = start_websocket_server(vec![
         // Leave one unread response on each old connection so the server does not close it.
-        vec![response.clone(); 4],
+        // Runtime admission must happen again even when the peer keeps the socket open.
         vec![response.clone(), response.clone()],
+        vec![response.clone(), response.clone()],
+        vec![response.clone(), response.clone()],
+        // The account switches after this handshake, before its request is sent.
+        vec![response.clone()],
         vec![response],
     ])
     .await;
@@ -429,12 +433,7 @@ async fn websocket_reuses_connection_until_credentials_or_account_change(
     stream_until_complete(&mut session, &harness, &prompt_with_input(input.clone())).await;
     input.push(message_item("second"));
     stream_until_complete(&mut session, &harness, &prompt_with_input(input.clone())).await;
-    assert_eq!(server.handshakes().len(), 1);
-    drop(session);
-    let mut session = harness.client.new_session();
-    input.push(message_item("third"));
-    stream_until_complete(&mut session, &harness, &prompt_with_input(input.clone())).await;
-    assert_eq!(server.handshakes().len(), 1);
+    assert_eq!(server.handshakes().len(), 2);
 
     *credentials.0.write().unwrap() = CodexAuth::from_api_key("key-b");
     session
@@ -448,17 +447,17 @@ async fn websocket_reuses_connection_until_credentials_or_account_change(
         .unwrap();
     assert_eq!(
         server.handshakes().len(),
-        1,
+        2,
         "preconnect must not admit work"
     );
-    input.push(message_item("fourth"));
+    input.push(message_item("third"));
     stream_until_complete(&mut session, &harness, &prompt_with_input(input.clone())).await;
-    assert_eq!(server.handshakes().len(), 2);
+    assert_eq!(server.handshakes().len(), 3);
 
-    input.push(message_item("fifth"));
+    input.push(message_item("fourth"));
     let prompt = prompt_with_input(input);
     let gate = Arc::new(Barrier::new(2));
-    // Allow the pre-connect check, then pause after selecting the old account's socket.
+    // Allow the pre-connect check, then pause after the old account's socket opens.
     budget.0.lock().unwrap().extend([None, Some(gate.clone())]);
     let generation = stream_until_complete(&mut session, &harness, &prompt);
     tokio::pin!(generation);
@@ -472,10 +471,10 @@ async fn websocket_reuses_connection_until_credentials_or_account_change(
     assert!(!previous_owner.is_current());
     tokio::join!(generation, gate.wait());
     let handshakes = server.handshakes();
-    assert_eq!(handshakes.len(), 3);
+    assert_eq!(handshakes.len(), 5);
     let runtime_ids: Vec<_> = handshakes
         .iter()
-        .zip(["key-a", "key-b", "key-other-user"])
+        .zip(["key-a", "key-a", "key-b", "key-b", "key-other-user"])
         .map(|(h, credential)| {
             assert_eq!(
                 h.header("cookie").as_deref(),
@@ -495,24 +494,22 @@ async fn websocket_reuses_connection_until_credentials_or_account_change(
                 .clone()
         })
         .collect();
-    assert_ne!(runtime_ids[0], runtime_ids[1]);
+    assert_eq!(runtime_ids[0], runtime_ids[1]);
     assert_ne!(runtime_ids[1], runtime_ids[2]);
+    assert_eq!(runtime_ids[2], runtime_ids[3]);
+    assert_ne!(runtime_ids[3], runtime_ids[4]);
     assert_eq!(
         server
             .connections()
             .iter()
             .map(Vec::len)
             .collect::<Vec<_>>(),
-        vec![3, 1, 1]
+        vec![1, 1, 1, 0, 1]
     );
     for (index, request) in server.connections().iter().flatten().enumerate() {
         let body = request.body_json();
-        let reused = index == 1 || index == 2;
-        assert_eq!(
-            body["previous_response_id"],
-            if reused { json!("resp-1") } else { Value::Null }
-        );
-        // Turn routing is scoped to the current turn and credential owner.
+        assert_eq!(body["previous_response_id"], Value::Null);
+        // Reconnecting with the same actor preserves turn routing.
         let expected_turn_state = if index == 1 {
             json!("runtime-state")
         } else {
@@ -522,10 +519,7 @@ async fn websocket_reuses_connection_until_credentials_or_account_change(
             body["client_metadata"]["x-codex-turn-state"],
             expected_turn_state
         );
-        assert_eq!(
-            body["input"].as_array().unwrap().len(),
-            if reused { 1 } else { index + 1 }
-        );
+        assert_eq!(body["input"].as_array().unwrap().len(), index + 1);
     }
     for request in registration.received_requests().await.unwrap() {
         let body: Value = request.body_json().unwrap();
@@ -728,7 +722,7 @@ async fn model_runtime_auth_strips_credentials_on_cross_origin_redirects(mode: R
 #[test_case(RuntimeAuthMode::DualHeader; "dual_header")]
 #[test_case(RuntimeAuthMode::AssertionOnly; "assertion_only")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn paused_runtime_is_rejected_after_server_closes_connection(mode: RuntimeAuthMode) {
+async fn paused_runtime_cannot_continue_on_an_admitted_websocket(mode: RuntimeAuthMode) {
     use futures::SinkExt;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
@@ -758,15 +752,12 @@ async fn paused_runtime_is_rejected_after_server_closes_connection(mode: Runtime
     let proofs = Arc::new(std::sync::Mutex::new(Vec::new()));
     let server_requests = Arc::clone(&requests);
     let server_proofs = Arc::clone(&proofs);
-    let closed = Arc::new(tokio::sync::Notify::new());
-    let server_closed = Arc::clone(&closed);
     let server = tokio::spawn(async move {
         let mut connections = tokio::task::JoinSet::new();
         for paused in [false, true, true, false] {
             let (stream, _) = listener.accept().await.unwrap();
             let proofs = Arc::clone(&server_proofs);
             let requests = Arc::clone(&server_requests);
-            let closed = Arc::clone(&server_closed);
             connections.spawn(async move {
                 let handshake = move |request: &HandshakeRequest, response: HandshakeResponse| {
                     proofs.lock().unwrap().push(assertion_payload(
@@ -802,6 +793,7 @@ async fn paused_runtime_is_rejected_after_server_closes_connection(mode: Runtime
                 else {
                     return;
                 };
+                // Keep admitted sockets usable: only another handshake observes the pause.
                 while let Some(Ok(message)) = socket.next().await {
                     if message.is_text() {
                         requests.fetch_add(/*val*/ 1, Ordering::SeqCst);
@@ -811,15 +803,6 @@ async fn paused_runtime_is_rejected_after_server_closes_connection(mode: Runtime
                                 .await
                                 .unwrap();
                         }
-                        // The server's authorization loop closes an admitted socket on pause.
-                        socket.close(None).await.unwrap();
-                        while let Some(Ok(message)) = socket.next().await {
-                            if message.is_close() {
-                                break;
-                            }
-                        }
-                        closed.notify_one();
-                        break;
                     }
                 }
             });
@@ -838,9 +821,6 @@ async fn paused_runtime_is_rejected_after_server_closes_connection(mode: Runtime
     };
     let mut session = harness.client.new_session();
     complete(&mut session, &harness).await.unwrap();
-    tokio::time::timeout(Duration::from_secs(5), closed.notified())
-        .await
-        .expect("client acknowledged the server close");
     let error = complete(&mut session, &harness).await.unwrap_err();
     assert_paused(&error);
     drop(session);

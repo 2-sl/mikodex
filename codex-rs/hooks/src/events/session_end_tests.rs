@@ -43,7 +43,6 @@ fn session_end_ignores_successful_output() {
     let completed = parse_completed(
         &handler(/*matcher*/ None),
         HandlerRunResult {
-            encrypted_context: Vec::new(),
             structured_content: None,
             context_metadata: codex_protocol::models::ContentItemMetadata::harness(),
             started_at: 1,

@@ -124,19 +124,7 @@ pub(crate) fn ignored_toml_value_fields<T: DeserializeOwned>(
     value: TomlValue,
 ) -> Result<Vec<Vec<String>>, serde_path_to_error::Error<toml::de::Error>> {
     let mut ignored_paths = Vec::new();
-    validate_toml_value::<T>(value, Some(&mut ignored_paths))?;
-    Ok(ignored_paths)
-}
-
-/// Keep the same deserializer type whether or not the caller needs ignored field paths.
-pub(crate) fn validate_toml_value<T: DeserializeOwned>(
-    value: TomlValue,
-    mut ignored_paths: Option<&mut Vec<Vec<String>>>,
-) -> Result<(), serde_path_to_error::Error<toml::de::Error>> {
     let mut record_path = |path: serde_ignored::Path<'_>| {
-        let Some(ignored_paths) = &mut ignored_paths else {
-            return;
-        };
         let segments = ignored_path_segments(&path);
         if !segments.is_empty() {
             ignored_paths.push(segments);
@@ -144,7 +132,7 @@ pub(crate) fn validate_toml_value<T: DeserializeOwned>(
     };
     let deserializer = serde_ignored::Deserializer::new(value, &mut record_path);
     serde_path_to_error::deserialize::<_, T>(deserializer)?;
-    Ok(())
+    Ok(ignored_paths)
 }
 
 pub(crate) fn unknown_feature_toml_value_field(value: &TomlValue) -> Option<String> {

@@ -181,7 +181,6 @@ pub(super) async fn run_main_inner(
                 &validation_bootstrap,
                 &codex_home,
                 &embedded_network_policy,
-                /*resolution*/ None,
             )
             .await?
         } else {
@@ -314,7 +313,7 @@ pub(super) async fn run_main_inner(
             err
         }
     })?;
-    let resolution = if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
         codex_cloud_config::ensure_config_server_login(
             embedded_network_policy.bind_bootstrap_auth(bootstrap_auth_config(
                 &codex_home,
@@ -326,10 +325,8 @@ pub(super) async fn run_main_inner(
                 .requirements_toml(),
             codex_cloud_config::ConfigServerLoginMethod::Browser,
         )
-        .await?
-    } else {
-        None
-    };
+        .await?;
+    }
     // Keep normal terminal signals available until local configuration is ready. Once raw
     // mode begins, StartupDraft immediately takes ownership of input.
     let (initialized_terminal, terminal_restore_guard) = tokio::task::spawn_blocking(|| {
@@ -405,7 +402,6 @@ pub(super) async fn run_main_inner(
             &bootstrap_config,
             &codex_home,
             &embedded_network_policy,
-            resolution.as_ref(),
         ))
         .await??;
     let bootstrap_config_toml = &bootstrap_config.config_toml;
@@ -541,7 +537,6 @@ pub(super) async fn run_main_inner(
                 ),
                 config.config_layer_stack.requirements_toml(),
                 /*enable_codex_api_key_env*/ false,
-                cloud_config_bundle.config_server_resolution(),
             ))
             .await??
     };

@@ -5,6 +5,9 @@ use super::AppEventSender;
 use super::AppServerPath;
 use super::AppServerSession;
 use super::Document;
+use super::DocumentContent;
+use super::FileLink;
+use super::SidebarImage;
 use super::ThreadId;
 use tokio::sync::watch;
 
@@ -16,15 +19,16 @@ impl Document {
         server: &AppServerSession,
         tx: AppEventSender,
     ) {
-        if !matches!(self.access, super::DocumentAccess::User) {
-            return;
-        }
         let reader = server.request_view();
         let backend_id = self.backend;
         let source = self.source;
         let path = self.path.clone();
         let original_path = self.original_path.clone();
-        let location = self.location;
+        let is_image = (FileLink {
+            path: path.inferred_native_path_string(),
+            location: self.location,
+        })
+        .is_image();
         let request = uuid::Uuid::new_v4();
         let (refresh, mut changes) = watch::channel(());
         self.watch = Some((request, refresh));
@@ -32,8 +36,23 @@ impl Document {
             let fs = reader.file_system();
             let load = || async {
                 let result = async {
-                    let bytes = fs.read_preview_file(source, &original_path, &path).await?;
-                    super::decode_document(bytes, &path, location).await
+                    if is_image {
+                        let bytes = reader
+                            .read_preview_file(source, &original_path, &path)
+                            .await?;
+                        tokio::task::spawn_blocking(move || match SidebarImage::decode(&bytes) {
+                            Ok(image) => Ok(DocumentContent::Image(Box::new(image))),
+                            Err(image_error) => AppServerSession::preview_text(bytes)
+                                .map(DocumentContent::Text)
+                                .map_err(|_| image_error),
+                        })
+                        .await?
+                    } else {
+                        reader
+                            .read_document(source, &original_path, &path)
+                            .await
+                            .map(DocumentContent::Text)
+                    }
                 }
                 .await;
                 tx.send(AppEvent::SidebarDocumentLoaded {

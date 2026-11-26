@@ -483,7 +483,7 @@ async fn apply_hunks_to_files(
                     write_file_with_missing_parent_retry(
                         fs,
                         &path_uri,
-                        contents.as_bytes(),
+                        contents.clone().into_bytes(),
                         follow_symlinks,
                         sandbox,
                     )
@@ -594,7 +594,7 @@ async fn apply_hunks_to_files(
                         write_file_with_missing_parent_retry(
                             fs,
                             &dest_uri,
-                            new_contents.as_bytes(),
+                            new_contents.clone().into_bytes(),
                             follow_symlinks,
                             sandbox,
                         )
@@ -765,14 +765,14 @@ async fn note_existing_path_delta_support(
 async fn write_file_with_missing_parent_retry(
     fs: &dyn ExecutorFileSystem,
     path: &PathUri,
-    contents: &[u8],
+    contents: Vec<u8>,
     follow_symlinks: bool,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> anyhow::Result<()> {
     match fs
         .write_file(
             path,
-            contents.to_vec(),
+            contents.clone(),
             WriteFileOptions { follow_symlinks },
             sandbox,
         )
@@ -799,7 +799,7 @@ async fn write_file_with_missing_parent_retry(
             }
             fs.write_file(
                 path,
-                contents.to_vec(),
+                contents,
                 WriteFileOptions { follow_symlinks },
                 sandbox,
             )

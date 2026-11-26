@@ -49,6 +49,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
+use tokio::sync::OnceCell;
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::RwLock;
 use tokio::sync::Semaphore;
@@ -81,42 +82,19 @@ struct NetworkApprovalProxy {
     shared_ingress_for_remote: Option<Arc<AtomicBool>>,
 }
 
-/// Owns the service entry from registration through command completion.
-/// The map never owns this guard; cancelling startup therefore removes its entry on drop.
-#[derive(Debug)]
-struct NetworkApprovalRegistration {
-    registration_id: String,
-    calls: std::sync::Weak<SyncMutex<NetworkApprovalCallState>>,
-    finish_outcome: SyncOnceLock<Option<String>>,
-}
-
-impl NetworkApprovalRegistration {
-    fn finish(&self) -> &Option<String> {
-        self.finish_outcome.get_or_init(|| {
-            let calls = self.calls.upgrade()?;
-            let mut calls = calls
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            calls.active_calls.shift_remove(&self.registration_id);
-            calls.call_outcomes.remove(&self.registration_id)
-        })
-    }
-}
-
-impl Drop for NetworkApprovalRegistration {
-    fn drop(&mut self) {
-        let _ = self.finish();
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct DeferredNetworkApproval {
-    registration: Arc<NetworkApprovalRegistration>,
+    registration_id: String,
     cancellation_token: CancellationToken,
+    finish_outcome: Arc<OnceCell<Option<String>>>,
     _execution_proxy: Option<NetworkApprovalProxy>,
 }
 
 impl DeferredNetworkApproval {
+    pub(crate) fn registration_id(&self) -> &str {
+        &self.registration_id
+    }
+
     pub(crate) fn cancellation_token(&self) -> CancellationToken {
         self.cancellation_token.clone()
     }
@@ -139,19 +117,21 @@ impl DeferredNetworkApproval {
         std::future::pending().await
     }
 
-    pub(crate) fn finish(&self) -> Result<(), ToolError> {
+    async fn finish(&self, service: &NetworkApprovalService) -> Result<(), ToolError> {
         let outcome = self
-            .registration
-            .finish()
-            .clone()
-            .or_else(|| abandoned_network_approval_outcome(&self.cancellation_token));
+            .finish_outcome
+            .get_or_init(|| async { service.finish_call_outcome(&self.registration_id).await })
+            .await
+            .clone();
+        let outcome =
+            outcome.or_else(|| abandoned_network_approval_outcome(&self.cancellation_token));
         network_approval_outcome_to_result(outcome)
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct ActiveNetworkApproval {
-    registration: NetworkApprovalRegistration,
+    registration_id: Option<String>,
     cancellation_token: CancellationToken,
     execution_proxy: NetworkApprovalProxy,
 }
@@ -165,17 +145,18 @@ impl ActiveNetworkApproval {
         &self.execution_proxy.proxy
     }
 
-    pub(crate) fn into_deferred(self) -> DeferredNetworkApproval {
+    pub(crate) fn into_deferred(self) -> Option<DeferredNetworkApproval> {
         let ActiveNetworkApproval {
-            registration,
+            registration_id,
             cancellation_token,
             execution_proxy,
         } = self;
-        DeferredNetworkApproval {
-            registration: Arc::new(registration),
+        registration_id.map(|registration_id| DeferredNetworkApproval {
+            registration_id,
             cancellation_token,
+            finish_outcome: Arc::new(OnceCell::new()),
             _execution_proxy: Some(execution_proxy),
-        }
+        })
     }
 }
 
@@ -324,7 +305,7 @@ struct PendingNetworkApprovals {
 pub(crate) struct NetworkApprovalService {
     shared_ingress_registered: Arc<AtomicBool>,
     // Pending-request cleanup must publish a tool outcome synchronously before cancelling it.
-    calls: Arc<SyncMutex<NetworkApprovalCallState>>,
+    calls: SyncMutex<NetworkApprovalCallState>,
     // Owner cleanup runs from Drop, so this lock cannot require an async task.
     pending_host_approvals: SyncMutex<PendingNetworkApprovals>,
     // Keep persisted session policy and the in-memory approval caches in the same order.
@@ -506,7 +487,7 @@ impl Default for NetworkApprovalService {
     fn default() -> Self {
         Self {
             shared_ingress_registered: Arc::default(),
-            calls: Arc::default(),
+            calls: SyncMutex::new(NetworkApprovalCallState::default()),
             pending_host_approvals: SyncMutex::default(),
             session_policy_commit_lock: Mutex::new(()),
             session_approved_hosts: Mutex::new(HashSet::new()),
@@ -530,12 +511,7 @@ impl NetworkApprovalService {
         other_approved_hosts.extend(approved_hosts.iter().cloned());
     }
 
-    fn register_call(&self, call: ActiveNetworkApprovalCall) -> NetworkApprovalRegistration {
-        let registration = NetworkApprovalRegistration {
-            registration_id: call.registration_id.clone(),
-            calls: Arc::downgrade(&self.calls),
-            finish_outcome: SyncOnceLock::new(),
-        };
+    async fn register_call(&self, call: ActiveNetworkApprovalCall) {
         let mut calls = self
             .calls
             .lock()
@@ -543,7 +519,10 @@ impl NetworkApprovalService {
         calls
             .active_calls
             .insert(call.registration_id.clone(), Arc::new(call));
-        registration
+    }
+
+    pub(crate) async fn unregister_call(&self, registration_id: &str) {
+        self.remove_call(registration_id).await;
     }
 
     async fn resolve_single_active_call(&self) -> Option<Arc<ActiveNetworkApprovalCall>> {
@@ -718,6 +697,19 @@ impl NetworkApprovalService {
 
         drop(calls);
         call.cancellation_token.cancel();
+    }
+
+    async fn remove_call(&self, registration_id: &str) -> Option<String> {
+        let mut calls = self
+            .calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        calls.active_calls.shift_remove(registration_id);
+        calls.call_outcomes.remove(registration_id)
+    }
+
+    async fn finish_call_outcome(&self, registration_id: &str) -> Option<String> {
+        self.remove_call(registration_id).await
     }
 
     pub(crate) async fn record_blocked_request(&self, blocked: BlockedRequest) {
@@ -1271,7 +1263,7 @@ pub(crate) async fn begin_network_approval(
         return Ok(None);
     };
     let cancellation_token = CancellationToken::new();
-    let registration = session
+    session
         .services
         .network_approval
         .register_call(ActiveNetworkApprovalCall {
@@ -1284,10 +1276,11 @@ pub(crate) async fn begin_network_approval(
             permission_profile,
             environments: environments.clone(),
             cancellation_token: cancellation_token.clone(),
-        });
+        })
+        .await;
 
     Ok(Some(ActiveNetworkApproval {
-        registration,
+        registration_id: Some(registration_id),
         cancellation_token,
         execution_proxy: NetworkApprovalProxy {
             proxy,
@@ -1444,13 +1437,14 @@ pub(crate) async fn remote_network_proxy_launch(
     Ok((launch, credential_masking))
 }
 
-pub(crate) fn finish_deferred_network_approval(
+pub(crate) async fn finish_deferred_network_approval(
+    session: &Session,
     deferred: Option<DeferredNetworkApproval>,
 ) -> Result<(), ToolError> {
     let Some(deferred) = deferred else {
         return Ok(());
     };
-    deferred.finish()
+    deferred.finish(&session.services.network_approval).await
 }
 
 #[cfg(test)]

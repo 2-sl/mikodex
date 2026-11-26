@@ -76,14 +76,14 @@ pub fn prepare_context(
     budgeting: ContextBudgeting,
     reviewer_history: &[ResponseItemEnvelope],
 ) -> Result<ComposedContext, SectionError> {
-    prepare_context_with_caps(
+    prepare_context_with_async_caps(
         context,
         profile,
         entry_number_offset,
         presentation,
         budgeting,
         reviewer_history,
-        /*elastic*/ None,
+        /*async_elastic*/ None,
     )
 }
 
@@ -101,7 +101,7 @@ pub fn prepare_async_context(
     } else {
         ContextBudgeting::Fixed
     };
-    prepare_context_with_caps(
+    prepare_context_with_async_caps(
         Cow::Borrowed(context),
         profile,
         entry_number_offset,
@@ -112,14 +112,14 @@ pub fn prepare_async_context(
     )
 }
 
-fn prepare_context_with_caps(
+fn prepare_context_with_async_caps(
     context: Cow<'_, CollectedContext>,
     profile: &ContextProfile,
     entry_number_offset: usize,
     presentation: ContextPresentation<'_>,
     budgeting: ContextBudgeting,
     reviewer_history: &[ResponseItemEnvelope],
-    elastic: Option<&ElasticBudgetConfig>,
+    async_elastic: Option<&ElasticBudgetConfig>,
 ) -> Result<ComposedContext, SectionError> {
     let (target, placeholder) = match &presentation {
         ContextPresentation::SyncFull { .. } => (
@@ -190,7 +190,6 @@ fn prepare_context_with_caps(
         transcript::prepare_heartbeats(entries, entry_number_offset),
         entry_number_offset,
         budgeting,
-        elastic,
     );
     if entries.len() == entry_number_offset
         && let Some(placeholder) = placeholder
@@ -225,9 +224,7 @@ fn prepare_context_with_caps(
         *enclosing_call = Some(evidence);
     }
     context.retain_new_reviews(reviewer_history);
-    if target == crate::ContextTarget::Async
-        && let Some(config) = elastic
-    {
+    if let Some(config) = async_elastic {
         async_entries::apply(&mut context, config, &mut transcript.truncations);
     }
     prepare_sections(&mut context, budgeting)?;
@@ -480,7 +477,7 @@ pub trait SyncImagePreparer: Sync {
 /// Image capability is independent of the model context window used for all evidence.
 pub struct SyncPreparation<'a> {
     /// Fixed remains the production default until elastic rollout is enabled.
-    pub elastic: Option<&'a ElasticBudgetConfig>,
+    pub budgeting: ContextBudgeting,
     pub reviewer_history: &'a [ResponseItemEnvelope],
     pub context_window: Option<i64>,
     pub history_tokens: i64,
@@ -505,21 +502,15 @@ pub async fn prepare_sync_context_with_facts(
             section: "sync_preparation",
         });
     }
-    let budgeting = if preparation.elastic.is_some() {
-        ContextBudgeting::Elastic
-    } else {
-        ContextBudgeting::Fixed
-    };
-    let mut context = prepare_context_with_caps(
+    let mut context = prepare_context(
         Cow::Owned(context),
         profile,
         entry_number_offset,
         presentation,
-        budgeting,
+        preparation.budgeting,
         preparation.reviewer_history,
-        preparation.elastic,
     )?;
-    if budgeting == ContextBudgeting::Elastic && !preparation.supports_images {
+    if preparation.budgeting == ContextBudgeting::Elastic && !preparation.supports_images {
         context.retain_images(|_, _| false);
     } else if context
         .section_costs()
@@ -537,7 +528,7 @@ pub async fn prepare_sync_context_with_facts(
             |image, detail| preparation.image_preparer.prepare(image, detail),
             preparation.estimate_tokens,
             || std::future::ready(preparation.history_tokens),
-            budgeting,
+            preparation.budgeting,
         )
         .await;
     }

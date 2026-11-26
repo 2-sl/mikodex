@@ -12,7 +12,6 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -22,10 +21,7 @@ use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::CommandExecParams;
 use codex_app_server_protocol::CommandExecResponse;
-use codex_app_server_protocol::PermissionProfileListParams;
-use codex_app_server_protocol::PermissionProfileListResponse;
 use codex_app_server_protocol::RequestId;
-use futures::future::BoxFuture;
 use uuid::Uuid;
 
 /// Shared handle for running workspace commands from TUI components.
@@ -43,8 +39,6 @@ pub(crate) struct WorkspaceCommand {
     pub(crate) argv: Vec<String>,
     /// Explicit working directory on the host that executes the command.
     pub(crate) cwd: PathBuf,
-    /// Named permissions to resolve in the command cwd. Omission uses server defaults.
-    pub(crate) permission_profile: Option<String>,
     /// Environment overrides where `None` removes a variable.
     pub(crate) env: HashMap<String, Option<String>>,
     /// Maximum wall-clock duration before app-server cancels the command.
@@ -62,7 +56,6 @@ impl WorkspaceCommand {
         Self {
             argv: argv.into_iter().map(Into::into).collect(),
             cwd: cwd.into(),
-            permission_profile: None,
             env: HashMap::new(),
             timeout: Duration::from_secs(/*secs*/ 5),
             disable_output_cap: false,
@@ -136,15 +129,6 @@ impl std::error::Error for WorkspaceCommandError {}
 /// Implementations decide where the workspace lives. Callers provide argv/cwd/env and should not
 /// branch on local versus remote execution.
 pub(crate) trait WorkspaceCommandExecutor: Send + Sync {
-    /// Checks whether a custom profile is defined outside the thread.
-    fn has_permission_profile<'a>(
-        &'a self,
-        _cwd: &'a Path,
-        _id: &'a str,
-    ) -> BoxFuture<'a, Result<bool, WorkspaceCommandError>> {
-        Box::pin(async { Ok(false) })
-    }
-
     /// Runs a workspace command and returns captured output or an app-server request error.
     ///
     /// Callers should treat errors as infrastructure failures and should treat successful output
@@ -172,33 +156,12 @@ impl AppServerWorkspaceCommandRunner {
 }
 
 impl WorkspaceCommandExecutor for AppServerWorkspaceCommandRunner {
-    fn has_permission_profile<'a>(
-        &'a self,
-        cwd: &'a Path,
-        id: &'a str,
-    ) -> BoxFuture<'a, Result<bool, WorkspaceCommandError>> {
-        Box::pin(async move {
-            let catalog: PermissionProfileListResponse = self
-                .request_handle
-                .request_typed(ClientRequest::PermissionProfileList {
-                    request_id: RequestId::String(format!("workspace-profiles-{}", Uuid::new_v4())),
-                    params: PermissionProfileListParams {
-                        cwd: Some(cwd.to_string_lossy().into_owned()),
-                        cursor: None,
-                        limit: None, // Full catalog.
-                    },
-                })
-                .await
-                .map_err(|err| WorkspaceCommandError::new(err.to_string()))?;
-            // Let command/exec enforce requirements for defined profiles.
-            Ok(catalog.data.iter().any(|profile| profile.id == id))
-        })
-    }
-
     /// Sends the command as a one-off app-server `command/exec` request.
     ///
     /// The request is non-tty, does not stream stdin/stdout/stderr, and uses the caller's timeout.
-    /// App-server resolves any named permission profile in the command cwd.
+    /// Bounded commands use app-server's default output cap. It leaves sandbox and permission
+    /// profile selection to app-server so the same runner follows the active session's embedded or
+    /// remote execution policy.
     fn run(
         &self,
         command: WorkspaceCommand,
@@ -230,7 +193,7 @@ impl WorkspaceCommandExecutor for AppServerWorkspaceCommandRunner {
                         env,
                         size: None,
                         sandbox_policy: None,
-                        permission_profile: command.permission_profile,
+                        permission_profile: None,
                     },
                 })
                 .await

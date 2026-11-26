@@ -257,7 +257,6 @@ async fn spawn_v2_subagent(
             control.clone(),
             Some(parent_thread_id),
             /*inherited_exec_policy*/ None,
-            /*spawn_service_tier*/ None,
         )
         .await
         .expect("spawn v2 subagent")

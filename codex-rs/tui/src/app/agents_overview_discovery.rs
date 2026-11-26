@@ -19,7 +19,6 @@ use codex_app_server_protocol::ThreadSourceKind;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::SubAgentSource;
 use codex_state::PINNED_THREAD_SECTION_ID;
-use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::sync::PoisonError;
 use tokio_util::task::AbortOnDropHandle;
@@ -160,12 +159,7 @@ impl AgentsOverviewDiscovery {
         &mut self,
         handle: &AppServerRequestHandle,
         limit: usize,
-        search_sort: Option<HistorySort>,
     ) -> (Vec<(Thread, bool)>, bool) {
-        let timestamp = |thread: &Thread| match search_sort {
-            Some(sort) => sort.timestamp(thread),
-            None => thread.recency_at.unwrap_or(thread.updated_at),
-        };
         let [interactive, other] = &mut self.sources;
         // Cloud does not support filtering its task list to Exec and AppServer threads.
         if matches!(handle, AppServerRequestHandle::Cloud(_)) {
@@ -188,8 +182,9 @@ impl AgentsOverviewDiscovery {
                     source.rows.front().map(|(thread, _)| (index, thread))
                 })
                 .max_by(|(_, left), (_, right)| {
-                    timestamp(left)
-                        .cmp(&timestamp(right))
+                    left.recency_at
+                        .unwrap_or(left.updated_at)
+                        .cmp(&right.recency_at.unwrap_or(right.updated_at))
                         .then_with(|| left.id.cmp(&right.id))
                 })
                 .map(|(index, _)| index);
@@ -216,7 +211,7 @@ impl AgentsOverviewDiscovery {
         refresh_recent: bool,
     ) -> (Vec<(Thread, bool)>, bool) {
         if !matches!(handle, AppServerRequestHandle::Cloud(_)) {
-            return self.next_batch(handle, limit, /*search_sort*/ None).await;
+            return self.next_batch(handle, limit).await;
         }
         // Cloud has one source. Fetch only what we can show, even for a partial refill.
         self.sources[1].exhausted = true;
@@ -339,44 +334,9 @@ impl SourcePage {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(super) enum HistorySort {
-    Created,
-    #[default]
-    Updated,
-}
-
-impl HistorySort {
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::Created => "Created",
-            Self::Updated => "Updated",
-        }
-    }
-
-    fn sort_key(self) -> ThreadSortKey {
-        match self {
-            Self::Created => ThreadSortKey::CreatedAt,
-            Self::Updated => ThreadSortKey::UpdatedAt,
-        }
-    }
-
-    pub(super) fn timestamp(self, thread: &Thread) -> i64 {
-        match self {
-            Self::Created => thread.created_at,
-            Self::Updated => thread.updated_at,
-        }
-    }
-}
-
 #[derive(Default)]
 pub(super) struct HistorySearch {
-    /// Identifies matches for this query across sort changes.
     pub(super) id: Uuid,
-    /// Changes on every restart so a late page cannot advance a different scan.
-    pub(super) scan_id: Uuid,
-    /// Visible before the sort changed, but not yet encountered in the new order.
-    pub(super) retained: HashSet<ThreadId>,
     pub(super) cursor: AgentsOverviewDiscovery,
     /// Requested number of matches visible under the active status filter.
     pub(super) target: usize,
@@ -411,19 +371,17 @@ impl App {
         let shared = &self.agents_overview.view_state;
         let mut state = shared.lock().unwrap_or_else(PoisonError::into_inner);
         let query = state.search.to_lowercase();
-        let sort = state.search_sort;
-        let Some(search) = state.history.as_mut().filter(|search| search.scan_id == id) else {
+        let Some(search) = state.history.as_mut().filter(|search| search.id == id) else {
             return;
         };
-        let first = self.agents_overview.search_id != search.id;
+        let first = self.agents_overview.search_id != id;
         let mut cursor = std::mem::take(&mut search.cursor);
         if first {
             self.agents_overview.search_matches.clear();
-            self.agents_overview.search_id = search.id;
+            self.agents_overview.search_id = id;
         }
         for source in &mut cursor.sources {
             source.page_size = 100;
-            source.sort_key = sort.sort_key();
         }
         if matches!(handle, AppServerRequestHandle::Cloud(_)) {
             cursor.sources[1].exhausted = true;
@@ -434,7 +392,7 @@ impl App {
                 tokio::time::sleep(std::time::Duration::from_millis(180)).await;
             }
             loop {
-                let (mut rows, ok) = cursor.next_batch(&handle, limit, Some(sort)).await;
+                let (mut rows, ok) = cursor.next_batch(&handle, limit).await;
                 rows.retain(|(thread, _)| matches_query(thread, &query));
                 if rows.is_empty() && ok && cursor.has_more() {
                     continue;
@@ -464,15 +422,12 @@ impl App {
             .view_state
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let Some(search) = state.history.as_mut().filter(|s| s.scan_id == id) else {
+        let Some(search) = state.history.as_mut().filter(|s| s.id == id) else {
             return;
         };
         for (thread, unread) in rows {
-            let Ok(id) = ThreadId::from_string(&thread.id) else {
-                continue;
-            };
-            search.retained.remove(&id);
-            if !overview.threads.get(&id).is_some_and(Option::is_some)
+            if let Ok(id) = codex_protocol::ThreadId::from_string(&thread.id)
+                && !overview.threads.get(&id).is_some_and(Option::is_some)
                 && !overview.removed_threads.contains(&id)
                 && !overview.hidden_threads.contains(&id)
                 && let std::collections::hash_map::Entry::Vacant(entry) =

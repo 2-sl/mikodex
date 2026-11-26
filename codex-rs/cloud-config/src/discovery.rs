@@ -2,7 +2,6 @@
 //! Explicit OAuth settings take precedence, and discovered settings stay in memory.
 
 use codex_config::ConfigServer;
-use codex_config::ConfigServerResolution;
 use codex_exec_server::RouteAwareHttpClient;
 use codex_login::AuthRouteConfig;
 use codex_login::OAuthSessionConfig;
@@ -17,23 +16,8 @@ const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) async fn resolve_config_server(
     config: &ConfigServer,
     routes: &AuthRouteConfig,
-    previous: Option<&ConfigServerResolution>,
-) -> io::Result<ConfigServerResolution> {
+) -> io::Result<ConfigServer> {
     config.validated_base_url().map_err(io::Error::other)?;
-    let factory = routes.bootstrap_http_client_factory();
-    let outbound_proxy_policy = factory.outbound_proxy_policy();
-    let system_proxy_fallback = factory.allows_system_proxy_fallback();
-    if let Some(previous) = previous
-        && previous.configured == *config
-        && previous.outbound_proxy_policy == outbound_proxy_policy
-        && previous.system_proxy_fallback == system_proxy_fallback
-    {
-        previous
-            .resolved
-            .validated_base_url()
-            .map_err(io::Error::other)?;
-        return Ok(previous.clone());
-    }
     let mut resolved = config.clone();
 
     if config.oauth.is_none()
@@ -43,12 +27,7 @@ pub(crate) async fn resolve_config_server(
         resolved.validated_base_url().map_err(io::Error::other)?;
     }
 
-    Ok(ConfigServerResolution {
-        outbound_proxy_policy,
-        system_proxy_fallback,
-        configured: config.clone(),
-        resolved,
-    })
+    Ok(resolved)
 }
 
 async fn discover_oauth(

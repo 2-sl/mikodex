@@ -31,7 +31,6 @@ use crate::SectionHistory;
 use crate::SectionInput;
 use crate::SectionScope;
 use crate::TranscriptContent;
-use crate::audio_transcripts::collect_audio_transcript;
 
 pub(crate) const TRANSCRIPT_OMISSION_NOTICE: &str = "Some conversation entries were omitted.";
 
@@ -183,11 +182,6 @@ fn collect_transcript_for_review(
         .filter(|context| !crate::retained_instructions::has_legacy_order(context));
 
     for (item, source) in history.items_with_sources() {
-        entries.extend(
-            history
-                .audio_transcripts_for(item)
-                .filter_map(|transcript| collect_audio_transcript(transcript, &config.options)),
-        );
         let is_enclosing_call = matches!(
             item,
             ResponseItem::FunctionCall { call_id, .. }

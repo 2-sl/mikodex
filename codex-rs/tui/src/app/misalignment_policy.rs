@@ -104,7 +104,10 @@ impl App {
             }
         }
         if self.current_displayed_thread_id() != Some(review.thread_id)
-            || self.active_thread_rx().is_some_and(|rx| !rx.is_empty())
+            || self
+                .active_thread_rx
+                .as_ref()
+                .is_some_and(|rx| !rx.is_empty())
             || !self.chat_widget.is_current_misalignment_review(&review)
         {
             return;

@@ -114,7 +114,7 @@ pub struct RequestBudget {
 }
 
 /// Section policies named for the source section that owns the evidence.
-/// Transcript evidence uses separate allocation groups within one collection section.
+/// The transcript has separate message and tool groups despite sharing one section.
 /// Entry caps apply to section text; minimum allocations include Required usage.
 #[derive(
     Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
@@ -124,7 +124,6 @@ pub enum ElasticSection {
     TranscriptMessages,
     TranscriptTools,
     TranscriptSelectedExecResults,
-    TranscriptAudio,
     #[serde(alias = "root_messages")]
     RootConversationMessages,
     #[serde(alias = "retained_instructions")]
@@ -153,7 +152,6 @@ impl ElasticSection {
         Self::TranscriptMessages,
         Self::TranscriptTools,
         Self::TranscriptSelectedExecResults,
-        Self::TranscriptAudio,
         Self::RootConversationMessages,
         Self::RetainedUserInstructions,
         Self::TrustedUserAnswers,
@@ -171,8 +169,7 @@ impl ElasticSection {
 /// Per-group elastic limits, validated when decoded; not an activation switch.
 /// Entry caps apply to required and optional supporting text; exact actions stay whole.
 /// Omitted groups use the synchronous entry caps,
-/// reserving one capped entry as their minimum. Selected exec results and audio use their
-/// dedicated groups only when configured.
+/// reserving one capped entry as their minimum. Selected exec results reserve zero by default.
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ElasticBudgetConfig {
@@ -209,9 +206,7 @@ impl ElasticBudgetConfig {
             let tokens = match section {
                 ElasticSection::TranscriptMessages => entries.message_tokens,
                 ElasticSection::TranscriptTools => entries.tool_tokens,
-                ElasticSection::TranscriptSelectedExecResults | ElasticSection::TranscriptAudio => {
-                    0
-                }
+                ElasticSection::TranscriptSelectedExecResults => 0,
                 _ => crate::preparation::MAX_INSTRUCTION_TOKENS,
             };
             ElasticSectionLimits {

@@ -649,7 +649,6 @@ async fn load_config(
         &root_config_overrides,
         LoaderOverrides::default(),
         overrides,
-        /*resolution*/ None,
     )
     .await?
     .build()

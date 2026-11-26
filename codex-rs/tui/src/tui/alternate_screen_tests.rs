@@ -28,17 +28,15 @@ fn refreshed_mouse_policy_applies_to_fullscreen_and_overlays() {
         screen
             .enter(&mut output, input.captures_mouse(owned))
             .unwrap();
-        for next in [
-            MouseCapture::Inherit,
-            MouseCapture::Enabled,
-            MouseCapture::Disabled,
-        ] {
-            for mouse in [
-                tmux::MouseCapture::Enabled,
-                tmux::MouseCapture::DisabledByTmux,
-                tmux::MouseCapture::Enabled,
+        for disabled in [true, false, true] {
+            screen
+                .mouse_capture_disabled
+                .store(disabled, Ordering::Relaxed);
+            for next in [
+                MouseCapture::Enabled,
+                MouseCapture::Inherit,
+                MouseCapture::Disabled,
             ] {
-                screen.set_tmux_mouse(mouse);
                 input.apply(&screen, &mut output, next, owned).unwrap();
                 terminal.process(&std::mem::take(&mut output));
                 let capture = match next {
@@ -46,7 +44,7 @@ fn refreshed_mouse_policy_applies_to_fullscreen_and_overlays() {
                     MouseCapture::Enabled => true,
                     MouseCapture::Disabled => false,
                 };
-                let expected = if mouse == tmux::MouseCapture::Enabled && capture {
+                let expected = if !disabled && capture {
                     vt100::MouseProtocolMode::AnyMotion
                 } else {
                     vt100::MouseProtocolMode::None

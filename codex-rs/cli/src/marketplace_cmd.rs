@@ -133,7 +133,6 @@ impl MarketplaceCli {
             &config_overrides,
             LoaderOverrides::default(),
             ConfigOverrides::default(),
-            /*resolution*/ None,
         )
         .await?;
         let config = builder.clone().build().await?;

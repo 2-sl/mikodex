@@ -252,8 +252,7 @@ impl GoalToolExecutor {
                 )
                 .await;
         }
-        self.metrics
-            .record_tool_created(invocation.codex_turn_metadata.as_deref());
+        self.metrics.record_created();
         self.analytics.created(
             &goal,
             GoalEventAttribution::Turn(invocation.turn_id.as_str()),

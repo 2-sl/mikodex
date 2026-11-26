@@ -389,7 +389,7 @@ impl App {
                             ListAction::MoveDown
                         };
                         pane.file_path_scroll = sidebar_chooser::scroll_file_path(
-                            sidebar_chooser::file_path_areas(area)[0],
+                            area,
                             &file.path,
                             pane.file_path_scroll,
                             action,
@@ -428,7 +428,7 @@ impl App {
                         && let Some(action) = list_action
                     {
                         pane.file_path_scroll = sidebar_chooser::scroll_file_path(
-                            sidebar_chooser::file_path_areas(area)[0],
+                            area,
                             &file.path,
                             pane.file_path_scroll,
                             action,
@@ -824,7 +824,7 @@ impl App {
         let document_shortcut = document.is_some_and(|id| {
             self.sidebar()
                 .and_then(|pane| pane.documents.get(&id))
-                .is_some_and(|doc| doc.allows_tab_shortcut(key, &self.keymap))
+                .is_some_and(|doc| doc.allows_tab_shortcut(key))
         });
         let close = if let Some(id) = document {
             (bindings.close_sidebar_tab.is_pressed(key)

@@ -120,10 +120,7 @@ async fn preserves_explicit_oauth_without_discovery() {
         oauth: Some(Box::new(explicit_oauth)),
     };
     assert_eq!(
-        resolve_config_server(&config, &routes, /*previous*/ None)
-            .await
-            .unwrap()
-            .resolved,
+        resolve_config_server(&config, &routes).await.unwrap(),
         config
     );
     let home = tempfile::tempdir().unwrap();

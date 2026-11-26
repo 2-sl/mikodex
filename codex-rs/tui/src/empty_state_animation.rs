@@ -25,7 +25,6 @@ use image::imageops::FilterType;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
-use ratatui::layout::Size;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::widgets::Widget;
@@ -79,7 +78,6 @@ pub(crate) struct EmptyStateAnimation {
     chat_background_elapsed: Duration,
     chat_background_last_frame: Option<Instant>,
     logo_renderer: Renderer,
-    measured_screen: Size,
     background_image_path: Option<PathBuf>,
     background_disabled_path: Option<PathBuf>,
     sprite_frame: Option<SpriteFrame>,
@@ -108,7 +106,6 @@ impl EmptyStateAnimation {
 
     pub(crate) fn start_fresh(&mut self) {
         self.cancel_replay();
-        self.invalidate_window_size();
         self.eligible = true;
         self.spin_elapsed = Duration::ZERO;
         self.last_frame = None;
@@ -272,11 +269,6 @@ impl EmptyStateAnimation {
     /// Resume after process suspension continues from the last visible bob position.
     pub(crate) fn pause_clock(&mut self) {
         self.last_frame = None;
-    }
-
-    /// A resize can change the pixel dimensions without changing the grid.
-    pub(crate) fn invalidate_window_size(&mut self) {
-        self.measured_screen = Size::default();
     }
 
     /// Paint the user image or built-in logo inside a caller-owned, reserved rectangle.
@@ -497,19 +489,14 @@ impl EmptyStateAnimation {
             return;
         }
         let default_background = terminal_palette::default_bg();
-        let default_foreground = terminal_palette::default_fg();
-        let color_level = if default_background.is_some() && default_foreground.is_some() {
+        let color_level = if default_background.is_some() {
             terminal_palette::effective_stdout_color_level()
         } else {
             terminal_palette::StdoutColorLevel::Unknown
         };
         let background = default_background.unwrap_or((15, 20, 37));
-        let foreground = default_foreground.unwrap_or((210, 221, 235));
+        let foreground = terminal_palette::default_fg().unwrap_or((210, 221, 235));
         let lighting = Lighting::terminal(foreground, background);
-        if !cfg!(test) && self.measured_screen != buffer.area.as_size() {
-            self.logo_renderer.window_size = crossterm::terminal::window_size().ok();
-            self.measured_screen = buffer.area.as_size();
-        }
         let cells = self
             .logo_renderer
             .frame(area.width, area.height, phase, &lighting);

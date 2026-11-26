@@ -103,7 +103,8 @@ fn submit_prompt(app: &mut App, prompt: &str) {
 
 fn drain_active_thread_events(app: &mut App) {
     while let Some(event) = app
-        .active_thread_rx_mut()
+        .active_thread_rx
+        .as_mut()
         .and_then(|receiver| receiver.try_recv().ok())
     {
         app.handle_thread_event_now(event);
@@ -139,7 +140,7 @@ async fn next_turn_started(
     }
 }
 
-pub(in crate::app) async fn wait_for_turn_completed(
+pub(super) async fn wait_for_turn_completed(
     app: &mut App,
     app_server: &mut AppServerSession,
     thread_id: ThreadId,

@@ -280,7 +280,7 @@ async fn active_discovery_supersedes_restored_completion() -> color_eyre::Result
             request,
             Ok(crate::app_event::AgentPickerThreadRefresh {
                 threads: vec![thread, completed_thread, failed_thread],
-                ..Default::default()
+                archived_thread_ids: HashSet::new(),
             }),
         )
         .is_none()
