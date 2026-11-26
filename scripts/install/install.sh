@@ -1042,30 +1042,31 @@ prompt_yes_no() {
 }
 
 print_launch_instructions() {
-  if [ "$path_action" = "already" ]; then
-    step "$BIN_DIR is already on PATH"
-    step "Current terminal: codex"
-  else
-    step "Current terminal: $path_line && codex"
-  fi
-  step "Future terminals: open a new terminal and run: codex"
-
   case "$path_action" in
-print_launch_instructions() {
-  if [ "$path_action" = "already" ]; then
-    step "$BIN_DIR is already on PATH"
-    step "Current terminal: mikodex"
-  else
-    step "Current terminal: $path_line && mikodex"
-  fi
-  step "Future terminals: open a new terminal and run: mikodex"
-
-  case "$path_action" in
-    added) step "PATH was added to $path_profile" ;;
-    updated) step "PATH was updated in $path_profile" ;;
-    configured) step "PATH is already configured in $path_profile" ;;
-  esac
-}
+    already)
+      step "$BIN_DIR is already on PATH"
+      step "Current terminal: mikodex"
+      step "Future terminals: open a new terminal and run: mikodex"
+      ;;
+    added)
+      step "Current terminal: export PATH="$BIN_DIR:\$PATH" && mikodex"
+      step "Future terminals: open a new terminal and run: mikodex"
+      step "PATH was added to $path_profile"
+      ;;
+    updated)
+      step "Current terminal: export PATH="$BIN_DIR:\$PATH" && mikodex"
+      step "Future terminals: open a new terminal and run: mikodex"
+      step "PATH was updated in $path_profile"
+      ;;
+    configured)
+      step "Current terminal: export PATH="$BIN_DIR:\$PATH" && mikodex"
+      step "Future terminals: open a new terminal and run: mikodex"
+      step "PATH is already configured in $path_profile"
+      ;;
+    *)
+      step "Current terminal: mikodex"
+      step "Future terminals: open a new terminal and run: mikodex"
+      ;;
   esac
 }
 

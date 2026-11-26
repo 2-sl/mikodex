@@ -712,10 +712,26 @@ async fn thread_start_accepts_absolute_runtime_workspace_roots() -> Result<()> {
         .build_initialized()
         .await?;
 
+    let invalid_id = mcp
+        .send_thread_start_request(ThreadStartParams {
+            runtime_workspace_roots: Some(vec![
+                codex_utils_path_uri::LegacyAppPathString::from_string("relative"),
+            ]),
+            ..Default::default()
+        })
+        .await?;
+    let invalid = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(invalid_id)),
+    )
+    .await??;
+    assert_eq!(invalid.error.code, INVALID_REQUEST_ERROR_CODE);
+    assert!(invalid.error.message.contains("runtimeWorkspaceRoots"));
+
     let req_id = mcp
         .send_thread_start_request(ThreadStartParams {
             cwd: Some(cwd.to_string_lossy().to_string()),
-            runtime_workspace_roots: Some(vec![extra_root.abs()]),
+            runtime_workspace_roots: Some(vec![extra_root.abs().into()]),
             sandbox: Some(SandboxMode::WorkspaceWrite),
             ..Default::default()
         })
@@ -728,8 +744,8 @@ async fn thread_start_accepts_absolute_runtime_workspace_roots() -> Result<()> {
         ..
     } = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(req_id)).await??;
 
-    assert_eq!(response_cwd, cwd.abs());
-    assert_eq!(runtime_workspace_roots, vec![extra_root.abs()]);
+    assert_eq!(response_cwd, cwd.abs().into());
+    assert_eq!(runtime_workspace_roots, vec![extra_root.abs().into()]);
     #[cfg(windows)]
     let _ = sandbox;
     #[cfg(not(windows))]
@@ -738,7 +754,7 @@ async fn thread_start_accepts_absolute_runtime_workspace_roots() -> Result<()> {
             panic!("expected workspace-write sandbox");
         };
         assert!(
-            writable_roots.contains(&extra_root.abs().canonicalize()?),
+            writable_roots.contains(&extra_root.abs().canonicalize()?.into()),
             "legacy sandbox projection should include the runtime workspace root"
         );
     }
@@ -749,7 +765,7 @@ async fn thread_start_accepts_absolute_runtime_workspace_roots() -> Result<()> {
     environment.runtime_workspace_roots = Some(vec![environment_root.abs().into()]);
     let req_id = mcp
         .send_thread_start_request(ThreadStartParams {
-            runtime_workspace_roots: Some(vec![extra_root.abs()]),
+            runtime_workspace_roots: Some(vec![extra_root.abs().into()]),
             environments: Some(vec![environment]),
             sandbox: Some(SandboxMode::WorkspaceWrite),
             ..Default::default()
@@ -760,7 +776,7 @@ async fn thread_start_accepts_absolute_runtime_workspace_roots() -> Result<()> {
         sandbox,
         ..
     } = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(req_id)).await??;
-    assert_eq!(runtime_workspace_roots, vec![environment_root.abs()]);
+    assert_eq!(runtime_workspace_roots, vec![environment_root.abs().into()]);
     #[cfg(windows)]
     let _ = sandbox;
     #[cfg(not(windows))]
@@ -769,7 +785,7 @@ async fn thread_start_accepts_absolute_runtime_workspace_roots() -> Result<()> {
             panic!("expected workspace-write sandbox");
         };
         assert!(
-            writable_roots.contains(&environment_root.abs().canonicalize()?),
+            writable_roots.contains(&environment_root.abs().canonicalize()?.into()),
             "legacy sandbox projection should include the environment workspace root"
         );
     }
@@ -809,7 +825,7 @@ async fn thread_start_excludes_profile_workspace_roots_from_runtime_workspace_ro
 
     assert_eq!(
         runtime_workspace_roots,
-        vec![cwd.path().to_path_buf().abs()]
+        vec![cwd.path().to_path_buf().abs().into()]
     );
 
     Ok(())

@@ -26,9 +26,11 @@ use super::*;
 use crate::app_event::AgentsOverviewThreadRefresh;
 use crate::backend_id::BackendId;
 use crate::bottom_pane::BottomPaneView;
+use crate::chatwidget::ReadOnlyThread;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::chatwidget::ThreadInputStateRestoreMode;
+use crate::session_start::is_archived_session_error;
 use crate::startup_draft::StartupDraftPump;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
@@ -37,6 +39,13 @@ use codex_protocol::protocol::SubAgentSource;
 use std::collections::VecDeque;
 
 pub(crate) const AGENTS_OVERVIEW_VIEW_ID: &str = "agents-overview";
+
+#[derive(Clone, Copy)]
+pub(super) struct DetailsDividerDrag {
+    pub(super) press_y: u16,
+    pub(super) initial_height: u16,
+    pub(super) screen: Rect,
+}
 
 #[derive(Default)]
 pub(super) struct AgentsOverviewState {
@@ -77,6 +86,7 @@ pub(super) struct AgentsOverviewState {
     pub(super) refresh_task: Option<tokio::task::JoinHandle<()>>,
     pub(super) refresh_notifications: HashMap<ThreadId, Vec<ServerNotification>>,
     pub(super) rendered_full_screen: bool,
+    pub(super) details_divider_drag: Option<DetailsDividerDrag>,
     pub(super) visible_thread_ids: Vec<ThreadId>,
     /// The persistent left-rail view, separate from the chat widget's full-screen view stack.
     pub(super) sidebar_view: Option<AgentsOverviewView>,
@@ -106,6 +116,23 @@ pub(super) struct AgentsOverviewState {
 }
 
 impl AgentsOverviewState {
+    pub(super) fn cancel_details_divider_drag(&mut self) {
+        self.details_divider_drag = None;
+        let mut view = self
+            .view_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        view.docked_details_resizing = false;
+        view.details_divider_area = None;
+    }
+
+    pub(super) fn update_details_divider_height(&mut self, height: u16) {
+        let mut view = self
+            .view_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        view.docked_details_height = Some(height);
+    }
     pub(super) fn refill_count(&self, owner: BackendId) -> usize {
         self.refill_by_backend
             .get(&owner)
@@ -135,6 +162,99 @@ impl Drop for AgentsOverviewState {
 }
 
 impl App {
+    pub(super) fn handle_agents_overview_details_mouse(
+        &mut self,
+        tui: &mut crate::Tui,
+        mouse: crossterm::event::MouseEvent,
+    ) -> bool {
+        use crossterm::event::MouseButton;
+        use crossterm::event::MouseEventKind;
+
+        let viewport: Rect = match tui.prepare_draw_size() {
+            Ok(size) => size.into(),
+            Err(_) => return false,
+        };
+        if let Some(drag) = self.agents_overview.details_divider_drag {
+            if viewport != drag.screen {
+                self.agents_overview.cancel_details_divider_drag();
+                tui.frame_requester().schedule_frame();
+                return false;
+            }
+            match mouse.kind {
+                MouseEventKind::Drag(MouseButton::Left)
+                | MouseEventKind::Up(MouseButton::Left) => {
+                    let area_height = self
+                        .agents_overview
+                        .view_state
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .docked_area_height;
+                    let delta_y = i32::from(mouse.row) - i32::from(drag.press_y);
+                    let requested = (i32::from(drag.initial_height) - delta_y)
+                        .clamp(0, i32::from(u16::MAX)) as u16;
+                    let height =
+                        AgentsOverviewView::clamp_docked_details_height(requested, area_height);
+                    self.agents_overview.update_details_divider_height(height);
+                    if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+                        self.agents_overview.details_divider_drag = None;
+                        let mut view = self
+                            .agents_overview
+                            .view_state
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        view.docked_details_resizing = false;
+                    }
+                    tui.frame_requester().schedule_frame();
+                    return true;
+                }
+                _ => {
+                    self.agents_overview.cancel_details_divider_drag();
+                    tui.frame_requester().schedule_frame();
+                    return false;
+                }
+            }
+        }
+
+        if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+            return false;
+        }
+        let (divider, initial_height, area_height) = {
+            let view = self
+                .agents_overview
+                .view_state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (
+                view.details_divider_area,
+                view.docked_details_height,
+                view.docked_area_height,
+            )
+        };
+        let Some(divider) = divider else {
+            return false;
+        };
+        if !divider.contains((mouse.column, mouse.row).into()) {
+            return false;
+        }
+        let Some(initial_height) = initial_height else {
+            return false;
+        };
+        self.agents_overview.details_divider_drag = Some(DetailsDividerDrag {
+            press_y: mouse.row,
+            initial_height,
+            screen: viewport,
+        });
+        let mut view = self
+            .agents_overview
+            .view_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        view.docked_details_resizing = true;
+        drop(view);
+        tui.frame_requester().schedule_frame();
+        true
+    }
+
     pub(super) fn open_agents_overview(&mut self, app_server: &AppServerSession) {
         if !self.agents_overview.sidebar_focused {
             self.cancel_pending_key_chord();
@@ -502,7 +622,7 @@ impl App {
             .flatten()
             .cloned()
             .collect();
-        let view = self.agents_overview_view(threads.clone(), selected_thread_id);
+        let view = self.agents_overview_view(threads, selected_thread_id);
         let matches = &mut self.agents_overview.search_matches;
         if !matches.is_empty() {
             let visible: HashSet<_> = view
@@ -968,13 +1088,13 @@ impl App {
                 ThreadAttachPresentation::SessionLineage
             };
             let (resumed, read_only) = if let Some((_, started)) = started {
-                (started, false)
+                (started, None)
             } else if let Some(blank) = self
                 .live_blank_session(app_server, root_thread_id, &target_thread)
                 .await
             {
                 restored_blank_session = true;
-                (blank, false)
+                (blank, None)
             } else {
                 match app_server
                     .resume_thread_with_permission_overrides(
@@ -989,15 +1109,21 @@ impl App {
                     Ok(resumed) => {
                         provider_resume_checked = true;
                         resumed_mode = Some(resumed.session.collaboration_mode.is_some());
-                        (resumed, false)
+                        (resumed, None)
                     }
                     Err(error)
                         if crate::app_server_session::is_active_writer_error(&error)
                             || crate::app_server_session::model_provider_error(&error)
-                                .is_some() =>
+                                .is_some()
+                            || is_archived_session_error(&error, root_thread_id) =>
                     {
                         provider_resume_checked = true;
                         provider_error = crate::app_server_session::model_provider_error(&error);
+                        let reason = if is_archived_session_error(&error, root_thread_id) {
+                            ReadOnlyThread::Archived
+                        } else {
+                            ReadOnlyThread::ExternalWriter
+                        };
                         match app_server
                             .read_thread_for_viewing(
                                 &resume_config,
@@ -1008,7 +1134,7 @@ impl App {
                         {
                             Ok((thread, notice)) => {
                                 history_notice = notice;
-                                (thread, true)
+                                (thread, Some(reason))
                             }
                             Err(_) => {
                                 tracing::warn!("Failed to load read-only conversation history");
@@ -1068,7 +1194,8 @@ impl App {
                 }
             }
             // Read-only views retain explicit choices but never another task's restored state.
-            let preserve_explicit_permissions = preserve_explicit_permissions || read_only;
+            let preserve_explicit_permissions =
+                preserve_explicit_permissions || read_only.is_some();
             self.runtime_approvals_reviewer_override = self
                 .runtime_approvals_reviewer_override
                 .filter(|_| preserve_explicit_permissions);
@@ -1116,10 +1243,16 @@ impl App {
             if let Some(error) = provider_error {
                 self.chat_widget
                     .show_provider_error(error, /*rejected_message_id*/ None);
-            } else if read_only {
-                self.ensure_thread_channel(root_thread_id)
-                    .mark_external_writer();
-                self.chat_widget.show_external_writer_thread();
+            } else if let Some(reason) = read_only {
+                let channel = self.ensure_thread_channel(root_thread_id);
+                match reason {
+                    ReadOnlyThread::Archived => {
+                        channel.archived = true;
+                        channel.mark_replay_only();
+                    }
+                    ReadOnlyThread::ExternalWriter => channel.mark_external_writer(),
+                }
+                self.chat_widget.show_read_only_thread(reason);
             }
             if let Some(notice) = history_notice {
                 self.chat_widget
@@ -1139,7 +1272,7 @@ impl App {
             if is_new_session {
                 self.remember_launch_permissions();
             }
-            if !read_only {
+            if read_only.is_none() {
                 let approval = self.config.permissions.approval_policy.value();
                 if self
                     .runtime_approval_policy_override
@@ -1276,7 +1409,7 @@ impl App {
         &mut self,
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
-        cwd: Option<AbsolutePathBuf>,
+        cwd: Option<PathBuf>,
         mut startup_draft: Option<&mut StartupDraftPump>,
     ) -> Option<(Config, Option<PathBuf>)> {
         if self
@@ -1289,17 +1422,12 @@ impl App {
             );
             return None;
         }
-        let remote = app_server.uses_remote_workspace();
-        let remote_cwd = cwd
-            .as_ref()
-            .filter(|_| remote)
-            .map(AbsolutePathBuf::to_path_buf);
-        let local_cwd = if remote {
-            self.config.cwd.to_path_buf()
+        let (local_cwd, remote_cwd) = if app_server.uses_remote_workspace() {
+            (self.config.cwd.to_path_buf(), cwd)
         } else {
-            cwd.map_or_else(
-                || self.chat_widget.config_ref().cwd.to_path_buf(),
-                |cwd| cwd.to_path_buf(),
+            (
+                cwd.unwrap_or_else(|| self.chat_widget.session_cwd().to_path_buf()),
+                None,
             )
         };
         let mut config = match StartupDraftPump::run_with_optional_draft(

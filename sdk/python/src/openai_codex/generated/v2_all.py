@@ -263,14 +263,6 @@ class AppToolApproval(Enum):
     approve = "approve"
 
 
-class AppToolConfig(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    approval_mode: AppToolApproval | None = None
-    enabled: bool | None = None
-
-
 class AppToolSummary(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -580,6 +572,9 @@ class CodexErrorInfoValue(str, Enum):
     context_window_exceeded = "contextWindowExceeded"
     session_budget_exceeded = "sessionBudgetExceeded"
     usage_limit_exceeded = "usageLimitExceeded"
+    api_key_spend_limit_exceeded = "apiKeySpendLimitExceeded"
+    project_spend_limit_exceeded = "projectSpendLimitExceeded"
+    organization_spend_limit_exceeded = "organizationSpendLimitExceeded"
     rate_limit_exceeded = "rateLimitExceeded"
     flex_unavailable = "flexUnavailable"
     server_overloaded = "serverOverloaded"
@@ -1217,6 +1212,22 @@ class CyberAccessProgram(Enum):
     standard = "standard"
     daybreak_blue = "daybreakBlue"
     daybreak_red = "daybreakRed"
+
+
+class DaybreakAvailability(str, Enum):
+    available = "available"
+    enrollment_required = "enrollmentRequired"
+    unavailable_for_model = "unavailableForModel"
+    default = "default"
+
+    @classmethod
+    def _missing_(cls, value: object) -> DaybreakAvailability | None:
+        if not isinstance(value, str) or not value:
+            return None
+        member = str.__new__(cls, value)
+        member._name_ = value
+        member._value_ = value
+        return member
 
 
 class DeprecationNoticeNotification(BaseModel):
@@ -2941,6 +2952,13 @@ class ModelAccessPrograms(BaseModel):
         populate_by_name=True,
     )
     cyber: Annotated[list[CyberAccessProgram], Field(description="Accepted explicit selections.")]
+    daybreak_availability: Annotated[
+        DaybreakAvailability | None,
+        Field(
+            alias="daybreakAvailability",
+            description="Server-resolved Daybreak availability for this caller and model.",
+        ),
+    ] = "default"
 
 
 class ModelAvailabilityNux(BaseModel):
@@ -7589,6 +7607,15 @@ class AppTemplateSummary(BaseModel):
     name: str
     reason: AppTemplateUnavailableReason | None = None
     template_id: Annotated[str, Field(alias="templateId")]
+
+
+class AppToolConfig(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    approval_mode: AppToolApproval | None = None
+    approvals_reviewer: ApprovalsReviewer | None = None
+    enabled: bool | None = None
 
 
 class ApplicationNetworkRequirements(BaseModel):

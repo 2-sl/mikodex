@@ -68,6 +68,7 @@ use chrono::Utc;
 use codex_analytics::AnalyticsEventsClient;
 use codex_analytics::ImagePreparationFact;
 use codex_analytics::ImagePreparationMetadata;
+use codex_analytics::IncompleteReason;
 use codex_analytics::SubAgentThreadStartedInput;
 use codex_analytics::ThreadInitializationMode;
 use codex_analytics::TurnCodexErrorFact;
@@ -3312,7 +3313,9 @@ impl Session {
                 .features
                 .enabled(Feature::CriticalPathTiming)
         {
-            turn_context.turn_timing_state.invalidate_critical_path();
+            turn_context
+                .turn_timing_state
+                .invalidate_critical_path(&[IncompleteReason::UnattributedUserWait]);
         }
         timing
     }
@@ -5284,7 +5287,14 @@ impl Session {
                 .features
                 .plugin_recommendations_enabled()
         {
-            match PreparedToolRecommendations::load(self, turn_context).await {
+            let started_at = std::time::Instant::now();
+            let recommendations = PreparedToolRecommendations::load(self, turn_context).await;
+            turn_context.session_telemetry.record_duration(
+                "codex.initial_context.plugin_recommendations_wait_ms",
+                started_at.elapsed(),
+                &[],
+            );
+            match recommendations {
                 PreparedToolRecommendations::Endpoint(tools) => Some(tools),
                 PreparedToolRecommendations::Legacy(_) => None,
             }

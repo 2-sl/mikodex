@@ -1206,9 +1206,8 @@ def run_installer_in(
     env = os.environ.copy()
     env.update(
         {
-            "CODEX_HOME": str(root / "codex-home"),
             "MIKODEX_HOME": str(root / "codex-home"),
-            "CODEX_INSTALL_DIR": str(install_dir),
+            "CODEX_INSTALL_DIR": str(root / "install-bin"),
             "CODEX_NON_INTERACTIVE": "1",
             "CODEX_RELEASE": release,
             "CODEX_INSTALL_DAEMON_ONLY": "1" if daemon_only else "0",

@@ -353,6 +353,7 @@ impl App {
         let sidebar_image_protocol = self.preview_image_protocol(tui);
         let sidebar_motion =
             MotionMode::from_animations_enabled(self.local_settings.tui.animations);
+        let hover_mouse = self.hover_pointer(tui, tui.link_hover.mouse);
         // An input refresh opens a fresh terminal buffer. Carry the outer owner's
         // completed cells through it when only the conversation is being redrawn.
         let backdrop = caller_inset.map(|_| {
@@ -655,12 +656,16 @@ impl App {
                 self.conversation_frame.close_buttons = buttons;
             }
             if let Some(dock) = agents_dock {
-                if !dock.sidebar.is_empty()
+                let left_junction_rows = if !dock.sidebar.is_empty()
                     && let Some(view) = self.agents_overview.sidebar_view.as_ref()
                 {
+                    let rows = view.docked_separator_rows(dock.sidebar);
                     view.render_docked(dock.sidebar, frame.buffer);
-                }
-                dock.render_divider(frame.buffer, self);
+                    rows
+                } else {
+                    Vec::new()
+                };
+                dock.render_divider(frame.buffer, self, &left_junction_rows);
                 if !dock.command_reference.is_empty() {
                     command_reference::render(
                         dock.command_reference,
@@ -671,8 +676,15 @@ impl App {
                     );
                 }
             }
+            if let Some(area) = self.hover_target_area(hover_mouse, frame.buffer) {
+                super::link_hover::paint_hover_foreground(area, frame.buffer);
+            }
             self.paint_centered_dialog(frame);
         })?;
+        // A shortcut HUD is painted after the conversation and can move over a stationary pointer.
+        if hover_mouse != self.hover_pointer(tui, tui.link_hover.mouse) {
+            frames.schedule_frame();
+        }
         self.finish_conversation(tui, painted)
     }
 
@@ -786,15 +798,6 @@ impl App {
         } else {
             self.prompt_navigation_footer(area.width.saturating_sub(/*rhs*/ 2))
         };
-        let chat_widget = &self.chat_widget;
-        let view = &mut self.transcript_view;
-        let active_key = chat_widget.active_cell_transcript_key();
-        let footer_width = crate::bottom_pane::inset_footer_hint_area(area).width;
-        // Measure the composer to find the space available for transcript rows.
-        // Painting those rows tells us whether newer activity is still hidden,
-        // which can change the footer hint and the composer's measured height.
-        let footer = view.footer_with_navigation(footer_width, motion, latest_navigation);
-        let max_composer_height = side_pane::composer_height_limit(area.height);
         let unfocused = self.agents_overview.sidebar_focused
             || self.agents_overview.command_reference_focused
             || matches!(
@@ -804,6 +807,15 @@ impl App {
                     ..
                 })
             );
+        let chat_widget = &self.chat_widget;
+        let view = &mut self.transcript_view;
+        let active_key = chat_widget.active_cell_transcript_key();
+        let footer_width = crate::bottom_pane::inset_footer_hint_area(area).width;
+        // Measure the composer to find the space available for transcript rows.
+        // Painting those rows tells us whether newer activity is still hidden,
+        // which can change the footer hint and the composer's measured height.
+        let footer = view.footer_with_navigation(footer_width, motion, latest_navigation);
+        let max_composer_height = side_pane::composer_height_limit(area.height);
         let options = |interacting| ComposerRenderOptions {
             unfocused,
             max_height: Some(max_composer_height),

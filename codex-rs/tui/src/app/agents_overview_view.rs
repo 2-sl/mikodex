@@ -186,6 +186,8 @@ pub(super) struct AgentsOverviewViewState {
     pub(super) rename_target: Option<ThreadId>,
     pub(super) docked_details_height: Option<u16>,
     pub(super) docked_details_resizing: bool,
+    pub(super) details_divider_area: Option<Rect>,
+    pub(super) docked_area_height: u16,
     // The picker can finish this retained view when it selects the already active session.
     pub(super) completion: Option<ViewCompletion>,
 }
@@ -576,7 +578,7 @@ impl AgentsOverviewView {
             reasoning,
             Line::default(),
             Line::from("Project".dim()),
-            Line::from(row.thread.cwd.display().to_string()),
+            Line::from(row.thread.cwd.to_string()),
         ];
         lines.extend(row.details.usage_lines.clone());
         if let Some(branch) = row
@@ -844,7 +846,7 @@ impl BottomPaneView for AgentsOverviewView {
         if self.agents_keymap.new_task.is_pressed(key) {
             self.app_event_tx.send(AppEvent::NewAgentsOverviewSession {
                 backend_id: self.selected_row().and_then(|row| row.backend_id),
-                cwd: self.selected_row().map(|row| row.thread.cwd.clone()),
+                cwd: self.selected_row().map(|row| row.thread.cwd.to_path_buf()),
             });
             return;
         }
@@ -852,7 +854,9 @@ impl BottomPaneView for AgentsOverviewView {
             if self.worktrees_enabled {
                 self.app_event_tx.send(AppEvent::NewAgentsOverviewWorktree {
                     backend_id: self.selected_row().and_then(|row| row.backend_id),
-                    cwd: self.selected_row().map(|row| row.thread.cwd.clone()),
+                    cwd: self
+                        .selected_row()
+                        .and_then(|row| row.thread.cwd.to_inferred_abs_path()),
                 });
             }
             return;

@@ -179,12 +179,13 @@ pub(super) fn tab_and_body(area: Rect) -> [Rect; 2] {
 
 pub(super) fn sidebar_areas(app: &App, tui: &Tui, area: Rect, fraction: f64) -> Option<[Rect; 2]> {
     let target = app.sidebar_resize_target();
-    let preview = app
+    let preview_width = app
         .divider_drag
         .filter(|drag| {
             !drag.guide_only && drag.matches(area, app) && app.conversation_focus_available(tui)
         })
         .map(|drag| drag.width);
+    let preview_percent = preview_width.map(|width| width_percent(width, area.width));
     let saved = app.local_settings.tui.sidebar_width_percent;
     let default_width = if target.is_some_and(|target| {
         matches!(target.content, sidebar::SidebarContent::Chat(_))
@@ -197,7 +198,7 @@ pub(super) fn sidebar_areas(app: &App, tui: &Tui, area: Rect, fraction: f64) -> 
         .pane_resize
         .filter(|mode| mode.parent == app.sidebar_parent())
         .and_then(|mode| mode.preview_width);
-    let child_width = match (keyboard_width, preview, app.exact_sidebar_width) {
+    let child_width = match (keyboard_width, preview_width, app.exact_sidebar_width) {
         (Some(width), _, _) => sidebar_width(i32::from(width), area.width),
         (None, Some(width), _) => width,
         (None, None, Some((total, width)))
@@ -205,7 +206,7 @@ pub(super) fn sidebar_areas(app: &App, tui: &Tui, area: Rect, fraction: f64) -> 
         {
             width
         }
-        _ => preferred_width(area.width, saved, default_width),
+        _ => preferred_width(area.width, preview_percent.or(saved), default_width)
     };
     // A newly focused composer needs a cell even on the first opening frame.
     let open = target.is_some();
@@ -457,7 +458,7 @@ impl App {
                 };
                 let screen = super::agents_overview_dock::conversation_viewport(
                     self,
-                    tui.terminal.last_known_screen_size.into(),
+                    tui.prepare_draw_size()?.into(),
                 );
                 if drag.matches(screen, self) && visible_split(self, tui, screen).is_some() {
                     let width = i32::from(drag.initial_width) + i32::from(drag.press)

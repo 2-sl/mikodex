@@ -30,8 +30,8 @@ state with an installed Codex.
   side chat, and command reference. The right reference scrolls with Up and
   Down when focused. Enter in the Agent Command Center still opens the selected
   session; arrows keep editing a nonempty draft while chat has focus.
-- **Resizable sidebars and Agent Command Center details pane.** Drag dock dividers with the mouse, or use the
-  keyboard controls below. The Agent Command Center details pane also has a mouse-draggable divider. Mikodex saves each width in your user config.
+- **Resizable sidebars.** Drag either dock divider with the mouse, or use the
+  keyboard controls below. Mikodex saves each width in your user config.
 - **Korean keyboard input for slash commands.** Slash commands work when typed
   with a Korean 2-set keyboard layout active. For example, `/벼ㅑㅅ` and `/ㄷ턋`
   are accepted as `/quit` and `/exit`; the same conversion works for other
@@ -98,7 +98,7 @@ Start Mikodex again after the update command exits. On that next launch, Mikodex
 synchronizes the managed local app-server daemon to the updated CLI package. This
 can restart a running daemon and interrupt active or queued work. The result is
 recorded in %LOCALAPPDATA%\Mikodex\update.log; if synchronization fails, retry
-with `mikodex app-server daemon update --from-cli --yes`. This updater currently
+with mikodex app-server daemon update --from-cli --yes. This updater currently
 supports the canonical Windows x64 package layout.
 
 ## Resizing the sidebars

@@ -11,8 +11,8 @@ use crate::multi_agents;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::WebSearchAction;
-use std::path::Path;
 use ratatui::style::Stylize as _;
+use std::path::Path;
 use std::sync::Arc;
 
 pub(super) fn cells(
