@@ -88,7 +88,6 @@ pub use session_archive_commands::run_session_archive_command;
 pub use session_queue_commands::run_session_queue_command;
 use std::fs::OpenOptions;
 use std::io::IsTerminal;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -2365,10 +2364,13 @@ async fn run_ratatui_app(
     app_result
 }
 
+#[expect(
+    clippy::print_stderr,
+    reason = "TUI should no longer be displayed, so we can write to stderr."
+)]
 fn report_restore_error(result: color_eyre::Result<()>) {
     if let Err(err) = result {
-        let _ = writeln!(
-            std::io::stderr().lock(),
+        eprintln!(
             "failed to restore terminal. Run `reset` or restart your terminal to recover: {err}"
         );
     }

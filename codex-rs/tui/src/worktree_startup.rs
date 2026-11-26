@@ -73,7 +73,10 @@ impl StartupRecovery {
     fn report(&self) {
         if !self.finished.swap(true, Ordering::Relaxed) {
             restore_terminal_before_fatal_exit();
-            let _ = writeln!(std::io::stderr().lock(), "{}", self.message());
+            #[allow(clippy::print_stderr)]
+            {
+                eprintln!("{}", self.message());
+            }
         }
     }
 }

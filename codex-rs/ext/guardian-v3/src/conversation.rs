@@ -24,8 +24,6 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::sync::DropGuard;
 
 pub(super) struct Conversation {
-    // A prewarmed thread is still new until its first reusable review.
-    pub(super) kind: GuardianReviewSessionKind,
     pub(super) thread: Arc<CodexThread>,
     _stop: DropGuard,
     pub(super) inbox: Arc<ActorInbox>,
@@ -121,7 +119,6 @@ impl Conversation {
             .bind_thread(&spawned.thread, key, state, stop)
             .await;
         Ok(Self {
-            kind: GuardianReviewSessionKind::TrunkNew,
             thread: spawned.thread,
             _stop: stop_guard,
             delivered: 0,

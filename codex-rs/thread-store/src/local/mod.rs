@@ -566,14 +566,10 @@ impl ThreadStore for LocalThreadStore {
         )
     }
 
-    fn model_ids(&self) -> ThreadStoreResult<Arc<dyn codex_state::SessionModelIdStore>> {
-        let state_db = self
-            .state_db
+    fn model_ids(&self) -> Option<Arc<dyn codex_state::SessionModelIdStore>> {
+        self.state_db
             .clone()
-            .ok_or_else(|| ThreadStoreError::Internal {
-                message: "session model IDs require an initialized state database".into(),
-            })?;
-        Ok(state_db)
+            .map(|db| db as Arc<dyn codex_state::SessionModelIdStore>)
     }
 
     fn default_history_mode(&self) -> ThreadHistoryMode {
