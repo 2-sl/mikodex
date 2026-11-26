@@ -1197,6 +1197,10 @@ impl Tui {
     }
 
     pub fn event_stream(&self) -> Pin<Box<dyn Stream<Item = TuiEvent> + Send + 'static>> {
+        Box::pin(self.event_stream_with_input_gate())
+    }
+
+    pub(crate) fn event_stream_with_input_gate(&self) -> TuiEventStream {
         #[cfg(unix)]
         let stream = TuiEventStream::new(
             self.event_broker.clone(),
@@ -1211,7 +1215,7 @@ impl Tui {
             self.draw_tx.subscribe(),
             self.terminal_focused.clone(),
         );
-        Box::pin(stream)
+        stream
     }
 
     /// Overlays and in-place history edits can flush a replay before the scheduled draw.

@@ -308,6 +308,51 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
         }
     }
 
+    /// Continue servicing redraws while terminal input is temporarily gated.
+    /// This preserves queued input without letting it block visible updates.
+    pub(crate) fn next_with_terminal_input(
+        mut self: Pin<&mut Self>,
+        terminal_input_allowed: bool,
+    ) -> impl std::future::Future<Output = Option<TuiEvent>> + '_ {
+        std::future::poll_fn(move |cx| {
+            self.as_mut()
+                .poll_next_with_terminal_input(cx, terminal_input_allowed)
+        })
+    }
+
+    fn poll_next_with_terminal_input(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        terminal_input_allowed: bool,
+    ) -> Poll<Option<TuiEvent>> {
+        let this = self.get_mut();
+        if !terminal_input_allowed {
+            return this.poll_draw_event(cx);
+        }
+
+        // Approximate fairness + no starvation via round-robin.
+        let draw_first = this.poll_draw_first;
+        this.poll_draw_first = !this.poll_draw_first;
+
+        if draw_first {
+            if let Poll::Ready(event) = this.poll_draw_event(cx) {
+                return Poll::Ready(event);
+            }
+            if let Poll::Ready(event) = this.poll_crossterm_event(cx) {
+                return Poll::Ready(event);
+            }
+        } else {
+            if let Poll::Ready(event) = this.poll_crossterm_event(cx) {
+                return Poll::Ready(event);
+            }
+            if let Poll::Ready(event) = this.poll_draw_event(cx) {
+                return Poll::Ready(event);
+            }
+        }
+
+        Poll::Pending
+    }
+
     /// Map a crossterm event to a [`TuiEvent`], preserving mouse coordinates and modifiers.
     fn map_crossterm_event(&mut self, event: Event) -> Option<TuiEvent> {
         match event {
@@ -358,28 +403,8 @@ impl<S: EventSource + Default + Unpin> Unpin for TuiEventStream<S> {}
 impl<S: EventSource + Default + Unpin> Stream for TuiEventStream<S> {
     type Item = TuiEvent;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // approximate fairness + no starvation via round-robin.
-        let draw_first = self.poll_draw_first;
-        self.poll_draw_first = !self.poll_draw_first;
-
-        if draw_first {
-            if let Poll::Ready(event) = self.poll_draw_event(cx) {
-                return Poll::Ready(event);
-            }
-            if let Poll::Ready(event) = self.poll_crossterm_event(cx) {
-                return Poll::Ready(event);
-            }
-        } else {
-            if let Poll::Ready(event) = self.poll_crossterm_event(cx) {
-                return Poll::Ready(event);
-            }
-            if let Poll::Ready(event) = self.poll_draw_event(cx) {
-                return Poll::Ready(event);
-            }
-        }
-
-        Poll::Pending
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.poll_next_with_terminal_input(cx, /*terminal_input_allowed*/ true)
     }
 }
 

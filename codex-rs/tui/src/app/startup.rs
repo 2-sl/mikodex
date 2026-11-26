@@ -1334,7 +1334,7 @@ See the Mikodex keymap documentation for supported actions and examples."
         if let Err(err) = app.render_startup_frame(tui, &app_event_rx) {
             return shutdown_on_startup_error(app_server, &mut other_backends, err).await;
         }
-        let tui_events = tui.event_stream();
+        let tui_events = tui.event_stream_with_input_gate();
         tokio::pin!(tui_events);
         tracing::info!(
             duration_ms = %(startup_elapsed_before_app + startup_started_at.elapsed()).as_millis(),
@@ -1591,6 +1591,12 @@ See the Mikodex keymap documentation for supported actions and examples."
                             && has_pending_app_events
                         || (!waiting_for_initial_session_configured
                             && app.has_queued_startup_protected_request());
+                // Keep polling redraws while input routing is temporarily gated.
+                let can_poll_tui_events =
+                    app.pending_input_drain.is_none() && app.pending_thread_switch_resets == 0;
+                let terminal_input_allowed = app
+                    .can_read_terminal_after_thread_switch(tui, &app_event_rx)
+                    && (app.reconnect.offline || !block_terminal_input_for_pending_startup_events);
                 // The screen cache is physical geometry, not the inline viewport. This also
                 // notices the final size after returning from a standalone nested screen.
                 let size = tui.terminal.last_known_screen_size;
@@ -1768,8 +1774,7 @@ See the Mikodex keymap documentation for supported actions and examples."
                         }
                         AppRunControl::Continue
                     }
-                    event = tui_events.next(), if app.can_read_terminal_after_thread_switch(tui, &app_event_rx)
-                        && (app.reconnect.offline || !block_terminal_input_for_pending_startup_events) => {
+                    event = tui_events.as_mut().next_with_terminal_input(terminal_input_allowed), if can_poll_tui_events => {
                         if let Some(event) = event {
                             if (matches!(
                                 &event,
