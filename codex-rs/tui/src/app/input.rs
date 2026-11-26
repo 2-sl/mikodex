@@ -781,15 +781,6 @@ impl App {
                 return;
             }
         }
-            {
-                self.open_agents_overview(app_server);
-                return;
-            }
-            if self.chat_widget.is_read_only_view() {
-                return;
-            }
-        }
-
         if self.should_handle_unavailable_thread_key(key_event) {
             self.chat_widget
                 .handle_restricted_key(key_event, RestrictedInputMode::UnavailableThread);
