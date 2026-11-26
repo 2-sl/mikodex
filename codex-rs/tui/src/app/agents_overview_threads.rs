@@ -5,6 +5,7 @@
 //! Discovery merges into retained membership without evicting rows.
 
 use super::App;
+use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
 use super::agents_overview_details::preview_agent_message;
 use super::agents_overview_discovery::AgentsOverviewDiscovery;
 use super::agents_overview_discovery::is_overview_root;

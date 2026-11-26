@@ -1552,9 +1552,8 @@ See the Mikodex keymap documentation for supported actions and examples."
                             && has_pending_app_events
                         || (!waiting_for_initial_session_configured
                             && app.has_queued_startup_protected_request());
-                // Keep polling redraws while input routing is temporarily gated.
-                let can_poll_tui_events =
-                    app.pending_input_drain.is_none() && app.pending_thread_switch_resets == 0;
+                // Keep polling redraws while terminal input is temporarily gated.
+                let can_poll_tui_events = true;
                 let terminal_input_allowed = app
                     .can_read_terminal_after_thread_switch(tui, &app_event_rx)
                     && (app.reconnect.offline || !block_terminal_input_for_pending_startup_events);

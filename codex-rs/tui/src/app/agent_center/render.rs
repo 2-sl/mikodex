@@ -46,9 +46,6 @@ fn visible_suffix(input: &str, available: usize) -> &str {
     &input[start..]
 }
 
-const MIN_DOCKED_LIST_HEIGHT: u16 = 12;
-const MIN_DOCKED_DETAILS_HEIGHT: u16 = 8;
-
 struct CenterLayout {
     header: Rect,
     list: Rect,
@@ -327,11 +324,6 @@ impl Renderable for AgentsOverviewView {
             tabs,
             buf,
         );
-        if self.dock_focused == Some(false)
-            && let Some((_, tab)) = targets.iter().find(|(id, _)| *id == state.status_filter)
-        {
-            buf.set_style(*tab, crate::style::quiet_workspace_style());
-        }
         panel_separators::draw_horizontal(
             buf,
             inset(row(layout.header, /*offset*/ 2, /*height*/ 1)),

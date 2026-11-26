@@ -1,7 +1,7 @@
 //! Split the persistent command-center rail from the active conversation.
 
 use super::App;
-use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
+use super::agents_overview::{AGENTS_OVERVIEW_VIEW_ID, DetailsDividerDrag};
 use super::agents_overview_view::AgentsOverviewView;
 use super::panel_separators::{self, VerticalJunction};
 use crate::key_hint::KeyBindingListExt;
@@ -48,13 +48,6 @@ pub(super) struct DockDividerDrag {
     press: u16,
     initial_width: u16,
     pub(super) width: u16,
-    screen: Rect,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct DetailsDividerDrag {
-    press_y: u16,
-    initial_height: u16,
     screen: Rect,
 }
 

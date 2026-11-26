@@ -90,7 +90,6 @@ pub(super) struct AgentsOverviewState {
     pub(super) visible_thread_ids: Vec<ThreadId>,
     /// The persistent left-rail view, separate from the chat widget's full-screen view stack.
     pub(super) sidebar_view: Option<AgentsOverviewView>,
-    pub(super) details_divider_drag: Option<super::agents_overview_dock::DetailsDividerDrag>,
     /// Keyboard focus belongs to the command-center rail while its list is being operated.
     pub(super) sidebar_focused: bool,
     /// Keyboard focus belongs to the slash-command reference rail.
@@ -622,7 +621,7 @@ impl App {
             .flatten()
             .cloned()
             .collect();
-        let view = self.agents_overview_view(threads, selected_thread_id);
+        let view = self.agents_overview_view(threads.clone(), selected_thread_id);
         let matches = &mut self.agents_overview.search_matches;
         if !matches.is_empty() {
             let visible: HashSet<_> = view
