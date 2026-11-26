@@ -25,7 +25,7 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::turn_input::CyberAccessProgram;
-use codex_thread_context_ids_test_support::thread_context_ids;
+use codex_protocol_test_support::uuid_v7_item_id_generator_for_test;
 use core_test_support::responses;
 use core_test_support::responses::WebSocketConnectionConfig;
 use core_test_support::responses::ev_assistant_message;
@@ -78,7 +78,6 @@ impl LunaSampler {
             input: crate::async_scorer::request::PreparedRequest {
                 input,
                 input_tokens,
-                max_input_tokens: self.max_input_tokens(),
                 existing_context_tokens: 0,
                 cursor: codex_guardian_context::TranscriptCursor {
                     parent_history_version: 0,
@@ -262,7 +261,6 @@ pub(in crate::async_scorer) fn sampler_config(base_url: String) -> LunaSamplerCo
         originator: Some("guardian-v2-test".to_owned()),
 
         service_tier: None,
-        guardian_catalog: None,
         luna_compaction_hash: None,
         max_input_tokens: codex_guardian_context::DEFAULT_MAX_INPUT_TOKENS,
         metrics: None,
@@ -310,7 +308,7 @@ fn assert_classifier_instructions(request: &serde_json::Value) {
 
 pub(in crate::async_scorer) fn sample_request(parent_turn_id: &str) -> LunaSamplingRequest {
     LunaSamplingRequest {
-        context_ids: thread_context_ids(),
+        item_id_generator: uuid_v7_item_id_generator_for_test(),
         cyber_access_program: None,
         parent_response_id: None,
         instructions: classifier_instructions(),
@@ -676,7 +674,6 @@ async fn preconnected_sampler_reuses_authenticated_websocket_for_classifications
         originator: Some("guardian-v2-test".to_owned()),
 
         service_tier: None,
-        guardian_catalog: None,
         luna_compaction_hash: None,
         max_input_tokens: codex_guardian_context::DEFAULT_MAX_INPUT_TOKENS,
         metrics: None,
@@ -711,7 +708,7 @@ async fn preconnected_sampler_reuses_authenticated_websocket_for_classifications
 
     let first = sampler
         .sample(LunaSamplingRequest {
-            context_ids: thread_context_ids(),
+            item_id_generator: uuid_v7_item_id_generator_for_test(),
             cyber_access_program: None,
             parent_response_id: None,
             instructions: classifier_instructions(),
@@ -759,7 +756,7 @@ async fn preconnected_sampler_reuses_authenticated_websocket_for_classifications
     sampler.prewarm().await;
     let second = sampler
         .sample(LunaSamplingRequest {
-            context_ids: thread_context_ids(),
+            item_id_generator: uuid_v7_item_id_generator_for_test(),
             cyber_access_program: None,
             parent_response_id: None,
             instructions: classifier_instructions(),
@@ -862,7 +859,6 @@ async fn sampler_returns_classification_token_before_terminal_response_events() 
         originator: None,
 
         service_tier: None,
-        guardian_catalog: None,
         luna_compaction_hash: None,
         max_input_tokens: codex_guardian_context::DEFAULT_MAX_INPUT_TOKENS,
         metrics: None,
@@ -884,7 +880,6 @@ async fn sampler_returns_classification_token_before_terminal_response_events() 
         input: crate::async_scorer::request::PreparedRequest {
             input,
             input_tokens,
-            max_input_tokens: sampler.max_input_tokens(),
             existing_context_tokens: 0,
             cursor: codex_guardian_context::TranscriptCursor {
                 parent_history_version: 0,

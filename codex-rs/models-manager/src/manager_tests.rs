@@ -17,7 +17,6 @@ use codex_login::ExternalAuthRefreshContext;
 use codex_login::TokenData;
 use codex_protocol::auth::AuthMode;
 use codex_protocol::error::CodexErr;
-use codex_protocol::openai_models::DaybreakAvailability;
 use codex_protocol::openai_models::ModelAccessPrograms;
 use codex_protocol::openai_models::ModelOrigin;
 use codex_protocol::openai_models::ModelsResponse;
@@ -374,8 +373,10 @@ async fn file_cache_implements_models_cache_contract() {
         client_version: Some(client_version.clone()),
         models: vec![ModelInfo {
             available_access_programs: Some(ModelAccessPrograms {
-                daybreak_availability: DaybreakAvailability::EnrollmentRequired,
-                cyber: vec![CyberAccessProgram::Standard],
+                cyber: vec![
+                    CyberAccessProgram::Standard,
+                    CyberAccessProgram::DaybreakBlue,
+                ],
             }),
             ..remote_model("file-cached", "File Cached", /*priority*/ 0)
         }],
@@ -590,16 +591,9 @@ async fn initialization_retains_loaded_catalogs_including_empty_responses() {
         vec![remote_model("remote", "Remote", /*priority*/ 0)],
     ] {
         let endpoint = TestModelsEndpoint::new(vec![models.clone()]);
-        let manager = OpenAiModelsManager::with_settings(
-            ModelCatalogSettings {
-                skip_bundled_seed: true,
-                ..Default::default()
-            },
-            endpoint.clone(),
-            /*auth_manager*/ None,
-        );
-        assert!(manager.remote_models.read().await.entry.models.is_empty());
-        let manager = manager.with_provider_catalog();
+        let manager =
+            OpenAiModelsManager::new_without_cache(endpoint.clone(), /*auth_manager*/ None)
+                .with_provider_catalog();
         manager
             .ensure_initialized(DEFAULT_HTTP_CLIENT_FACTORY)
             .await;
@@ -1423,7 +1417,6 @@ async fn online_refresh_updates_access_programs_with_unchanged_etag() {
     let codex_home = tempdir().expect("temp dir");
     let granted_model = ModelInfo {
         available_access_programs: Some(ModelAccessPrograms {
-            daybreak_availability: Default::default(),
             cyber: vec![
                 CyberAccessProgram::Standard,
                 CyberAccessProgram::DaybreakBlue,
@@ -1432,10 +1425,7 @@ async fn online_refresh_updates_access_programs_with_unchanged_etag() {
         ..remote_model("access-programs", "Access Programs", /*priority*/ 0)
     };
     let revoked_model = ModelInfo {
-        available_access_programs: Some(ModelAccessPrograms {
-            cyber: Vec::new(),
-            daybreak_availability: Default::default(),
-        }),
+        available_access_programs: Some(ModelAccessPrograms { cyber: Vec::new() }),
         ..granted_model.clone()
     };
     let responses = vec![vec![granted_model.clone()], vec![revoked_model.clone()]];

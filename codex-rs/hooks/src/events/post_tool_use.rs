@@ -295,11 +295,6 @@ fn parse_completed(
         },
     }
 
-    if let Some(reason) = common::apply_failure_policy(handler, &mut status, &mut entries) {
-        should_block = true;
-        feedback_messages_for_model.push(reason);
-    }
-
     let completed = HookCompletedEvent {
         turn_id,
         run: dispatcher::completed_summary(handler, &run_result, status, entries),
@@ -317,12 +312,11 @@ fn parse_completed(
 }
 
 fn serialization_failure_outcome(hook_events: Vec<HookCompletedEvent>) -> PostToolUseOutcome {
-    let feedback_message = common::failure_block_reason(&hook_events);
     PostToolUseOutcome {
         hook_events,
-        should_block: feedback_message.is_some(),
+        should_block: false,
         additional_contexts: Vec::new(),
-        feedback_message,
+        feedback_message: None,
     }
 }
 
@@ -622,7 +616,6 @@ mod tests {
             matcher: Some(crate::engine::HookMatcher::new("^Bash$").expect("valid matcher")),
             timeout_sec: 5,
             status_message: Some("running post tool use hook".to_string()),
-            on_failure: Default::default(),
             additional_context_limit: Default::default(),
             source_path: test_path_buf("/tmp/hooks.json").abs().into(),
             source: codex_protocol::protocol::HookSource::User,

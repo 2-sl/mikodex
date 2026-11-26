@@ -1187,7 +1187,6 @@ struct PickerState {
     transcript_cells: HashMap<(BackendId, ThreadId), SessionTranscriptState>,
     pending_transcript_open: Option<(BackendId, ThreadId)>,
     unread: HashMap<(BackendId, ThreadId), String>,
-    overlay_backend_id: BackendId,
     overlay_receipt: Option<PickerLoadRequest>,
     pending_transcript_cancellation: Option<oneshot::Sender<()>>,
     transcript_loading_frame_shown: bool,
@@ -1410,7 +1409,6 @@ impl PickerState {
             transcript_cells: HashMap::new(),
             pending_transcript_open: None,
             unread: HashMap::new(),
-            overlay_backend_id: backend_id,
             overlay_receipt: None,
             pending_transcript_cancellation: None,
             transcript_loading_frame_shown: false,
@@ -1539,7 +1537,6 @@ impl PickerState {
                     thread_id,
                     revision,
                 });
-        self.overlay_backend_id = backend_id;
         self.overlay = Some(overlay);
         self.pending_transcript_open = None;
         self.transcript_loading_frame_shown = false;
@@ -1563,14 +1560,6 @@ impl PickerState {
             && let Some(receipt) = self.overlay_receipt.take()
         {
             (self.picker_loader)(receipt);
-        }
-        if let Overlay::Transcript(transcript) = overlay
-            && let Some(thread_id) = transcript.pending_thread_link.take()
-        {
-            tui.set_mouse_capture(crate::tui::MouseCapture::Inherit)?;
-            self.overlay = None;
-            self.open_thread_transcript(self.overlay_backend_id, thread_id);
-            return Ok(());
         }
         if overlay.is_done() {
             self.overlay = None;
@@ -1601,10 +1590,7 @@ impl PickerState {
             self.request_frame();
             return;
         };
-        self.open_thread_transcript(row.backend_id.unwrap_or(self.backend_id), thread_id);
-    }
-
-    fn open_thread_transcript(&mut self, backend_id: BackendId, thread_id: ThreadId) {
+        let backend_id = row.backend_id.unwrap_or(self.backend_id);
         let key = (backend_id, thread_id);
         self.pending_transcript_open = Some(key);
         self.transcript_loading_frame_shown = false;
@@ -4178,14 +4164,6 @@ fn format_timestamp(ts: DateTime<Utc>, clock_format: ClockFormat) -> String {
     .to_string()
 }
 
-pub(crate) fn loading_sessions_line() -> Line<'static> {
-    Line::from(
-        "Loading sessions…"
-            .set_style(secondary_text_style())
-            .italic(),
-    )
-}
-
 fn render_empty_state_line(state: &PickerState) -> Line<'static> {
     if !state.query.is_empty() {
         if state.search_state.is_active()
@@ -4210,7 +4188,12 @@ fn render_empty_state_line(state: &PickerState) -> Line<'static> {
 
     if state.pagination.is_loading() {
         if state.all_rows.is_empty() && state.pagination.num_scanned_files == 0 {
-            return loading_sessions_line();
+            return vec![
+                "Loading sessions…"
+                    .set_style(secondary_text_style())
+                    .italic(),
+            ]
+            .into();
         }
         return vec![
             "Loading older sessions…"
@@ -4896,7 +4879,7 @@ mod tests {
         state.cloud_backends.insert(state.backend_id);
         insta::assert_snapshot!(
             render_expanded_session_details(&row, &state, /*width*/ 53)[0].to_string(),
-            @"  │ Session:    ☁️ feat(tui): add raw scrollback mod…"
+            @"  │ Session:    ☁︎ feat(tui): add raw scrollback mode…"
         );
         assert!(rendered.contains("Branch:      codex/raw-scrollback-mode"));
         assert!(rendered.contains("Conversation:"));
@@ -5246,7 +5229,7 @@ mod tests {
             )[0]
                 .to_string()
                 .trim_end(),
-            @"  42s ago     ☁️ Fix resume …"
+            @"  42s ago     ☁︎ Fix resume p…"
         );
     }
 
@@ -6128,79 +6111,6 @@ mod tests {
             frames
                 .try_recv()
                 .expect("redraw even when the routed key has no effect");
-        }
-    }
-
-    #[tokio::test]
-    async fn linked_transcript_handoff_restores_mouse_capture() {
-        use crate::tui::MouseCapture;
-
-        for outcome in ["canceled", "failed", "loaded"] {
-            let mut state = PickerState::new(
-                BackendId::new(),
-                FrameRequester::test_dummy(),
-                page_only_loader(|_| {}),
-                ProviderFilter::MatchDefault(String::from("openai")),
-                /*show_all*/ true,
-                /*filter_cwd*/ None,
-                SessionPickerAction::Resume,
-            );
-            let thread_id = ThreadId::new();
-            let key = (state.backend_id, thread_id);
-            state.overlay = Some(Overlay::new_transcript(
-                Vec::new(),
-                state.keymap.pager.clone(),
-                state.copy_on_select,
-                state.mouse_scroll_speed,
-            ));
-            let mut tui = crate::tui::test_support::make_test_tui().expect("tui");
-            state
-                .handle_overlay_event(&mut tui, TuiEvent::Draw)
-                .unwrap();
-            assert_eq!(tui.mouse_capture, MouseCapture::Enabled);
-            let Some(Overlay::Transcript(transcript)) = &mut state.overlay else {
-                panic!("transcript preview");
-            };
-            transcript.pending_thread_link = Some(thread_id);
-            state
-                .handle_overlay_event(&mut tui, TuiEvent::Draw)
-                .unwrap();
-            assert_eq!(state.pending_transcript_open, Some(key));
-            assert_eq!(tui.mouse_capture, MouseCapture::Inherit);
-
-            if outcome == "canceled" {
-                state
-                    .handle_transcript_loading_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-            } else {
-                let transcript = if outcome == "failed" {
-                    Err(std::io::Error::other("failed"))
-                } else {
-                    Ok(LoadedTranscript {
-                        cells: Vec::new(),
-                        unread_revision: None,
-                    })
-                };
-                state
-                    .handle_background_event(BackgroundEvent::Transcript {
-                        backend_id: key.0,
-                        thread_id,
-                        transcript,
-                    })
-                    .await
-                    .unwrap();
-            }
-            assert_eq!(tui.mouse_capture, MouseCapture::Inherit);
-            if outcome == "loaded" {
-                assert!(state.note_transcript_loading_frame_drawn());
-                state.open_pending_transcript_if_ready();
-                state
-                    .handle_overlay_event(&mut tui, TuiEvent::Draw)
-                    .unwrap();
-                assert_eq!(tui.mouse_capture, MouseCapture::Enabled);
-            } else {
-                assert!(state.overlay.is_none());
-                assert_eq!(state.pending_transcript_open, None);
-            }
         }
     }
 
@@ -7738,7 +7648,6 @@ session_picker_view = "dense"
             section_entered_at: None,
             project_id: None,
             daybreak_enabled: None,
-            daybreak_program_propagation_enrolled: None,
             history_mode: Default::default(),
             model_provider: String::from("openai"),
             model: None,
@@ -7748,7 +7657,7 @@ session_picker_view = "dense"
             recency_at: Some(2),
             status: codex_app_server_protocol::ThreadStatus::Idle,
             path: None,
-            cwd: test_path_buf("/tmp").abs().into(),
+            cwd: test_path_buf("/tmp").abs(),
             cli_version: String::from("0.0.0"),
             source: codex_app_server_protocol::SessionSource::Cli,
             can_accept_direct_input: None,
@@ -7787,7 +7696,6 @@ session_picker_view = "dense"
             section_entered_at: None,
             project_id: None,
             daybreak_enabled: None,
-            daybreak_program_propagation_enrolled: None,
             history_mode: Default::default(),
             model_provider: String::from("openai"),
             model: None,
@@ -7797,7 +7705,7 @@ session_picker_view = "dense"
             recency_at: Some(2),
             status: codex_app_server_protocol::ThreadStatus::Idle,
             path: None,
-            cwd: test_path_buf("/tmp").abs().into(),
+            cwd: test_path_buf("/tmp").abs(),
             cli_version: String::from("0.0.0"),
             source: codex_app_server_protocol::SessionSource::Cli,
             can_accept_direct_input: None,
@@ -7891,7 +7799,6 @@ session_picker_view = "dense"
             section_entered_at: None,
             project_id: None,
             daybreak_enabled: None,
-            daybreak_program_propagation_enrolled: None,
             history_mode: Default::default(),
             model_provider: String::from("openai"),
             model: None,
@@ -7901,7 +7808,7 @@ session_picker_view = "dense"
             recency_at: Some(2),
             status: codex_app_server_protocol::ThreadStatus::Idle,
             path: None,
-            cwd: test_path_buf("/tmp").abs().into(),
+            cwd: test_path_buf("/tmp").abs(),
             cli_version: String::from("0.0.0"),
             source: codex_app_server_protocol::SessionSource::Cli,
             can_accept_direct_input: None,
@@ -7972,7 +7879,6 @@ session_picker_view = "dense"
             section_entered_at: None,
             project_id: None,
             daybreak_enabled: None,
-            daybreak_program_propagation_enrolled: None,
             history_mode: Default::default(),
             model_provider: String::from("openai"),
             model: None,
@@ -7982,7 +7888,7 @@ session_picker_view = "dense"
             recency_at: Some(2),
             status: codex_app_server_protocol::ThreadStatus::Idle,
             path: None,
-            cwd: test_path_buf("/tmp").abs().into(),
+            cwd: test_path_buf("/tmp").abs(),
             cli_version: String::from("0.0.0"),
             source: codex_app_server_protocol::SessionSource::Cli,
             can_accept_direct_input: None,

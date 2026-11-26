@@ -28,7 +28,6 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
@@ -41,11 +40,6 @@ use tracing::info;
 
 const MODEL_CACHE_FILE: &str = "models_cache.json";
 const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
-
-// The embedded catalog cannot change during this process. Preserve the existing empty fallback
-// on parse failure, and share the parsed data until a caller needs an owned catalog to mutate.
-static BUNDLED_MODELS: LazyLock<Vec<ModelInfo>> =
-    LazyLock::new(|| load_remote_models_from_file().unwrap_or_default());
 
 /// Remote endpoint used by the OpenAI-compatible model manager.
 ///
@@ -67,11 +61,6 @@ pub trait ModelsEndpointClient: fmt::Debug + Send + Sync {
     /// manager and cache's caller-established scope.
     /// Return `None` when identity is unavailable; cached catalog reuse is then disabled.
     fn identity(&self) -> Option<String>;
-
-    /// Whether auth must be resolved before checking catalog identity.
-    fn auth_requires_resolution(&self) -> bool {
-        true
-    }
 
     /// Returns whether this provider can authenticate command-scoped requests.
     fn has_command_auth(&self) -> bool;
@@ -168,12 +157,6 @@ pub struct RefreshedModelCatalog {
 
 /// Coordinates model discovery plus cached metadata on disk.
 pub trait ModelsManager: fmt::Debug + Send + Sync {
-    /// Whether to schedule initialization, without waiting on the catalog lock or auth.
-    /// Return true when readiness is unknown or credentials must be resolved first.
-    fn needs_initialization(&self) -> bool {
-        true
-    }
-
     /// Initialize a newly selected catalog without replacing an already-loaded snapshot.
     /// Stateful managers must check readiness for their current provider and credentials;
     /// a successful empty catalog is initialized too. Static catalogs need no work.
@@ -369,9 +352,9 @@ enum CatalogSource {
 }
 
 impl CatalogSource {
-    fn fallback_models(&self) -> Option<&'static [ModelInfo]> {
+    fn fallback_models(&self) -> Option<Vec<ModelInfo>> {
         match self {
-            Self::Default => Some(BUNDLED_MODELS.as_slice()),
+            Self::Default => Some(load_remote_models_from_file().unwrap_or_default()),
             Self::ExplicitProvider(_) => None,
         }
     }
@@ -389,7 +372,6 @@ impl CatalogSource {
 pub struct ModelCatalogSettings {
     cache: Option<Arc<dyn ModelsCache>>,
     pub api_key_model_discovery_default: bool,
-    pub skip_bundled_seed: bool,
     // Before the host publishes a live change, each thread uses its configured default.
     live_discovery: Arc<std::sync::Mutex<Option<bool>>>,
 }
@@ -499,11 +481,7 @@ impl OpenAiModelsManager {
                 etag: None,
                 client_version: Some(crate::client_version_to_whole()),
                 identity: endpoint_client.identity(),
-                models: if settings.skip_bundled_seed {
-                    Vec::new()
-                } else {
-                    BUNDLED_MODELS.to_vec()
-                },
+                models: load_remote_models_from_file().unwrap_or_default(),
             })),
             settings,
             endpoint_client,
@@ -537,19 +515,6 @@ impl StaticModelsManager {
 }
 
 impl ModelsManager for OpenAiModelsManager {
-    fn needs_initialization(&self) -> bool {
-        if self.endpoint_client.auth_requires_resolution() {
-            return true;
-        }
-        if self.api_key_discovery_disabled() {
-            return false;
-        }
-        !self
-            .remote_models
-            .try_read()
-            .is_ok_and(|catalog| self.catalog_is_initialized(&catalog))
-    }
-
     fn ensure_initialized(
         &self,
         http_client_factory: HttpClientFactory,
@@ -765,7 +730,7 @@ impl OpenAiModelsManager {
         {
             SelectedCatalog::CurrentSnapshot(Cow::Borrowed(&entry.models))
         } else {
-            SelectedCatalog::Fallback(Cow::Borrowed(
+            SelectedCatalog::Fallback(Cow::Owned(
                 self.catalog_source.fallback_models().unwrap_or_default(),
             ))
         }
@@ -1021,8 +986,7 @@ impl OpenAiModelsManager {
                         .auth_mode()
                         .is_some_and(AuthMode::has_chatgpt_account)
                 }));
-        if !remote_only && let Some(models) = self.catalog_source.fallback_models() {
-            let mut models = models.to_vec();
+        if !remote_only && let Some(mut models) = self.catalog_source.fallback_models() {
             for model in std::mem::take(&mut entry.models) {
                 if let Some(index) = models
                     .iter()
@@ -1095,10 +1059,6 @@ impl OpenAiModelsManager {
 }
 
 impl ModelsManager for StaticModelsManager {
-    fn needs_initialization(&self) -> bool {
-        false
-    }
-
     fn ensure_initialized(
         &self,
         _http_client_factory: HttpClientFactory,

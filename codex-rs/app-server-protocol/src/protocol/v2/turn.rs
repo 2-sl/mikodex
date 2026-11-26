@@ -224,10 +224,7 @@ pub struct TurnStartParams {
     #[experimental("turn/start.responsesapiClientMetadataPatch")]
     #[ts(optional = nullable)]
     pub responsesapi_client_metadata_patch: Option<HashMap<String, String>>,
-    /// Client-provided context fragments keyed by an opaque source identifier.
-    /// Omit this field or pass `null` to keep the current set. Pass a map to
-    /// replace the set when the input is delivered, or `{}` to clear it.
-    /// Clearing the set leaves previously recorded messages in the conversation history.
+    /// Optional client-provided context fragments keyed by an opaque source identifier.
     #[experimental("turn/start.additionalContext")]
     #[ts(optional = nullable)]
     pub additional_context: Option<HashMap<String, AdditionalContextEntry>>,
@@ -349,10 +346,7 @@ pub struct TurnSteerParams {
     #[experimental("turn/steer.responsesapiClientMetadataPatch")]
     #[ts(optional = nullable)]
     pub responsesapi_client_metadata_patch: Option<HashMap<String, String>>,
-    /// Client-provided context fragments keyed by an opaque source identifier.
-    /// Omit this field or pass `null` to keep the current set. Pass a map to
-    /// replace the set when the input is delivered, or `{}` to clear it.
-    /// Clearing the set leaves previously recorded messages in the conversation history.
+    /// Optional client-provided context fragments keyed by an opaque source identifier.
     #[experimental("turn/steer.additionalContext")]
     #[ts(optional = nullable)]
     pub additional_context: Option<HashMap<String, AdditionalContextEntry>>,

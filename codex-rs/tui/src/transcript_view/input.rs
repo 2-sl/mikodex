@@ -141,7 +141,6 @@ impl TranscriptView {
             return Some(ReaderLink::Agent(agent));
         }
         link.reader_destination(self.document_links)
-            .or_else(|| link.interaction_destination().map(ReaderLink::External))
     }
 
     pub(crate) fn cycle_document_link(
@@ -428,7 +427,7 @@ impl TranscriptView {
                 .hyperlinks
                 .iter()
                 .find(|link| link.columns.contains(&column))?
-                .interaction_destination()
+                .terminal_destination()
                 .map(ViewAction::OpenLink);
         }
         let inside = self.area.contains(point);
@@ -608,7 +607,10 @@ impl TranscriptView {
         mode: MouseMode<'_>,
     ) -> Option<ViewAction> {
         let was_following = self.is_following();
-        if event.modifiers.is_empty() && self.toggle_disclosure_at(cells, event.column, event.row) {
+        if !self.is_select_mode()
+            && event.modifiers.is_empty()
+            && self.toggle_disclosure_at(cells, event.column, event.row)
+        {
             // Keep the patch anchored for inspection, then follow again when the prompt closes.
             if was_following && let MouseMode::Selection(Some((thread_id, id))) = mode {
                 self.disclosure.resume_after_approval = Some((thread_id, id.to_owned()));

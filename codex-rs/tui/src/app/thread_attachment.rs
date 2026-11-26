@@ -3,7 +3,6 @@
 use super::*;
 use crate::app_server_session::ResumeModelSettings;
 use crate::backend_id::BackendId;
-use crate::chatwidget::ReadOnlyThread;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadStatus;
 use futures::future::BoxFuture;
@@ -24,11 +23,7 @@ impl Target {
 #[derive(Debug)]
 pub(crate) enum PreparedAttachment {
     Live(Box<AppServerStartedThread>),
-    ReplayOnly {
-        thread: Box<Thread>,
-        cwd: Option<codex_utils_path_uri::PathUri>,
-        read_only: Option<ReadOnlyThread>,
-    },
+    ReplayOnly(Box<Thread>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -248,26 +243,7 @@ pub(super) async fn prepare(
                     "Agent thread {thread_id} is not yet available for replay or live attach."
                 ));
             }
-            let convention = app_server.path_convention();
-            let cwd = match crate::app_server_session::decode_thread_cwd(&thread.cwd, convention) {
-                Ok(cwd) => Some(cwd),
-                Err(error) if convention.is_some() => return Err(error.into()),
-                Err(_) => None,
-            };
-            Ok(PreparedAttachment::ReplayOnly {
-                thread: Box::new(thread),
-                cwd,
-                read_only: if crate::session_start::is_archived_session_error(
-                    &resume_err,
-                    thread_id,
-                ) {
-                    Some(ReadOnlyThread::Archived)
-                } else if crate::app_server_session::is_active_writer_error(&resume_err) {
-                    Some(ReadOnlyThread::ExternalWriter)
-                } else {
-                    None
-                },
-            })
+            Ok(PreparedAttachment::ReplayOnly(Box::new(thread)))
         }
     }
 }
@@ -295,7 +271,7 @@ impl App {
             },
         );
         let is_closed = updates.close == CloseState::Closed
-            || matches!(&attachment, PreparedAttachment::ReplayOnly { thread, .. } if thread.status == ThreadStatus::NotLoaded);
+            || matches!(&attachment, PreparedAttachment::ReplayOnly(thread) if thread.status == ThreadStatus::NotLoaded);
         let live = self
             .install_thread_attachment(server, child, attachment, ChannelMode::Reuse(updates))
             .await;

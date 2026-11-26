@@ -9,6 +9,7 @@ use crate::context::ContextualUserFragment;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CodexResult;
+use codex_protocol::protocol::TokenUsage;
 
 pub(super) async fn maybe_record_reminder(
     sess: &Session,
@@ -119,7 +120,14 @@ impl Session {
         usage: &SamplingUsage,
     ) -> CodexResult<()> {
         let result = match usage.charge.posting {
-            ChargePosting::Unposted => self.record_numeric_usage(turn_id, usage).await,
+            ChargePosting::Unposted => {
+                self.record_numeric_usage(
+                    turn_id,
+                    usage.provider.as_ref(),
+                    usage.charge.hooks.charge,
+                )
+                .await
+            }
             ChargePosting::Posted => Ok(()),
             ChargePosting::PostedTurnExhausted => Err(CodexErr::SessionBudgetExceeded),
         };
@@ -137,75 +145,62 @@ impl Session {
         result
     }
 
-    async fn record_numeric_usage(&self, turn_id: &str, report: &SamplingUsage) -> CodexResult<()> {
-        let usage = report.provider.as_ref();
-        let hook_units = match report.charge.hooks.charge {
-            codex_hooks::HookCharge::Units(units) => units,
-            codex_hooks::HookCharge::Overflow => {
-                if let Some(account) = self.native_rollout_budget()
-                    && account.config().is_some_and(|config| config.enforce_limit)
-                {
-                    account.stop_on_overflow();
-                }
-                return Err(CodexErr::UsageAccountingFailed(
-                    "responseChargeAmount: total hook cost exceeds f64 range".into(),
-                ));
-            }
-        };
-        if usage.is_none() && hook_units == 0.0 {
+    async fn record_numeric_usage(
+        &self,
+        turn_id: &str,
+        usage: Option<&TokenUsage>,
+        hook_charge: codex_hooks::HookCharge,
+    ) -> CodexResult<()> {
+        if usage.is_none() && hook_charge == codex_hooks::HookCharge::default() {
             return Ok(());
         }
-        match &self.agent_runtime {
+        let stop_new_work = match &self.agent_runtime {
             AgentRuntimeServices::Controller => match self
                 .services
                 .agent_control
-                .record_usage(usage.cloned(), hook_units)
+                .record_usage(usage.cloned(), hook_charge)
                 .await
             {
-                Ok(()) => Ok(()),
+                Ok(()) => false,
                 // A legacy controller can report a posted bill and a stop through this error.
                 // A native account has already chosen its own deadline action.
                 Err(error)
                     if matches!(error.details(), CodexErrorDetails::SessionBudgetExceeded) =>
                 {
-                    if self.native_rollout_budget().is_none() {
-                        self.work_budget().stop_new_work();
-                    }
-                    Ok(())
+                    self.native_rollout_budget().is_none()
                 }
-                Err(error) => Err(CodexErr::UsageAccountingFailed(error.to_string())),
+                Err(error) => return Err(CodexErr::UsageAccountingFailed(error.to_string())),
             },
             AgentRuntimeServices::Host(services) => {
                 let Some(accounting) = &services.usage_accounting else {
                     return Ok(());
                 };
-                let usage_report = AgentUsageReport {
-                    thread_id: self.thread_id(),
-                    turn_id: turn_id.to_owned(),
-                    usage: usage.cloned(),
-                    additional_budget_units: hook_units,
-                };
-                let host_error = |error| {
-                    CodexErr::UsageAccountingFailed(format!(
-                        "Host usage accounting failed: {error}"
-                    ))
-                };
                 let decision = accounting
-                    .report_usage(usage_report)
+                    .report_usage(AgentUsageReport {
+                        thread_id: self.thread_id(),
+                        turn_id: turn_id.to_owned(),
+                        usage: usage.cloned(),
+                        additional_budget_units: hook_charge.units,
+                        additional_budget_units_overflowed: hook_charge.overflowed,
+                    })
                     .await
-                    .map_err(host_error)?;
-                if decision == UsageAccountingDecision::Exhausted {
-                    self.work_budget().stop_new_work();
-                }
+                    .map_err(|error| {
+                        CodexErr::UsageAccountingFailed(format!(
+                            "Host usage accounting failed: {error}"
+                        ))
+                    })?;
                 match decision {
-                    UsageAccountingDecision::Continue | UsageAccountingDecision::Exhausted => {
-                        Ok(())
-                    }
+                    UsageAccountingDecision::Continue => false,
+                    UsageAccountingDecision::Exhausted => true,
                     UsageAccountingDecision::ExhaustedForTurn => {
-                        Err(CodexErr::SessionBudgetExceeded)
+                        return Err(CodexErr::SessionBudgetExceeded);
                     }
                 }
             }
+        };
+        if stop_new_work {
+            self.work_budget().stop_new_work();
         }
+        Ok(())
     }
 }

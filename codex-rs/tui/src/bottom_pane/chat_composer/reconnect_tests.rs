@@ -293,31 +293,22 @@ fn unavailable_thread_accepts_highlighted_recovery_completion() {
 
 #[test]
 fn unavailable_thread_vim_escape_and_search_keep_popup_closed() {
-    for text in ["/sub", "/raw "] {
-        let (mut composer, _) = new_test_composer();
-        composer.enable_vim_in_insert_mode();
-        for ch in text.chars() {
-            composer.handle_restricted_key(
-                KeyCode::Char(ch).into(),
-                RestrictedInputMode::UnavailableThread,
-            );
-        }
-        assert!(matches!(
-            composer.popups.active,
-            ActivePopup::Command(_) | ActivePopup::Argument(_)
-        ));
-        composer.handle_restricted_key(KeyCode::Esc.into(), RestrictedInputMode::UnavailableThread);
-        assert!(composer.draft.textarea.is_vim_normal_mode());
-        composer.sync_popups();
-        assert!(matches!(composer.popups.active, ActivePopup::None));
-        assert_eq!(composer.current_text(), text);
+    let (mut composer, _) = new_test_composer();
+    composer.enable_vim_in_insert_mode();
+    for ch in "/sub".chars() {
         composer.handle_restricted_key(
-            KeyCode::Char('/').into(),
+            KeyCode::Char(ch).into(),
             RestrictedInputMode::UnavailableThread,
         );
-        assert!(composer.draft.textarea.vim_query().is_some());
-        assert!(matches!(composer.popups.active, ActivePopup::None));
     }
+    composer.handle_restricted_key(KeyCode::Esc.into(), RestrictedInputMode::UnavailableThread);
+    assert!(composer.draft.textarea.is_vim_normal_mode());
+    composer.handle_restricted_key(
+        KeyCode::Char('/').into(),
+        RestrictedInputMode::UnavailableThread,
+    );
+    assert!(composer.draft.textarea.vim_query().is_some());
+    assert!(matches!(composer.popups.active, ActivePopup::None));
 }
 
 #[test]

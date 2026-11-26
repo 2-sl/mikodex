@@ -84,10 +84,6 @@ impl ChatWidget {
         )
     }
 
-    pub(crate) fn status_line_area(&self) -> ratatui::layout::Rect {
-        self.bottom_pane.status_line_area()
-    }
-
     /// Sets the currently rendered footer status-line value.
     pub(crate) fn set_status_line(&mut self, status_line: Option<StatusLine>) {
         self.bottom_pane.set_status_line(status_line);
@@ -336,7 +332,11 @@ impl ChatWidget {
         use crate::bottom_pane::StatuslineProviderActions;
 
         let configured_status_line_items = self.configured_status_line_items();
-        let providers = if !self.custom_statusline_enabled() {
+        let providers = if !self
+            .config
+            .features
+            .enabled(codex_features::Feature::TuiExtensionsStatusLine)
+        {
             StatuslineProviderActions::Hidden
         } else if self.thread_params_mode == crate::ThreadParamsMode::Cloud {
             StatuslineProviderActions::Choose

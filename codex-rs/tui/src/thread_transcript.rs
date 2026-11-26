@@ -16,13 +16,12 @@ use crate::history_cell::split_reasoning_summary_parts;
 use crate::inline_visualization::InlineVisualizationContext;
 use crate::legacy_core::config::Config;
 use codex_app_server_protocol::Thread;
-use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::ThreadId;
 use codex_protocol::items::UserMessageItem;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use ratatui::style::Stylize as _;
-use std::path::Path;
 
 mod activity_pages;
 mod computer_groups;
@@ -104,10 +103,10 @@ pub(crate) fn thread_to_transcript_cells(
         .turns
         .into_iter()
         .flat_map(|turn| {
-            let mut cells = thread_items_with_timestamps_to_transcript_cells(
+            let mut cells = thread_items_to_transcript_cells(
                 thread_id,
-                cwd.as_path(),
-                turn.items,
+                &cwd,
+                turn.items.into_iter().map(|entry| entry.payload),
                 raw_reasoning_visibility,
                 config,
             );
@@ -129,24 +128,8 @@ pub(crate) fn thread_to_transcript_cells(
 
 pub(crate) fn thread_items_to_transcript_cells(
     thread_id: Option<ThreadId>,
-    cwd: &Path,
+    cwd: &AbsolutePathBuf,
     items: impl IntoIterator<Item = ThreadItemPayload>,
-    raw_reasoning_visibility: RawReasoningVisibility,
-    config: Option<&Config>,
-) -> TranscriptCells {
-    thread_items_with_timestamps_to_transcript_cells(
-        thread_id,
-        cwd,
-        items.into_iter().map(ThreadItem::untimed),
-        raw_reasoning_visibility,
-        config,
-    )
-}
-
-fn thread_items_with_timestamps_to_transcript_cells(
-    thread_id: Option<ThreadId>,
-    cwd: &Path,
-    items: impl IntoIterator<Item = ThreadItem>,
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
 ) -> TranscriptCells {
@@ -155,17 +138,7 @@ fn thread_items_with_timestamps_to_transcript_cells(
     });
     let mut cells: TranscriptCells = Vec::new();
     let mut pending = None;
-    for timed_item in items {
-        let started_at =
-            crate::clock_format::local_timestamp_from_unix_ms(timed_item.started_at_ms);
-        let completed_at =
-            crate::clock_format::local_timestamp_from_unix_ms(timed_item.completed_at_ms);
-        let timestamp = if matches!(&timed_item.payload, ThreadItemPayload::AgentMessage { .. }) {
-            completed_at.or(started_at)
-        } else {
-            started_at.or(completed_at)
-        };
-        let item = timed_item.payload;
+    for item in items {
         if matches!(item, ThreadItemPayload::Reasoning { .. })
             && let Some(group) = &mut pending
         {
@@ -174,7 +147,6 @@ fn thread_items_with_timestamps_to_transcript_cells(
                 cwd,
                 raw_reasoning_visibility,
                 inline_visualization_context.clone(),
-                timestamp.clone(),
             ) {
                 match group {
                     PendingActivity::Computer(group) => group.group.push_detail(cell),
@@ -185,7 +157,7 @@ fn thread_items_with_timestamps_to_transcript_cells(
         }
         if let Some(cell) = tools::historical_tool_fallback(&item) {
             PendingActivity::flush(&mut pending, &mut cells);
-            cells.push(Arc::new(cell.with_timestamp(timestamp.clone())));
+            cells.push(Arc::new(cell));
             continue;
         }
         match item {
@@ -197,18 +169,18 @@ fn thread_items_with_timestamps_to_transcript_cells(
                 if call.invocation.is_computer_activity() {
                     match &mut pending {
                         Some(PendingActivity::Computer(group)) => {
-                            computer_groups::append(group, call, timestamp.clone());
+                            computer_groups::append(group, call);
                         }
                         Some(PendingActivity::Exploration(_)) | None => {
                             PendingActivity::flush(&mut pending, &mut cells);
                             let mut group = crate::history_cell::ComputerActivityCell::default();
-                            computer_groups::append(&mut group, call, timestamp.clone());
+                            computer_groups::append(&mut group, call);
                             pending = Some(PendingActivity::Computer(group));
                         }
                     }
                 } else {
                     PendingActivity::flush(&mut pending, &mut cells);
-                    let cell = call.into_cell(timestamp.clone());
+                    let cell = call.into_cell();
                     cells.push(Arc::new(cell));
                 }
             }
@@ -217,7 +189,7 @@ fn thread_items_with_timestamps_to_transcript_cells(
                     PendingActivity::flush(&mut pending, &mut cells);
                 }
                 if let Some(command) = tools::CommandHistory::from_item(item) {
-                    let newer = command.into_cell(timestamp.clone());
+                    let newer = command.into_cell();
                     if let Some(PendingActivity::Exploration(group)) = &mut pending {
                         if let Err(newer) = group.append_completed(newer) {
                             PendingActivity::flush(&mut pending, &mut cells);
@@ -239,7 +211,6 @@ fn thread_items_with_timestamps_to_transcript_cells(
                     cwd,
                     raw_reasoning_visibility,
                     inline_visualization_context.clone(),
-                    timestamp.clone(),
                 );
                 if !projected.is_empty() {
                     PendingActivity::flush(&mut pending, &mut cells);
@@ -255,10 +226,9 @@ fn thread_items_with_timestamps_to_transcript_cells(
 /// Project one item without changing the active widget or its turn lifecycle.
 fn item_to_cells(
     item: ThreadItemPayload,
-    cwd: &Path,
+    cwd: &AbsolutePathBuf,
     raw_reasoning_visibility: RawReasoningVisibility,
     inline_visualization_context: Option<InlineVisualizationContext>,
-    timestamp: Option<chrono::DateTime<chrono::Local>>,
 ) -> TranscriptCells {
     let mut cells: TranscriptCells = Vec::new();
     match item {
@@ -302,7 +272,7 @@ fn item_to_cells(
                 item.local_image_paths(),
                 item.image_urls(),
             );
-            cells.push(Arc::new(cell.with_async_replies(replies, cwd)));
+            cells.push(Arc::new(cell.with_async_replies(replies, cwd.as_path())));
         }
         ThreadItemPayload::AgentMessage {
             text,
@@ -310,17 +280,16 @@ fn item_to_cells(
             phase,
             ..
         } => {
-            let parsed = parse_assistant_markdown(&text, cwd);
+            let parsed = parse_assistant_markdown(&text, cwd.as_path());
             if !parsed.visible_markdown.trim().is_empty() {
                 cells.push(Arc::new(
                     AgentMarkdownCell::new_with_inline_visualizations(
                         parsed.visible_markdown,
-                        cwd,
+                        cwd.as_path(),
                         inline_visualization_context,
                     )
                     .with_phase(phase)
-                    .with_questions(questions.as_deref().unwrap_or_default())
-                    .with_timestamp(timestamp),
+                    .with_questions(questions.as_deref().unwrap_or_default()),
                 ));
             }
         }
@@ -345,7 +314,10 @@ fn item_to_cells(
         }
         ThreadItemPayload::Plan { text, .. } => {
             if !text.trim().is_empty() {
-                cells.push(Arc::new(crate::history_cell::new_proposed_plan(text, cwd)));
+                cells.push(Arc::new(crate::history_cell::new_proposed_plan(
+                    text,
+                    cwd.as_path(),
+                )));
             }
         }
         ThreadItemPayload::Reasoning {
@@ -363,18 +335,22 @@ fn item_to_cells(
                 text.push_str(&content.join("\n\n"));
             }
             if !text.trim().is_empty() {
-                let mut cell =
-                    ReasoningSummaryCell::new(header, text, cwd, /*transcript_only*/ true);
+                let mut cell = ReasoningSummaryCell::new(
+                    header,
+                    text,
+                    cwd.as_path(),
+                    /*transcript_only*/ true,
+                );
                 cell.set_source_item_id(id);
                 cells.push(Arc::new(cell));
             }
         }
         item @ ThreadItemPayload::CommandExecution { .. } => {
             if let Some(command) = tools::CommandHistory::from_item(item) {
-                cells.push(Arc::new(command.into_cell(timestamp)));
+                cells.push(Arc::new(command.into_cell()));
             }
         }
-        other => cells.extend(other_items::cells(other, cwd, timestamp)),
+        other => cells.extend(other_items::cells(other, cwd)),
     }
     cells
 }

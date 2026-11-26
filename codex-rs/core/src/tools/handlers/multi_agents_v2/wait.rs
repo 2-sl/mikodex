@@ -72,7 +72,7 @@ impl Handler {
             .emit_turn_item_started(
                 &turn,
                 &TurnItem::CollabAgentToolCall(CollabAgentToolCallItem {
-                    id: call_id.to_string(),
+                    id: call_id.clone(),
                     tool: CollabAgentTool::Wait,
                     status: CollabAgentToolCallStatus::InProgress,
                     sender_thread_id: session.thread_id,
@@ -113,7 +113,7 @@ impl Handler {
             .emit_turn_item_completed(
                 &turn,
                 TurnItem::CollabAgentToolCall(CollabAgentToolCallItem {
-                    id: call_id.into(),
+                    id: call_id,
                     tool: CollabAgentTool::Wait,
                     status: CollabAgentToolCallStatus::Completed,
                     sender_thread_id: session.thread_id,

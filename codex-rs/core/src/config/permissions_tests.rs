@@ -391,7 +391,6 @@ fn compile_permission_profile_resolves_enabled_workspace_roots() -> std::io::Res
             entries: BTreeMap::from([(
                 "workspace".to_string(),
                 PermissionProfileToml {
-                    credentials: None,
                     description: None,
                     extends: None,
                     workspace_roots: Some(WorkspaceRootsToml {
@@ -593,7 +592,6 @@ fn read_write_trailing_glob_suffix_compiles_as_subpath() -> std::io::Result<()> 
             entries: BTreeMap::from([(
                 "workspace".to_string(),
                 PermissionProfileToml {
-                    credentials: None,
                     description: None,
                     extends: None,
                     workspace_roots: None,

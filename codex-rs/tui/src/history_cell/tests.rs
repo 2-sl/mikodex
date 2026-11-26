@@ -54,7 +54,6 @@ fn connected_server_version_notice_snapshot() {
     let (notice, _) = crate::status::remote_connection::pending_server_version_notice(
         &settings,
         &target,
-        /*daemon_updates_allowed*/ true,
         /*server_home*/ None,
         "0.153.0",
         Some("0.152.1"),
@@ -81,26 +80,14 @@ fn local_daemon_version_notice_snapshot() {
         show_server_version_notice: true,
         ..Default::default()
     };
-    for (client, server, updates_allowed, snapshot) in [
-        (
-            "0.153.0",
-            "0.152.1",
-            true,
-            "local_daemon_version_notice_snapshot",
-        ),
-        (
-            "0.155.0-alpha.12",
-            "0.156.0",
-            true,
-            "local_daemon_alpha_mismatch",
-        ),
-        ("0.0.0", "0.156.0", true, "local_daemon_source_mismatch"),
-        ("0.153.0", "0.152.1", false, "local_daemon_updates_disabled"),
+    for (client, server, snapshot) in [
+        ("0.153.0", "0.152.1", "local_daemon_version_notice_snapshot"),
+        ("0.155.0-alpha.12", "0.156.0", "local_daemon_alpha_mismatch"),
+        ("0.0.0", "0.156.0", "local_daemon_source_mismatch"),
     ] {
         let (notice, _) = crate::status::remote_connection::pending_server_version_notice(
             &settings,
             &target,
-            updates_allowed,
             /*server_home*/ None,
             client,
             Some(server),
@@ -667,7 +654,7 @@ fn session_configured_event(model: &str) -> ThreadSessionState {
         approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer::User,
         permission_profile: PermissionProfile::read_only(),
         active_permission_profile: None,
-        cwd: codex_utils_path_uri::PathUri::parse("file:///tmp/project").unwrap(),
+        cwd: test_path_buf("/tmp/project").abs(),
         runtime_workspace_roots: Vec::new(),
         instruction_source_paths: Vec::new(),
         reasoning_effort: None,
@@ -805,8 +792,13 @@ async fn session_info_uses_availability_nux_tooltip_override() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    target_os = "windows",
+    ignore = "snapshot path rendering differs on Windows"
+)]
 async fn session_info_availability_nux_tooltip_snapshot() {
-    let config = test_config().await;
+    let mut config = test_config().await;
+    config.cwd = test_path_buf("/tmp/project").abs();
     let cell = new_session_info(
         &config,
         &crate::local_settings::LocalSettings::from(&config),

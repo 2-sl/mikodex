@@ -45,20 +45,13 @@ pub(crate) fn build_reviewer_config(parent_config: &Config) -> anyhow::Result<Co
         Feature::GuardianV2,
         Feature::TokenBudget,
         Feature::ContextManagement,
-        Feature::AsyncCompaction,
-        Feature::AsyncCompactionRootOnly,
         Feature::CodexHooks,
         Feature::Apps,
         Feature::Plugins,
         Feature::WebSearchRequest,
         Feature::WebSearchCached,
     ] {
-        if (feature == Feature::Apps && conversation_history_tools)
-            || (matches!(
-                feature,
-                Feature::AsyncCompaction | Feature::AsyncCompactionRootOnly
-            ) && parent_config.guardian_model_provider.is_none())
-        {
+        if feature == Feature::Apps && conversation_history_tools {
             continue;
         }
         config.features.disable(feature).map_err(|err| {

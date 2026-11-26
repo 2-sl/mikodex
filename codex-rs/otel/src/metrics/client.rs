@@ -350,12 +350,6 @@ pub struct MetricsClient {
 impl MetricsClient {
     /// Build a metrics client from configuration and validate defaults.
     pub fn new(config: MetricsConfig) -> Result<Self> {
-        Self::new_with_transport::<true>(config)
-    }
-
-    pub(crate) fn new_with_transport<const ALLOW_GRPC: bool>(
-        config: MetricsConfig,
-    ) -> Result<Self> {
         let MetricsConfig {
             headers_helper,
             http_client_factory,
@@ -406,7 +400,7 @@ impl MetricsClient {
                         .as_deref(),
                 );
                 let exporter = crate::network_policy::PolicyExporter {
-                    exporter: build_otlp_metric_exporter::<ALLOW_GRPC>(
+                    exporter: build_otlp_metric_exporter(
                         exporter,
                         temporality,
                         &http_client_factory,
@@ -668,7 +662,7 @@ fn otlp_metrics_temporality(exporter: &OtelExporter, preference: Option<&str>) -
     }
 }
 
-fn build_otlp_metric_exporter<const ALLOW_GRPC: bool>(
+fn build_otlp_metric_exporter(
     exporter: OtelExporter,
     temporality: Temporality,
     factory: &codex_http_client::HttpClientFactory,
@@ -688,7 +682,7 @@ fn build_otlp_metric_exporter<const ALLOW_GRPC: bool>(
             .into_iter()
             .all(|key| std::env::var_os(key).is_none())
             .then_some(Compression::Zstd);
-            build_otlp_metric_exporter::<ALLOW_GRPC>(
+            build_otlp_metric_exporter(
                 crate::config::resolve_exporter(&OtelExporter::Statsig),
                 temporality,
                 factory,
@@ -696,9 +690,6 @@ fn build_otlp_metric_exporter<const ALLOW_GRPC: bool>(
                 compression,
             )
         }
-        OtelExporter::OtlpGrpc { .. } if !ALLOW_GRPC => Err(MetricsError::InvalidConfig {
-            message: "this provider requires OTLP/HTTP for metrics".into(),
-        }),
         OtelExporter::OtlpGrpc {
             endpoint,
             headers,

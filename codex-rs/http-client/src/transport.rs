@@ -13,7 +13,6 @@ use crate::request::Request;
 use crate::request::RequestBody;
 use crate::request::Response;
 use crate::request_draft::RequestDraft;
-use crate::request_draft::prevent_body_redirects;
 use crate::retry_after::RetryAfter;
 use bytes::Bytes;
 use bytes::BytesMut;
@@ -75,8 +74,7 @@ impl ReqwestTransport {
     }
 
     async fn send(&self, req: Request) -> Result<HttpResponse, TransportError> {
-        let private = req.has_private_body();
-        let prepared = req.prepare_wire_body().map_err(TransportError::Build)?;
+        let prepared = req.prepare_body_for_send().map_err(TransportError::Build)?;
 
         let Request {
             method,
@@ -93,7 +91,6 @@ impl ReqwestTransport {
             RequestDraft::new(method, url).map_err(|error| Self::map_error(error.into()))?;
         request.extend_headers(prepared.headers);
         *request.request.timeout_mut() = timeout;
-        request.private_body = private;
         *request.request.body_mut() = prepared.body.map(Into::into);
 
         match &self.client {
@@ -103,12 +100,9 @@ impl ReqwestTransport {
                     .await
                     .map_err(Self::map_route_aware_error),
                 HttpClientBackend::Direct(client) => {
-                    let mut request = request
+                    let request = request
                         .build(client)
                         .map_err(|error| Self::map_error(error.into()))?;
-                    if private {
-                        prevent_body_redirects(&mut request);
-                    }
                     client
                         .execute(request)
                         .await

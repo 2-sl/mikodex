@@ -53,9 +53,7 @@ impl TranscriptView {
             });
         }
         if self.select_mode.is_some() {
-            let hints = if let Some(hints) = self.block_mark_hints() {
-                hints
-            } else if let Some(mark) = self.table_mark() {
+            let hints = if let Some(mark) = self.table_mark() {
                 let (full, short, minimal) =
                     if mark.kind == super::select_mode::table::TableMarkKind::Text {
                         (
@@ -65,17 +63,14 @@ impl TranscriptView {
                         )
                     } else {
                         (
-                            concat!(
-                                "arrows/hjkl extend cells · tab expand to table",
-                                " · v mark text · o swap · y copy · esc clear"
-                            ),
-                            "arrows extend · v mark text · y copy",
+                            "arrows/hjkl extend cells · v mark text · o swap · y copy · esc clear",
+                            "arrows move · v mark text · y copy",
                             "v mark text · y copy",
                         )
                     };
                 [full, short, minimal, "esc clear"].map(str::to_owned)
             } else if !has_selected_text
-                && let Some(label) = self.block_hint()
+                && self.select_cursor_is_on_table()
                 && let Some(mark) = self
                     .disclosure
                     .keymap
@@ -84,11 +79,11 @@ impl TranscriptView {
                 let mark = mark.display_label();
                 [
                     format!(
-                        "arrows/hjkl move · v mark text · V mark lines · {mark} mark {label} · / find · q close"
+                        "arrows/hjkl move · v mark text · V mark lines · {mark} mark cell · / find · q close"
                     ),
-                    format!("arrows move · {mark} mark {label} · v mark text"),
-                    format!("{mark} mark {label} · q close"),
-                    format!("{mark} mark {label}"),
+                    format!("arrows move · {mark} mark cell · v mark text"),
+                    format!("{mark} mark cell · q close"),
+                    format!("{mark} mark cell"),
                 ]
             } else if has_selected_text {
                 let copy = crate::key_hint::ctrl(KeyCode::Char('c')).display_label();
@@ -312,9 +307,9 @@ pub(super) fn navigation_line(navigation: &str) -> Line<'static> {
             " clear selection",
             " copy+↓",
             " extend cells",
-            " extend",
-            " expand",
-            " shrink",
+            " mark cell",
+            " mark text",
+            " mark lines",
             " move in cell",
             " move",
             " ends",
@@ -340,11 +335,6 @@ pub(super) fn navigation_line(navigation: &str) -> Line<'static> {
         if let Some(action) = action {
             spans.extend(key_label_spans(&hint[..hint.len() - action.len()]));
             spans.push(action.dim());
-        } else if let Some(at) = hint.rfind(" mark ").or_else(|| hint.rfind(" expand to ")) {
-            // The Markdown target can be several words (e.g. "list item").
-            let (key, action) = hint.split_at(at);
-            spans.extend(key_label_spans(key));
-            spans.push(action.to_owned().dim());
         } else if hint == "esc" {
             spans.extend(key_label_spans(hint));
         } else {

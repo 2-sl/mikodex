@@ -3,9 +3,7 @@
 use super::*;
 use crate::app::backend_sessions::InitialBackendSessions;
 use crate::app::startup::prepare_fresh_startup_config;
-use crate::app::startup::startup_config_cwd;
 use crate::app::startup::startup_model;
-use crate::app::startup::statusline_enabled;
 use crate::app::startup_bootstrap::bootstrap_server_owned_start;
 use pretty_assertions::assert_eq;
 
@@ -463,21 +461,15 @@ requires_openai_auth = false
         if !server_owned {
             server.bootstrap(&config).await?;
         }
-        let defaults = crate::config_update::read_effective_config_with_layers(
-            &server.request_handle(),
-            startup_config_cwd(&config, &server, &target, /*resumed_cwd*/ None)
-                .display()
-                .to_string(),
-        )
-        .await?;
         prepare_fresh_startup_config(
             &mut config,
             &server,
-            &defaults,
+            &target,
             &cli_kv_overrides,
             &harness_overrides,
             &EnvironmentManager::default_for_tests(),
-        );
+        )
+        .await?;
         if server_owned {
             bootstrap_server_owned_start(
                 &mut server,
@@ -636,7 +628,7 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
         )?;
         std::fs::write(
             server_home.path().join("config.toml"),
-            "model_reasoning_effort = \"high\"\nsandbox_mode = \"read-only\"\nmodel_reasoning_summary = \"concise\"\n[model_providers.server-only]\nname = \"OpenAI\"\nwire_api = \"responses\"\n",
+            "model_reasoning_effort = \"high\"\nsandbox_mode = \"read-only\"\nmodel_reasoning_summary = \"concise\"\n",
         )?;
         let mut config = ConfigBuilder::default()
             .codex_home(client_home.path().to_path_buf())
@@ -680,43 +672,21 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
         } else {
             AppServerTarget::Embedded
         };
-        if remote {
-            assert_eq!(
-                startup_config_cwd(&config, &server, &target, Some(destination.path())),
-                if override_cwd {
-                    launch_cwd.path()
-                } else {
-                    destination.path()
-                },
-            );
-        }
         let bootstrap = server.bootstrap(&config).await?;
         assert_eq!(
             bootstrap.default_model.as_deref(),
             Some("stale-client-model")
         );
-        let defaults = crate::config_update::read_effective_config_with_layers(
-            &server.request_handle(),
-            startup_config_cwd(&config, &server, &target, /*resumed_cwd*/ None)
-                .display()
-                .to_string(),
-        )
-        .await?;
-        assert!(!statusline_enabled(&defaults.config));
         let defaults_read = prepare_fresh_startup_config(
             &mut config,
             &server,
-            &defaults,
+            &target,
             &[],
             &ConfigOverrides::default(),
             &EnvironmentManager::default_for_tests(),
-        );
+        )
+        .await?;
         assert!(!defaults_read.prompt_windows_sandbox);
-        assert_eq!(
-            config.model_reasoning_summary,
-            Some(codex_protocol::config_types::ReasoningSummary::Concise)
-        );
-        assert!(config.model_providers["server-only"].is_openai());
         assert_eq!(config.model, None);
         let selected_model =
             startup_model(&config, &bootstrap, /*server_defaults_read*/ true)?;
@@ -732,13 +702,15 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
         )
         .await?;
         assert_eq!(started.session.model, selected_model);
-        let cwd = started.session.cwd.to_path_buf();
         assert!(
             !started
                 .session
                 .permission_profile
                 .file_system_sandbox_policy()
-                .can_write_local_path_with_cwd(&cwd, &cwd)
+                .can_write_local_path_with_cwd(
+                    started.session.cwd.as_path(),
+                    started.session.cwd.as_path()
+                )
         );
         let starts = recorded_params(&requests, "thread/start");
         assert_eq!(starts.len(), if remote { 1 } else { 2 });
@@ -787,12 +759,8 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
     Ok(())
 }
 
-#[test]
-fn fresh_startup_observes_config_edits_after_directory_trust() -> Result<()> {
-    run_embedded_tui_scenario("tui-startup-after-trust", startup_after_directory_trust)
-}
-
-async fn startup_after_directory_trust() -> Result<()> {
+#[tokio::test]
+async fn fresh_startup_observes_config_edits_after_directory_trust() -> Result<()> {
     let home = tempdir()?;
     let destination = tempdir()?;
     std::fs::create_dir(destination.path().join(".git"))?;
@@ -851,12 +819,8 @@ async fn startup_after_directory_trust() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn startup_reads_server_defaults_before_starting_thread() -> Result<()> {
-    run_embedded_tui_scenario("tui-startup-defaults", startup_with_server_defaults)
-}
-
-async fn startup_with_server_defaults() -> Result<()> {
+#[tokio::test]
+async fn startup_reads_server_defaults_before_starting_thread() -> Result<()> {
     let client_home = tempdir()?;
     let server_home = tempdir()?;
     let projectless_cwd = tempdir()?;

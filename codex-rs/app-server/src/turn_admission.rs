@@ -1,5 +1,4 @@
 //! Tracks client runtime changes and turn starts admitted before a shutdown drain.
-//! Reopening a temporary workspace pause wakes pending work to retry admission.
 
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_extension_api::TurnStartAdmission;
@@ -21,7 +20,6 @@ struct AdmissionState {
 pub(crate) struct TurnAdmission {
     state: Arc<Mutex<AdmissionState>>,
     active_tx: watch::Sender<usize>,
-    resumed_tx: watch::Sender<()>,
 }
 
 impl Default for TurnAdmission {
@@ -29,7 +27,6 @@ impl Default for TurnAdmission {
         Self {
             state: Arc::new(Mutex::new(AdmissionState::default())),
             active_tx: watch::channel(0).0,
-            resumed_tx: watch::channel(()).0,
         }
     }
 }
@@ -95,15 +92,11 @@ impl TurnAdmission {
 
 impl Drop for TurnAdmissionPause {
     fn drop(&mut self) {
-        let mut state = self
-            .0
+        self.0
             .state
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.paused = false;
-        if !state.closed {
-            self.0.resumed_tx.send_replace(());
-        }
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .paused = false;
     }
 }
 
@@ -112,10 +105,6 @@ impl TurnStartAdmission for TurnAdmission {
         self.admit()
             .ok()
             .map(|permit| Box::new(permit) as Box<dyn Send>)
-    }
-
-    fn admission_updates(&self) -> Option<watch::Receiver<()>> {
-        Some(self.resumed_tx.subscribe())
     }
 }
 

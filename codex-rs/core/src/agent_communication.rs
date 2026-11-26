@@ -6,7 +6,6 @@ use codex_extension_api::MessageLifecycleContributor;
 use codex_extension_api::MessageLifecycleInput;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::InterAgentCommunication;
-use codex_tool_call_id::ToolCallId;
 use serde::Deserialize;
 use serde::Serialize;
 use std::borrow::Cow;
@@ -47,7 +46,6 @@ impl AgentCommunicationKind {
 pub(crate) struct AgentCommunicationContext {
     pub(crate) kind: AgentCommunicationKind,
     pub(crate) sender_thread_id: ThreadId,
-    pub(crate) source_tool_call_id: Option<ToolCallId>,
 }
 
 impl AgentCommunicationContext {
@@ -55,7 +53,6 @@ impl AgentCommunicationContext {
         Self {
             kind,
             sender_thread_id,
-            source_tool_call_id: None,
         }
     }
 }
@@ -177,23 +174,16 @@ struct MessagePublication {
 
 /// Clones follow one logical delivery through queues and share its consumption state.
 #[derive(Clone)]
-pub(crate) struct MessageDelivery {
-    pub(crate) source_tool_call_id: Option<ToolCallId>,
-    publication: Option<Arc<Mutex<Option<MessagePublication>>>>,
-}
+pub(crate) struct MessageDelivery(Arc<Mutex<Option<MessagePublication>>>);
 
 impl MessageDelivery {
     pub(crate) fn publish(
         sender: ThreadId,
-        source_tool_call_id: Option<ToolCallId>,
         observers: &[Arc<dyn MessageLifecycleContributor>],
         unconfirmed_results: Option<&Arc<AtomicUsize>>,
     ) -> Option<Self> {
         if observers.is_empty() && unconfirmed_results.is_none() {
-            return source_tool_call_id.map(|id| Self {
-                source_tool_call_id: Some(id),
-                publication: None,
-            });
+            return None;
         }
         let input = MessageLifecycleInput {
             sender,
@@ -211,27 +201,21 @@ impl MessageDelivery {
             observers: observers.into(),
             result_write,
         };
-        Some(Self {
-            source_tool_call_id,
-            publication: Some(Arc::new(Mutex::new(Some(publication)))),
-        })
+        Some(Self(Arc::new(Mutex::new(Some(publication)))))
     }
 
     pub(crate) fn awaits_result_write(&self) -> bool {
-        self.publication.as_ref().is_some_and(|publication| {
-            publication
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .as_ref()
-                .is_some_and(|publication| publication.result_write.is_some())
-        })
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|publication| publication.result_write.is_some())
     }
 
     /// The first consumer owns both the publication hooks and the write receipt.
     pub(crate) fn consumed(&self, recipient: ThreadId) -> Option<ResultWrite> {
         let publication = self
-            .publication
-            .as_ref()?
+            .0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()?;

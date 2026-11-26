@@ -131,7 +131,7 @@ impl RequestPermissionsHandler {
         let response = session
             .request_permissions_for_environment(
                 &step_context,
-                call_id.into(),
+                call_id,
                 request,
                 cancellation_token,
             )

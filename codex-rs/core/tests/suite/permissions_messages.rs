@@ -477,15 +477,8 @@ async fn catalog_permission_message_is_sent_initially_and_after_model_change() -
     Ok(())
 }
 
-#[test_case(None, /*scoped*/ false; "keeps_bundled_unscoped_guidance")]
-#[test_case(None, /*scoped*/ true; "keeps_bundled_scoped_guidance")]
-#[test_case(Some(""), /*scoped*/ false; "omits_blank_unscoped_guidance")]
-#[test_case(Some(""), /*scoped*/ true; "omits_blank_scoped_guidance")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn empty_catalog_permission_message_with_never_approval(
-    never_approval: Option<&str>,
-    scoped: bool,
-) -> Result<()> {
+async fn empty_catalog_permission_message_preserves_approval_instructions() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -495,27 +488,21 @@ async fn empty_catalog_permission_message_with_never_approval(
     )
     .await;
     let model_slug = "empty-catalog-permissions-model";
-    let mut model = model_info_from_slug(model_slug);
-    model.model_messages = Some(ModelMessages {
-        permissions: Some(PermissionMessages {
+    let model = model_with_permission_messages(
+        model_slug,
+        PermissionMessages {
+            danger_full_access: None,
+            workspace_write: None,
             read_only: Some(String::new()),
+            approved_prefixes: None,
+            writable_root: None,
+            writable_roots: None,
             ..Default::default()
-        }),
-        approvals: Some(ApprovalMessages {
-            never: never_approval.map(str::to_owned),
-            ..Default::default()
-        }),
-        ..Default::default()
-    });
+        },
+    );
     let mut builder = test_codex()
         .with_model(model_slug)
         .with_config(move |config| {
-            if scoped {
-                config
-                    .features
-                    .enable(Feature::PerEnvironmentContext)
-                    .expect("per-environment context should be available");
-            }
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::Never);
             config
                 .permissions
@@ -525,23 +512,15 @@ async fn empty_catalog_permission_message_with_never_approval(
                 models: vec![model],
             });
         });
-    let test = builder.build_with_auto_env(&server).await?;
+    let test = builder.build(&server).await?;
 
     submit_text_turn(&test, "hello").await?;
 
     let permissions = permissions_texts(&req.single_request());
-    if never_approval == Some("") {
-        assert_eq!(permissions, Vec::<String>::new());
-    } else {
-        assert_eq!(permissions.len(), 1);
-        assert_eq!(
-            permissions[0].starts_with("<permissions instructions><"),
-            scoped,
-        );
-        assert!(permissions[0].contains("Approval policy is currently never"));
-        assert!(!permissions[0].contains("Filesystem sandboxing defines"));
-        assert!(!permissions[0].contains("`sandbox_mode`"));
-    }
+    assert_eq!(permissions.len(), 1);
+    assert!(permissions[0].contains("Approval policy is currently never"));
+    assert!(!permissions[0].contains("Filesystem sandboxing defines"));
+    assert!(!permissions[0].contains("`sandbox_mode`"));
     Ok(())
 }
 

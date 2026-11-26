@@ -1,6 +1,0 @@
----
-source: tui/src/transcript_view/select_mode_tests.rs
-expression: hints.join("\n")
----
-Markdown list · **←→/hl** move · **↑↓/jk** extend · **tab** expand to list item · **⇧tab** shrink · **v** mark text · **y** copy · **esc** clear
-list · **←→** move · **↑↓** extend · **y** copy

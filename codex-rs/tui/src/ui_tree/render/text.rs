@@ -1,6 +1,5 @@
 //! Prepared inline text retains styled chunks and their legal line breaks across leaves.
 
-use super::AvailableWidth;
 use super::Fragment;
 use super::RenderTheme;
 use super::Visit;
@@ -319,11 +318,10 @@ impl Chunk {
 impl PreparedText {
     pub(super) fn layout<'a>(
         &'a self,
-        width: AvailableWidth,
+        width: usize,
         limit: usize,
         visit: &mut Visit<'a, '_>,
     ) -> usize {
-        let width = width.cells;
         let mut y = 0;
         for line in &self.lines {
             let mut start = 0;

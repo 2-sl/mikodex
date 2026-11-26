@@ -17,14 +17,6 @@ pub(crate) enum RestrictedInputMode {
 }
 
 impl ChatComposer {
-    pub(crate) fn set_restricted_input_mode(&mut self, mode: Option<RestrictedInputMode>) {
-        self.popups.restricted_input_mode = mode;
-        // Reconcile a popup opened before the routing mode changed, before Tab can accept it.
-        if matches!(self.popups.active, ActivePopup::Argument(_)) {
-            self.sync_slash_argument_popup(/*allow*/ true);
-        }
-    }
-
     /// Preserve Enter inside a paste burst without attempting submission.
     pub(crate) fn handle_paste_enter(&mut self, now: Instant) -> bool {
         let in_slash_context = self.slash_commands_enabled()
@@ -72,7 +64,6 @@ impl ChatComposer {
         key: KeyEvent,
         mode: RestrictedInputMode,
     ) -> InputResult {
-        self.set_restricted_input_mode(Some(mode));
         if mode == RestrictedInputMode::DraftHandoff {
             if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                 let now = tokio::time::Instant::now().into_std();
@@ -110,10 +101,7 @@ impl ChatComposer {
         self.cancel_history_search();
         self.attachments.clear_remote_image_selection();
         if mode != RestrictedInputMode::UnavailableThread
-            || !matches!(
-                self.popups.active,
-                ActivePopup::Command(_) | ActivePopup::Argument(_)
-            )
+            || !matches!(self.popups.active, ActivePopup::Command(_))
         {
             self.popups.active = ActivePopup::None;
         }
@@ -150,28 +138,6 @@ impl ChatComposer {
         if mode == RestrictedInputMode::UnavailableThread
             && pending_pastes.is_empty()
             && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-            && matches!(self.popups.active, ActivePopup::Argument(_))
-            && !self.submit_keys.is_pressed(key)
-            && (matches!(
-                key.code,
-                KeyCode::Tab | KeyCode::Up | KeyCode::Down | KeyCode::Esc
-            ) || key.modifiers == KeyModifiers::CONTROL
-                && matches!(key.code, KeyCode::Char('p' | 'n')))
-        {
-            let vim_escape = self.should_handle_vim_insert_escape(key);
-            let result = self.handle_slash_argument_key(key).0;
-            if vim_escape {
-                let first_line = self.draft.textarea.text().lines().next().unwrap_or("");
-                self.popups.dismissed_command_token =
-                    slash_input::command_popup_filter_text(first_line, /*cursor*/ 0);
-                self.edit_restricted_draft(key);
-            }
-            self.sync_unavailable_slash_popup();
-            return result;
-        }
-        if mode == RestrictedInputMode::UnavailableThread
-            && pending_pastes.is_empty()
-            && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
             && let ActivePopup::Command(popup) = &self.popups.active
         {
             let submit = self.submit_keys.is_pressed(key);
@@ -195,7 +161,7 @@ impl ChatComposer {
                     )
                     .0;
                 self.reset_vim_mode_after_successful_dispatch(&result);
-                self.sync_unavailable_slash_popup();
+                self.sync_command_popup(/*allow*/ true);
                 return result;
             }
             if !submit
@@ -235,12 +201,12 @@ impl ChatComposer {
             if matches!(command, Some(SlashCommandItem::Builtin(command))
                 if matches!(command, SlashCommand::Warnings | SlashCommand::Config | SlashCommand::Rc | SlashCommand::Quit | SlashCommand::Exit)
                     || mode == RestrictedInputMode::UnavailableThread && command.available_when_thread_unavailable())
-                && let Some(result) = self
+            {
+                let result = self
                     .try_dispatch_bare_slash_command()
                     .or_else(|| self.try_dispatch_slash_command_with_args())
-            {
+                    .unwrap_or(InputResult::None);
                 self.reset_vim_mode_after_successful_dispatch(&result);
-                self.popups.active = ActivePopup::None;
                 return result;
             }
         }
@@ -252,19 +218,14 @@ impl ChatComposer {
         {
             self.edit_restricted_draft(key);
             if mode == RestrictedInputMode::UnavailableThread {
-                self.sync_unavailable_slash_popup();
+                self.sync_command_popup(
+                    self.slash_commands_enabled()
+                        && !self.draft.is_bash_mode
+                        && self.draft.textarea.vim_query().is_none(),
+                );
             }
         }
         InputResult::None
-    }
-
-    fn sync_unavailable_slash_popup(&mut self) {
-        let allow = self.slash_commands_enabled()
-            && !self.draft.is_bash_mode
-            && self.draft.textarea.vim_query().is_none();
-        if !self.sync_slash_argument_popup(allow) {
-            self.sync_command_popup(allow);
-        }
     }
 
     fn edit_restricted_draft(&mut self, key: KeyEvent) {

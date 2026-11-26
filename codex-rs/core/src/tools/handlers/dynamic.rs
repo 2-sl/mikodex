@@ -146,7 +146,7 @@ impl DynamicToolHandler {
         let response = request_dynamic_tool(
             &session,
             turn.as_ref(),
-            call_id.into(),
+            call_id,
             self.tool_name.clone(),
             args,
             cancellation_token,

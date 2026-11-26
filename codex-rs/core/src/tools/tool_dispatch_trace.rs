@@ -16,7 +16,6 @@ use codex_rollout_trace::ToolDispatchPayload;
 use codex_rollout_trace::ToolDispatchRequester;
 use codex_rollout_trace::ToolDispatchResult;
 use codex_rollout_trace::ToolDispatchTraceContext;
-use codex_tool_call_id::ToolCallId;
 
 /// Keeps registry results and abandoned dispatches paired with trace end events.
 pub(crate) struct ToolDispatchTrace {
@@ -63,7 +62,7 @@ fn tool_dispatch_invocation(invocation: &ToolInvocation) -> Option<ToolDispatchI
     let requester = match &invocation.source {
         ToolCallSource::Direct | ToolCallSource::DirectPlaintextMessage => {
             ToolDispatchRequester::Model {
-                model_visible_call_id: invocation.call_id.to_string(),
+                model_visible_call_id: invocation.call_id.clone(),
             }
         }
         ToolCallSource::CodeMode {
@@ -93,7 +92,7 @@ fn tool_dispatch_invocation(invocation: &ToolInvocation) -> Option<ToolDispatchI
 
 fn tool_dispatch_result(
     invocation: &ToolInvocation,
-    call_id: &ToolCallId,
+    call_id: &str,
     payload: &ToolPayload,
     result: &dyn ToolOutput,
 ) -> Option<ToolDispatchResult> {

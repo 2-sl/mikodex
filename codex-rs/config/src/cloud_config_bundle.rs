@@ -175,7 +175,6 @@ pub struct CloudConfigBundleLoadError {
     code: CloudConfigBundleLoadErrorCode,
     message: String,
     status_code: Option<u16>,
-    login_required: bool,
 }
 
 impl CloudConfigBundleLoadError {
@@ -188,24 +187,7 @@ impl CloudConfigBundleLoadError {
             code,
             message: message.into(),
             status_code,
-            login_required: false,
         }
-    }
-
-    pub fn login_required(message: impl Into<String>) -> Self {
-        Self {
-            login_required: true,
-            ..Self::new(
-                CloudConfigBundleLoadErrorCode::Auth,
-                /*status_code*/ None,
-                message,
-            )
-        }
-    }
-
-    pub fn requires_login(&self) -> bool {
-        self.login_required
-            || (self.code == CloudConfigBundleLoadErrorCode::Auth && self.status_code == Some(401))
     }
 
     pub fn code(&self) -> CloudConfigBundleLoadErrorCode {

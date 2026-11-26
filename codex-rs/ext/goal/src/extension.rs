@@ -30,6 +30,7 @@ use codex_extension_api::TurnStopInput;
 use codex_otel::MetricsClient;
 use codex_protocol::ThreadId;
 use codex_protocol::items::TurnItem;
+use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadGoalStatus;
@@ -425,14 +426,13 @@ where
                 return;
             };
 
-            let reason = if input.error.is_usage_limit() {
-                ActiveGoalStopReason::UsageLimit
-            } else {
+            let reason = match input.error {
+                CodexErrorInfo::UsageLimitExceeded => ActiveGoalStopReason::UsageLimit,
                 // The turn has ended because the error was non-retryable or its
                 // retries were exhausted. Block the goal to prevent automatic
                 // continuation from looping and consuming tokens, as can happen
                 // with compaction errors.
-                ActiveGoalStopReason::TurnError
+                _ => ActiveGoalStopReason::TurnError,
             };
             if let Err(err) = runtime
                 .stop_active_goal_for_turn(input.turn_id, reason)

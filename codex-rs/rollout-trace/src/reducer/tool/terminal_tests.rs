@@ -19,7 +19,6 @@ use crate::model::TerminalResult;
 use crate::model::TerminalSession;
 use crate::model::ToolCallKind;
 use crate::model::ToolCallSummary;
-use crate::payload::PayloadCapture;
 use crate::payload::RawPayloadKind;
 use crate::raw_event::RawTraceEventPayload;
 use crate::reducer::test_support::ROOT_THREAD_ID;
@@ -38,30 +37,8 @@ use crate::writer::TraceWriter;
 
 #[test]
 fn exec_tool_reduces_to_terminal_operation_and_session() -> anyhow::Result<()> {
-    check_exec_terminal_result("ok\n", /*exit_code*/ 0, Some("ok\n"))
-}
-
-#[test]
-fn exec_end_retains_exit_code_and_session_when_output_is_omitted() -> anyhow::Result<()> {
-    // Numbered lines stay larger than the bundle budget even after compression.
-    let output = (0..32_768)
-        .map(|line| format!("{line}\n"))
-        .collect::<String>();
-    check_exec_terminal_result(
-        &output, /*exit_code*/ 17, /*expected_stdout*/ None,
-    )
-}
-
-fn check_exec_terminal_result(
-    output: &str,
-    exit_code: i32,
-    expected_stdout: Option<&str>,
-) -> anyhow::Result<()> {
-    let (temp, writer) = crate::writer::capture_tests::limited_trace(
-        /*body*/ 256 << 10,
-        /*bundle*/ 24 << 10,
-    )?;
-    start_thread(&writer, ROOT_THREAD_ID, "/root")?;
+    let temp = TempDir::new()?;
+    let writer = create_started_writer(&temp)?;
     start_turn(&writer, "turn-1")?;
     append_inference_with_tool_call(&writer)?;
 
@@ -80,7 +57,7 @@ fn check_exec_terminal_result(
     let _tool_start = writer.append_with_context(
         trace_context("turn-1"),
         RawTraceEventPayload::ToolCallStarted {
-            tool_call_id: "tool-1".into(),
+            tool_call_id: "tool-1".to_string(),
             model_visible_call_id: Some("call-1".to_string()),
             code_mode_runtime_tool_id: None,
             requester: crate::raw_event::RawToolCallRequester::Model,
@@ -104,7 +81,7 @@ fn check_exec_terminal_result(
         trace_context("turn-1"),
         RawTraceEventPayload::ToolCallRuntimeStarted {
             kind: ToolCallKind::ExecCommand,
-            tool_call_id: "tool-1".into(),
+            tool_call_id: "tool-1".to_string(),
             runtime_payload: runtime_start_payload,
         },
     )?;
@@ -117,21 +94,16 @@ fn check_exec_terminal_result(
             "turn_id": "turn-1",
             "command": ["cargo", "test"],
             "cwd": "/repo",
-            "aggregated_output": output,
-            "exit_code": exit_code,
+            "aggregated_output": "ok\n",
+            "exit_code": 0,
             "status": "completed"
         }),
     )?;
-    if expected_stdout.is_none() {
-        assert!(runtime_end_payload.capture.is_complete());
-        assert!(matches!(runtime_end_payload.parts.as_slice(), [child]
-            if matches!(child.capture, PayloadCapture::Omitted { .. })));
-    }
     let runtime_end_payload_id = runtime_end_payload.raw_payload_id.clone();
     let runtime_end = writer.append_with_context(
         trace_context("turn-1"),
         RawTraceEventPayload::ToolCallRuntimeEnded {
-            tool_call_id: "tool-1".into(),
+            tool_call_id: "tool-1".to_string(),
             status: ExecutionStatus::Completed,
             runtime_payload: runtime_end_payload,
         },
@@ -152,7 +124,7 @@ fn check_exec_terminal_result(
     writer.append_with_context(
         trace_context("turn-1"),
         RawTraceEventPayload::ToolCallEnded {
-            tool_call_id: "tool-1".into(),
+            tool_call_id: "tool-1".to_string(),
             status: ExecutionStatus::Completed,
             result_payload: Some(result_payload),
         },
@@ -199,7 +171,7 @@ fn check_exec_terminal_result(
         TerminalOperation {
             operation_id: operation_id.clone(),
             terminal_id: Some("terminal_session:terminal_operation:1".to_string()),
-            tool_call_id: "tool-1".into(),
+            tool_call_id: "tool-1".to_string(),
             kind: TerminalOperationKind::ExecCommand,
             execution: ExecutionWindow {
                 started_at_unix_ms: runtime_start.wall_time_unix_ms,
@@ -216,8 +188,8 @@ fn check_exec_terminal_result(
                 max_output_tokens: None,
             },
             result: Some(TerminalResult {
-                exit_code: Some(exit_code),
-                stdout: expected_stdout.unwrap_or_default().to_string(),
+                exit_code: Some(0),
+                stdout: "ok\n".to_string(),
                 stderr: String::new(),
                 formatted_output: None,
                 original_token_count: None,
@@ -295,13 +267,13 @@ fn reused_process_ids_keep_sessions_and_stdin_joins_distinct() -> anyhow::Result
             writer.append_with_context(
                 trace_context("turn-1"),
                 RawTraceEventPayload::ToolCallRuntimeEnded {
-                    tool_call_id: "tool-0".into(),
+                    tool_call_id: "tool-0".to_string(),
                     status: ExecutionStatus::Completed,
                     runtime_payload: response,
                 },
             )?;
         }
-        let tool_call_id = crate::ToolCallId::from(format!("tool-{index}"));
+        let tool_call_id = format!("tool-{index}");
         writer.append_with_context(
             trace_context_for_thread(thread, turn),
             RawTraceEventPayload::ToolCallStarted {
@@ -369,7 +341,7 @@ fn reused_process_ids_keep_sessions_and_stdin_joins_distinct() -> anyhow::Result
         TerminalOperation {
             operation_id: "terminal_operation:6".to_string(),
             terminal_id: Some("terminal_session:terminal_operation:5".to_string()),
-            tool_call_id: "tool-5".into(),
+            tool_call_id: "tool-5".to_string(),
             kind: TerminalOperationKind::WriteStdin,
             execution: ExecutionWindow {
                 started_at_unix_ms: runtime_start.wall_time_unix_ms,
@@ -394,8 +366,8 @@ fn reused_process_ids_keep_sessions_and_stdin_joins_distinct() -> anyhow::Result
     writer.append_with_context(
         trace_context("turn-1"),
         RawTraceEventPayload::StdinTargetResolved {
-            tool_call_id: "tool-2".into(),
-            exec_tool_call_id: "tool-4".into(),
+            tool_call_id: "tool-2".to_string(),
+            exec_tool_call_id: "tool-4".to_string(),
         },
     )?;
     let mut expected = rollout;
@@ -447,7 +419,7 @@ fn dispatch_write_stdin_payload_reduces_to_terminal_operation() -> anyhow::Resul
     let tool_start = writer.append_with_context(
         trace_context("turn-1"),
         RawTraceEventPayload::ToolCallStarted {
-            tool_call_id: "tool-stdin".into(),
+            tool_call_id: "tool-stdin".to_string(),
             model_visible_call_id: Some("call-stdin".to_string()),
             code_mode_runtime_tool_id: None,
             requester: crate::raw_event::RawToolCallRequester::Model,
@@ -472,7 +444,7 @@ fn dispatch_write_stdin_payload_reduces_to_terminal_operation() -> anyhow::Resul
     let tool_end = writer.append_with_context(
         trace_context("turn-1"),
         RawTraceEventPayload::ToolCallEnded {
-            tool_call_id: "tool-stdin".into(),
+            tool_call_id: "tool-stdin".to_string(),
             status: ExecutionStatus::Completed,
             result_payload: Some(response_payload),
         },
@@ -496,7 +468,7 @@ fn dispatch_write_stdin_payload_reduces_to_terminal_operation() -> anyhow::Resul
         TerminalOperation {
             operation_id: operation_id.clone(),
             terminal_id: Some("terminal_session:terminal_operation:1".to_string()),
-            tool_call_id: "tool-stdin".into(),
+            tool_call_id: "tool-stdin".to_string(),
             kind: TerminalOperationKind::WriteStdin,
             execution: ExecutionWindow {
                 started_at_unix_ms: tool_start.wall_time_unix_ms,
@@ -553,7 +525,7 @@ fn invalid_write_stdin_arguments_remain_failed_tool_calls() -> anyhow::Result<()
             ToolDispatchInvocation {
                 thread_id: ROOT_THREAD_ID.to_string(),
                 codex_turn_id: "turn-1".to_string(),
-                tool_call_id: "call-stdin".into(),
+                tool_call_id: "call-stdin".to_string(),
                 tool_name: "write_stdin".to_string(),
                 tool_namespace: None,
                 requester: ToolDispatchRequester::Model {
@@ -598,91 +570,8 @@ fn invalid_write_stdin_arguments_remain_failed_tool_calls() -> anyhow::Result<()
 
 #[test]
 fn code_mode_write_stdin_result_projects_structured_exec_fields() -> anyhow::Result<()> {
-    check_code_mode_write_stdin_result(/*body_limit*/ 128 << 10)
-}
-
-#[test]
-fn capped_code_mode_write_stdin_retains_structured_exec_fields() -> anyhow::Result<()> {
-    check_code_mode_write_stdin_result(/*body_limit*/ 4096)
-}
-
-fn check_code_mode_write_stdin_result(body_limit: usize) -> anyhow::Result<()> {
-    let output = "x".repeat(80 << 10);
-    let response = json!({
-        "type": "code_mode_response",
-        "value": {
-            "chunk_id": "abc123",
-            "wall_time_seconds": 1.25,
-            "exit_code": 0,
-            "original_token_count": 3,
-            "output": output
-        }
-    });
-    let retained_output = (body_limit > output.len()).then_some(output);
-    assert_eq!(
-        replay_write_stdin_result(body_limit, response, ExecutionStatus::Completed)?,
-        Some(TerminalResult {
-            exit_code: Some(0),
-            stdout: retained_output.clone().unwrap_or_default(),
-            stderr: String::new(),
-            formatted_output: retained_output,
-            original_token_count: Some(3),
-            chunk_id: Some("abc123".to_string()),
-        }),
-    );
-    Ok(())
-}
-
-#[test]
-fn capped_write_stdin_only_recovers_structured_output() -> anyhow::Result<()> {
-    let body_limit = 4 << 10;
-    let text = "x".repeat(80 << 10);
-    for (response, status) in [
-        (
-            json!({"type": "direct_response", "response_item": {"type": "function_call_output", "output": text}}),
-            ExecutionStatus::Completed,
-        ),
-        (
-            json!({"type": "error", "error": text}),
-            ExecutionStatus::Failed,
-        ),
-        // A literal null and a gap elsewhere do not identify a missing terminal output.
-        (
-            json!({"type": "code_mode_response", "value": {"output": null, "text": text}}),
-            ExecutionStatus::Completed,
-        ),
-    ] {
-        assert_eq!(
-            replay_write_stdin_result(body_limit, response, status)?,
-            None
-        );
-    }
-    let response = json!({
-        "type": "code_mode_response",
-        "value": {"output": "done", "exit_code": 17, "text": text},
-    });
-    assert_eq!(
-        replay_write_stdin_result(body_limit, response, ExecutionStatus::Completed)?,
-        Some(TerminalResult {
-            exit_code: Some(17),
-            stdout: "done".into(),
-            formatted_output: Some("done".into()),
-            stderr: String::new(),
-            original_token_count: None,
-            chunk_id: None,
-        })
-    );
-    Ok(())
-}
-
-fn replay_write_stdin_result(
-    body_limit: usize,
-    response: serde_json::Value,
-    status: ExecutionStatus,
-) -> anyhow::Result<Option<TerminalResult>> {
-    let (temp, writer) =
-        crate::writer::capture_tests::limited_trace(body_limit, /*bundle*/ 1 << 20)?;
-    start_thread(&writer, ROOT_THREAD_ID, "/root")?;
+    let temp = TempDir::new()?;
+    let writer = create_started_writer(&temp)?;
     start_turn(&writer, "turn-1")?;
 
     let request_payload = writer.write_json_payload(
@@ -701,6 +590,19 @@ fn replay_write_stdin_result(
             }
         }),
     )?;
+    let response_payload = writer.write_json_payload(
+        RawPayloadKind::ToolResult,
+        &json!({
+            "type": "code_mode_response",
+            "value": {
+                "chunk_id": "abc123",
+                "wall_time_seconds": 1.25,
+                "exit_code": 0,
+                "original_token_count": 3,
+                "output": "done\n"
+            }
+        }),
+    )?;
     writer.append_with_context(
         trace_context("turn-1"),
         RawTraceEventPayload::CodeCellStarted {
@@ -712,7 +614,7 @@ fn replay_write_stdin_result(
     writer.append_with_context(
         trace_context("turn-1"),
         RawTraceEventPayload::ToolCallStarted {
-            tool_call_id: "tool-stdin".into(),
+            tool_call_id: "tool-stdin".to_string(),
             model_visible_call_id: None,
             code_mode_runtime_tool_id: Some("runtime-tool-1".to_string()),
             requester: crate::raw_event::RawToolCallRequester::CodeCell {
@@ -723,22 +625,29 @@ fn replay_write_stdin_result(
             invocation_payload: Some(request_payload),
         },
     )?;
-    writer.event_with_payload(
+    writer.append_with_context(
         trace_context("turn-1"),
-        RawPayloadKind::ToolResult,
-        &response,
-        move |response_payload| RawTraceEventPayload::ToolCallEnded {
-            tool_call_id: "tool-stdin".into(),
-            status,
+        RawTraceEventPayload::ToolCallEnded {
+            tool_call_id: "tool-stdin".to_string(),
+            status: ExecutionStatus::Completed,
             result_payload: Some(response_payload),
         },
     )?;
-    writer.flush()?;
 
     let rollout = replay_bundle(temp.path())?;
-    Ok(rollout.terminal_operations["terminal_operation:1"]
-        .result
-        .clone())
+    assert_eq!(
+        rollout.terminal_operations["terminal_operation:1"].result,
+        Some(TerminalResult {
+            exit_code: Some(0),
+            stdout: "done\n".to_string(),
+            stderr: String::new(),
+            formatted_output: Some("done\n".to_string()),
+            original_token_count: Some(3),
+            chunk_id: Some("abc123".to_string()),
+        }),
+    );
+
+    Ok(())
 }
 
 fn append_inference_with_tool_call(writer: &TraceWriter) -> anyhow::Result<()> {

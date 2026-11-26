@@ -14,10 +14,10 @@ use codex_otel::ADDITIONAL_CONTEXT_COUNT_METRIC;
 use codex_otel::ADDITIONAL_CONTEXT_VALUE_BYTES_BUCKETS;
 use codex_otel::ADDITIONAL_CONTEXT_VALUE_BYTES_METRIC;
 use codex_otel::SessionTelemetry;
+use codex_protocol::ItemIdGenerator;
 use codex_protocol::ResponseItemId;
 use codex_protocol::protocol::AdditionalContextEntry;
 use codex_protocol::protocol::AdditionalContextKind;
-use codex_thread_context_ids::ThreadContextIds;
 use codex_utils_string::truncate_middle_with_token_budget;
 
 pub(crate) enum AdditionalContextFormat {
@@ -92,10 +92,10 @@ impl AdditionalContextStore {
         values: BTreeMap<String, AdditionalContextEntry>,
         format: AdditionalContextFormat,
         telemetry: &SessionTelemetry,
-        context_ids: &ThreadContextIds,
+        item_id_generator: &ItemIdGenerator,
     ) -> Vec<ResponseItemEnvelope> {
         self.values.retain(|key, _| values.contains_key(key));
-        self.extend(values, format, telemetry, context_ids)
+        self.extend(values, format, telemetry, item_id_generator)
     }
 
     /// Adds a producer's updates without dropping unrelated client context.
@@ -104,7 +104,7 @@ impl AdditionalContextStore {
         values: BTreeMap<String, AdditionalContextEntry>,
         format: AdditionalContextFormat,
         telemetry: &SessionTelemetry,
-        context_ids: &ThreadContextIds,
+        item_id_generator: &ItemIdGenerator,
     ) -> Vec<ResponseItemEnvelope> {
         let mut fragments = Vec::new();
         for (key, entry) in values {
@@ -121,7 +121,7 @@ impl AdditionalContextStore {
             let Some(prefix) = envelope.id_prefix() else {
                 unreachable!("additional context has an item ID")
             };
-            let id = context_ids.next_item(prefix);
+            let id = item_id_generator(prefix);
             envelope.set_id(Some(id.clone()));
             self.values.insert(key, (value, id));
             fragments.push(envelope);

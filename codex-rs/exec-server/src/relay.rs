@@ -34,7 +34,6 @@ use crate::noise_channel::NoiseChannelPublicKey;
 use crate::noise_channel::PendingResponderHandshake;
 use crate::noise_channel::noise_channel_prologue;
 use crate::noise_relay::NOISE_RELAY_RESET_REASON;
-use crate::noise_relay::admission::InboundAdmission;
 use crate::noise_relay::executor_stream::ClosedNoiseVirtualStream;
 use crate::noise_relay::executor_stream::NoiseVirtualStream;
 use crate::noise_relay::executor_stream::spawn_noise_virtual_stream;
@@ -49,7 +48,6 @@ use crate::relay_proto::relay_message_frame;
 use crate::server::ConnectionProcessor;
 use crate::telemetry::ExecutorRegistration;
 use crate::websocket_pong_watchdog::WEBSOCKET_PONG_TIMEOUT_REASON;
-use tokio_util::task::TaskTracker;
 
 #[path = "relay_writer.rs"]
 mod writer;
@@ -519,7 +517,6 @@ pub(crate) async fn run_multiplexed_environment<T, E, V, H>(
     executor_registration_id: String,
     identity: NoiseChannelIdentity,
     validator: V,
-    admission: Option<InboundAdmission>,
 ) -> RendezvousDisconnectReason
 where
     T: Sink<Message, Error = E> + Stream<Item = Result<Message, E>> + Unpin + Send + 'static,
@@ -548,11 +545,6 @@ where
     let mut streams: HashMap<String, NoiseVirtualStream<H>> = HashMap::new();
     let mut pending_handshakes: HashMap<String, PendingHandshake> = HashMap::new();
     let mut validation_tasks: JoinSet<HarnessKeyValidationResult> = JoinSet::new();
-    let stream_tasks = admission.as_ref().map(|_| TaskTracker::new());
-    let shutdown = admission
-        .as_ref()
-        .map(|a| a.shutdown.clone())
-        .unwrap_or_default();
     let mut failed_handshakes = 0usize;
     let mut handshake_cooldown_until = None;
     let mut next_validation_id = 0u64;
@@ -597,7 +589,6 @@ where
     loop {
         // Registry calls run separately so a slow check does not block the relay.
         let frame = tokio::select! {
-            _ = shutdown.cancelled() => break,
             writer_result = &mut physical_writer_task => {
                 match writer_result {
                     Ok(reason) => disconnect_reason = reason,
@@ -724,8 +715,8 @@ where
                         streams.insert(
                             validation_result.stream_id.clone(),
                             spawn_noise_virtual_stream(
-                                ClosedNoiseVirtualStream { stream_id: validation_result.stream_id, instance_id: validation_result.validation_id },
-                                stream_tasks.as_ref(),
+                                validation_result.stream_id,
+                                validation_result.validation_id,
                                 handler.clone(),
                                 physical_outgoing_tx.clone(),
                                 closed_stream_tx.clone(),
@@ -733,9 +724,6 @@ where
                                 executor_registration.clone(),
                             ),
                         );
-                        if let Some(admission) = &admission {
-                            admission.authorized.notify_one();
-                        }
                     }
                     Some(Err(error)) => {
                         warn!("Noise relay harness key validation task failed: {error}");
@@ -827,15 +815,6 @@ where
                     send_reset(&physical_outgoing_tx, stream_id);
                     continue;
                 }
-                let handshake_permit = if let Some(admission) = &admission {
-                    let Some(permit) = admission.budget.try_admit() else {
-                        send_reset(&physical_outgoing_tx, stream_id);
-                        continue;
-                    };
-                    Some(permit)
-                } else {
-                    None
-                };
                 let prologue =
                     noise_channel_prologue(&environment_id, &executor_registration_id, &stream_id);
                 let request = match frame.into_handshake_payload() {
@@ -901,7 +880,6 @@ where
                 // Failed validation leaves no transport state. Preserve the
                 // trusted registry status for request-scoped rejection handling.
                 validation_tasks.spawn(async move {
-                    let _handshake_permit = handshake_permit;
                     let result = match timeout(
                         HARNESS_KEY_VALIDATION_TIMEOUT,
                         validator.validate_harness_key(
@@ -976,13 +954,7 @@ where
     for (_stream_id, stream) in streams {
         stream.disconnect();
     }
-    // Reporters must not block on a closed physical connection while handlers drain.
-    drop(closed_stream_rx);
-    if let Some(stream_tasks) = stream_tasks {
-        validation_tasks.shutdown().await;
-        stream_tasks.close();
-        stream_tasks.wait().await;
-    }
+    // Dropping the JoinSet aborts any registry checks still running.
     if !physical_writer_task.is_finished() {
         physical_writer_task.abort();
         let _ = physical_writer_task.await;
@@ -1287,7 +1259,6 @@ mod tests {
             "test-registration".to_string(),
             NoiseChannelIdentity::generate()?,
             AllowHarnessKeyValidator,
-            /*admission*/ None,
         ));
 
         assert!(matches!(outbound_rx.next().await, Some(Message::Ping(_))));

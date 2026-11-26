@@ -2,6 +2,7 @@ use crate::FreeformTool;
 use crate::JsonSchema;
 use crate::LoadableToolSpec;
 use crate::ResponsesApiNamespace;
+use crate::ResponsesApiNamespaceTool;
 use crate::ResponsesApiTool;
 use crate::default_namespace_description;
 use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
@@ -91,26 +92,34 @@ pub fn create_tools_json_for_responses_api(
     Ok(tools_json)
 }
 
-pub fn create_tools_json_for_responses_lite<'a>(
-    tools: impl IntoIterator<Item = &'a ToolSpec>,
+pub fn create_tools_json_for_responses_lite(
+    tools: &[ToolSpec],
 ) -> Result<Vec<Value>, serde_json::Error> {
-    let mut members = Vec::new();
-    let mut description = None;
+    let mut functions = ResponsesApiNamespace {
+        name: DEFAULT_FUNCTION_NAMESPACE.to_string(),
+        description: default_namespace_description(DEFAULT_FUNCTION_NAMESPACE),
+        tools: Vec::new(),
+    };
     let mut functions_index = None;
     let mut tools_json = Vec::new();
 
     for tool in tools {
         match tool {
-            ToolSpec::Function(_) | ToolSpec::Freeform(_) => {
-                members.push(serde_json::to_value(tool)?);
+            ToolSpec::Function(tool) => {
+                functions
+                    .tools
+                    .push(ResponsesApiNamespaceTool::Function(tool.clone()));
+            }
+            ToolSpec::Freeform(tool) => {
+                functions
+                    .tools
+                    .push(ResponsesApiNamespaceTool::Custom(tool.clone()));
             }
             ToolSpec::Namespace(namespace) if namespace.name == DEFAULT_FUNCTION_NAMESPACE => {
                 if !namespace.description.trim().is_empty() {
-                    description = Some(&namespace.description);
+                    functions.description = namespace.description.clone();
                 }
-                for member in &namespace.tools {
-                    members.push(serde_json::to_value(member)?);
-                }
+                functions.tools.extend(namespace.tools.clone());
             }
             tool => {
                 tools_json.push(serde_json::to_value(tool)?);
@@ -121,18 +130,12 @@ pub fn create_tools_json_for_responses_lite<'a>(
     }
 
     if let Some(functions_index) = functions_index
-        && !members.is_empty()
+        && !functions.tools.is_empty()
     {
-        // The serialized bytes feed the additional_tools ID. Keep the namespace field order.
-        let mut namespace = serde_json::to_value(ToolSpec::Namespace(ResponsesApiNamespace {
-            name: DEFAULT_FUNCTION_NAMESPACE.to_string(),
-            description: description
-                .cloned()
-                .unwrap_or_else(|| default_namespace_description(DEFAULT_FUNCTION_NAMESPACE)),
-            tools: Vec::new(),
-        }))?;
-        namespace["tools"] = Value::Array(members);
-        tools_json.insert(functions_index, namespace);
+        tools_json.insert(
+            functions_index,
+            serde_json::to_value(ToolSpec::Namespace(functions))?,
+        );
     }
 
     Ok(tools_json)

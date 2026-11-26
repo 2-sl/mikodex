@@ -4,7 +4,6 @@ use http::HeaderValue;
 use http::Method;
 use serde::Serialize;
 use serde_json::Value;
-use std::fmt;
 use std::time::Duration;
 
 /// A JSON request body serialized once into reference-counted bytes.
@@ -12,27 +11,11 @@ use std::time::Duration;
 /// Clones share the encoded allocation. Internally, the body can also hold the
 /// final compressed wire bytes while retaining the original JSON only when
 /// request-body trace logging is enabled.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncodedJsonBody {
     bytes: Bytes,
     trace_bytes: Option<Bytes>,
     prepared: bool,
-    private: bool,
-}
-
-impl fmt::Debug for EncodedJsonBody {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut body = f.debug_struct("EncodedJsonBody");
-        if self.private {
-            return body
-                .field("byte_len", &self.bytes.len())
-                .finish_non_exhaustive();
-        }
-        body.field("bytes", &self.bytes)
-            .field("trace_bytes", &self.trace_bytes)
-            .field("prepared", &self.prepared)
-            .finish()
-    }
 }
 
 impl EncodedJsonBody {
@@ -42,7 +25,6 @@ impl EncodedJsonBody {
             bytes: Bytes::from(bytes),
             trace_bytes: None,
             prepared: false,
-            private: false,
         })
     }
 
@@ -54,16 +36,6 @@ impl EncodedJsonBody {
     /// Observers can clone this handle to retain the transport JSON without copying it.
     pub fn shared_bytes(&self) -> &Bytes {
         &self.bytes
-    }
-
-    /// Send richer JSON only to the configured origin and use the original body in traces.
-    pub fn with_private_json(&self, json: String) -> Self {
-        Self {
-            bytes: Bytes::from(json),
-            trace_bytes: Some(self.bytes.clone()),
-            prepared: false,
-            private: true,
-        }
     }
 
     pub(crate) fn trace_bytes(&self) -> &[u8] {
@@ -104,12 +76,6 @@ impl PreparedRequestBody {
     pub fn body_bytes(&self) -> Bytes {
         self.body.clone().unwrap_or_default()
     }
-}
-
-// Wire bytes can contain private connector results. Deliberately omit Debug.
-pub(crate) struct WireBody {
-    pub(crate) headers: HeaderMap,
-    pub(crate) body: Option<Bytes>,
 }
 
 #[derive(Debug, Clone)]
@@ -163,14 +129,7 @@ impl Request {
             self.body,
             Some(RequestBody::Json(_) | RequestBody::EncodedJson(_))
         );
-        let private_trace = match &self.body {
-            Some(RequestBody::EncodedJson(body)) if body.private => body.trace_bytes.clone(),
-            _ => None,
-        };
-        let private = private_trace.is_some();
-        let trace_bytes = if private {
-            private_trace
-        } else if self.compression != RequestCompression::None
+        let trace_bytes = if self.compression != RequestCompression::None
             && tracing::enabled!(target: "codex_http_client::transport", tracing::Level::TRACE)
         {
             match self.body.as_ref() {
@@ -183,14 +142,13 @@ impl Request {
         } else {
             None
         };
-        let prepared = self.prepare_wire_body()?;
+        let prepared = self.prepare_body_for_send()?;
         self.headers = prepared.headers;
         self.body = match (is_json, prepared.body) {
             (true, Some(bytes)) => Some(RequestBody::EncodedJson(EncodedJsonBody {
                 bytes,
                 trace_bytes,
                 prepared: true,
-                private,
             })),
             (false, Some(body)) => Some(RequestBody::Raw(body)),
             (_, None) => None,
@@ -203,31 +161,15 @@ impl Request {
     ///
     /// Auth schemes such as AWS SigV4 need to sign the final body bytes, including
     /// compression and content headers. Calling this method does not mutate the
-    /// request. Use [`Self::into_prepared`] for private JSON to retain its redacted
-    /// debug representation.
+    /// request.
     pub fn prepare_body_for_send(&self) -> Result<PreparedRequestBody, String> {
-        if self.has_private_body() {
-            return Err("private JSON requires Request::into_prepared".to_string());
-        }
-        let wire = self.prepare_wire_body()?;
-        Ok(PreparedRequestBody {
-            headers: wire.headers,
-            body: wire.body,
-        })
-    }
-
-    pub(crate) fn has_private_body(&self) -> bool {
-        matches!(&self.body, Some(RequestBody::EncodedJson(body)) if body.private)
-    }
-
-    pub(crate) fn prepare_wire_body(&self) -> Result<WireBody, String> {
         let headers = self.headers.clone();
         match self.body.as_ref() {
             Some(RequestBody::Raw(raw_body)) => {
                 if self.compression != RequestCompression::None {
                     return Err("request compression cannot be used with raw bodies".to_string());
                 }
-                Ok(WireBody {
+                Ok(PreparedRequestBody {
                     headers,
                     body: Some(raw_body.clone()),
                 })
@@ -237,7 +179,7 @@ impl Request {
                 self.prepare_encoded_json(headers, &body)
             }
             Some(RequestBody::EncodedJson(body)) => self.prepare_encoded_json(headers, body),
-            None => Ok(WireBody {
+            None => Ok(PreparedRequestBody {
                 headers,
                 body: None,
             }),
@@ -248,9 +190,9 @@ impl Request {
         &self,
         mut headers: HeaderMap,
         body: &EncodedJsonBody,
-    ) -> Result<WireBody, String> {
+    ) -> Result<PreparedRequestBody, String> {
         if body.prepared {
-            return Ok(WireBody {
+            return Ok(PreparedRequestBody {
                 headers,
                 body: Some(body.bytes.clone()),
             });
@@ -298,7 +240,7 @@ impl Request {
             );
         }
 
-        Ok(WireBody {
+        Ok(PreparedRequestBody {
             headers,
             body: Some(bytes),
         })
@@ -385,92 +327,6 @@ mod tests {
             request.headers.get(http::header::CONTENT_TYPE),
             Some(&HeaderValue::from_static("application/json"))
         );
-    }
-
-    #[test]
-    fn ordinary_request_bodies_keep_debug_fields() {
-        let canonical = EncodedJsonBody::encode(&json!({"model": "test"})).expect("valid JSON");
-        let json = &canonical.bytes;
-        assert_eq!(
-            format!("{canonical:?}"),
-            format!("EncodedJsonBody {{ bytes: {json:?}, trace_bytes: None, prepared: false }}")
-        );
-
-        for compression in [RequestCompression::None, RequestCompression::Zstd] {
-            let mut request = Request::new(Method::POST, "https://example.com".to_string())
-                .with_compression(compression);
-            request
-                .headers
-                .insert("x-test", HeaderValue::from_static("header-marker"));
-            request.body = Some(RequestBody::EncodedJson(canonical.clone()));
-            let subscriber = tracing_subscriber::registry();
-            let prepared =
-                tracing::subscriber::with_default(subscriber, || request.into_prepared())
-                    .expect("body should prepare");
-            let wire = prepared.prepare_body_for_send().expect("prepared body");
-            let Some(RequestBody::EncodedJson(encoded)) = prepared.body.as_ref() else {
-                panic!("expected encoded JSON");
-            };
-            let PreparedRequestBody { headers, body } = &wire;
-            let bytes = body.as_ref().expect("wire bytes");
-            let trace_bytes = (compression == RequestCompression::Zstd).then_some(json);
-            assert_eq!(
-                format!("{encoded:?}"),
-                format!(
-                    "EncodedJsonBody {{ bytes: {bytes:?}, trace_bytes: {trace_bytes:?}, prepared: true }}"
-                )
-            );
-            assert_eq!(
-                format!("{wire:?}"),
-                format!("PreparedRequestBody {{ headers: {headers:?}, body: Some({bytes:?}) }}")
-            );
-        }
-    }
-
-    #[test]
-    fn private_json_keeps_canonical_trace_body() {
-        let mut call = json!({
-            "arguments": "argument-marker",
-            "tool_result_metadata": "metadata-marker"
-        });
-        let canonical = EncodedJsonBody::encode(&call).expect("valid JSON");
-        call["tool_result"] = json!("private-result-marker");
-        let wire = call.to_string();
-        let enriched = canonical.with_private_json(wire.clone());
-        for compression in [RequestCompression::None, RequestCompression::Zstd] {
-            let mut request = Request::new(Method::POST, "https://example.com".to_string())
-                .with_compression(compression);
-            request.body = Some(RequestBody::EncodedJson(enriched.clone()));
-            let prepared = request
-                .clone()
-                .into_prepared()
-                .expect("body should prepare");
-            for request in [&request, &prepared] {
-                assert_eq!(
-                    request.prepare_body_for_send().unwrap_err(),
-                    "private JSON requires Request::into_prepared"
-                );
-            }
-            let Some(RequestBody::EncodedJson(body)) = prepared.body.as_ref() else {
-                panic!("expected encoded JSON");
-            };
-            for encoded in [&enriched, body] {
-                let len = encoded.as_bytes().len();
-                assert_eq!(
-                    format!("{encoded:?}"),
-                    format!("EncodedJsonBody {{ byte_len: {len}, .. }}")
-                );
-            }
-            assert_eq!(body.trace_bytes(), canonical.as_bytes());
-            let wire_body = prepared.prepare_wire_body().expect("wire body");
-            let bytes = wire_body.body.as_deref().expect("wire bytes");
-            assert_eq!(bytes, body.as_bytes());
-            let bytes = match compression {
-                RequestCompression::None => bytes.to_vec(),
-                RequestCompression::Zstd => zstd::stream::decode_all(bytes).expect("valid zstd"),
-            };
-            assert_eq!(bytes, wire.as_bytes());
-        }
     }
 }
 

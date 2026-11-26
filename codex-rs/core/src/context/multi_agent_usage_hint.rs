@@ -3,7 +3,7 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::input_text;
 
-/// Developer note introducing a child after its inherited conversation prefix.
+/// Configured multi-agent instructions emitted as a standalone developer message.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MultiAgentUsageHint {
     text: String,

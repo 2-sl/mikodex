@@ -24,10 +24,7 @@ use futures::FutureExt;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use serde_json::Value;
-use std::io;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
@@ -73,7 +70,6 @@ struct Attachment {
 struct Replies {
     idle: Option<idle::Recovery>,
     active: Option<Attachment>,
-    attached: Arc<AtomicBool>,
     generation: u64,
     stream_losses: CloudStreamLosses,
     // Keep the last observed status through EOF until this conversation is unloaded.
@@ -81,12 +77,6 @@ struct Replies {
 }
 
 impl Replies {
-    fn set_active(&mut self, active: Option<Attachment>) {
-        self.active = active;
-        self.attached
-            .store(self.active.is_some(), Ordering::Relaxed);
-    }
-
     async fn next_event(&mut self, output: &mpsc::UnboundedSender<AppServerEvent>) {
         if let Some(recovery) = &mut self.idle
             && let Some((root, _, open)) = &mut recovery.held
@@ -96,23 +86,22 @@ impl Replies {
             recovery.held = None;
             if let Some(opened) = opened {
                 if let Err(reason) = recovery.check_permit() {
-                    let _ = opened.ack.send(Err(io::Error::other(reason)));
+                    let _ = opened.ack.send(Err(reason));
                     return;
                 }
-                let (stream, first) = match check_prepared_stream((opened.stream, opened.first)) {
-                    Ok(attachment) => attachment,
-                    Err(error) => {
-                        let _ = opened
-                            .ack
-                            .send(Err(idle::reply_stream_error(error.as_ref())));
-                        return;
-                    }
+                let Ok((stream, first)) = check_prepared_stream((opened.stream, opened.first))
+                else {
+                    let _ = opened
+                        .ack
+                        .send(Err("Cloud reply stream disconnected again."));
+                    return;
                 };
                 // Commit through the acknowledgement. If the caller timed out
                 // and closed it first, leave the stream held and drop it here.
                 if opened.ack.send(Ok(())).is_err() {
                     return;
                 }
+                recovery.attempts += 1;
                 recovery.installed = Some(tokio::time::Instant::now());
                 recovery.observed_idle = None;
                 self.stream_losses.supersede(&root);
@@ -169,7 +158,7 @@ impl Replies {
             ended => {
                 let id = active.thread_id.clone();
                 let error = ended.and_then(Result::err);
-                self.set_active(/*active*/ None);
+                self.active = None;
                 if let Some(recovery) = &mut self.idle {
                     recovery
                         .state
@@ -244,7 +233,7 @@ impl Replies {
             return Ok(None);
         }
         let mut stream = self.while_listening(open, output).await?;
-        let first = check_reply_stream(&mut stream).map_err(activation_stream_error)?;
+        let first = probe_reply_stream(&mut stream)?;
         Ok(Some((stream, first)))
     }
 
@@ -270,10 +259,10 @@ impl Replies {
         output: &mpsc::UnboundedSender<AppServerEvent>,
     ) {
         self.generation = self.generation.wrapping_add(1);
-        self.set_active(Some(Attachment {
+        self.active = Some(Attachment {
             thread_id: id.to_owned(),
             stream,
-        }));
+        });
         if let Some(event) = first_event {
             forward(
                 id,
@@ -314,7 +303,7 @@ impl Replies {
             .as_ref()
             .is_some_and(|active| active.thread_id == id)
         {
-            self.set_active(/*active*/ None);
+            self.active = None;
         }
     }
 
@@ -337,8 +326,12 @@ impl Replies {
     }
 }
 
-fn activation_stream_error(_: Option<cloud::Error>) -> color_eyre::Report {
-    eyre!("Cloud conversation activated but its stream did not connect. Reopen it before sending.")
+fn probe_reply_stream(stream: &mut ReplyStream) -> Result<Option<cloud::Event>> {
+    check_reply_stream(stream).map_err(|_| {
+        eyre!(
+            "Cloud conversation activated but its stream did not connect. Reopen it before sending."
+        )
+    })
 }
 
 /// Opens an app-server client backed by the authenticated native Cloud client.
@@ -357,10 +350,12 @@ fn start_worker(
         loaded: None,
         warned_partial_history: None,
     };
-    let handle = app_client.request_handle();
     let mut replies = Replies {
-        attached: handle.attached,
-        idle: Some(idle::Recovery::new(handle.reconnect, client, login)),
+        idle: Some(idle::Recovery::new(
+            app_client.request_handle().reconnect,
+            client,
+            login,
+        )),
         stream_losses: app_client.stream_losses.clone(),
         ..Default::default()
     };
@@ -491,13 +486,9 @@ async fn run_worker_with_prepared(
             CloudOperation::ResumeDisconnectedThread {
                 thread_id,
                 require_history,
-                timeout,
-                dispatched,
+                deadline,
                 release,
             } => {
-                if dispatched.send(()).is_err() {
-                    continue;
-                }
                 // Retire canceled holds, but commit a ready handoff through its normal ACK.
                 if replies
                     .idle
@@ -520,7 +511,7 @@ async fn run_worker_with_prepared(
                         thread_id,
                         cached.clone(),
                         require_history,
-                        timeout,
+                        deadline,
                         release,
                         command.response,
                     );
@@ -565,7 +556,6 @@ async fn run_worker_with_prepared(
                 let is_read = history_thread.is_some()
                     || matches!(&request, protocol::ClientRequest::ThreadList { .. });
                 let login = history_thread.and_then(|id| replies.idle.as_ref()?.history_login(id));
-                let recovery_read = login.is_some();
                 // When closure and the handshake are both ready, cancel before
                 // the handshake can replace the active attachment.
                 let result = tokio::select! {
@@ -579,10 +569,10 @@ async fn run_worker_with_prepared(
                     }
                     result = async {
                         let read = handle_request(request, mode, environment, requests, replies, output);
-                        let Some((login, timeout)) = login else {
+                        let Some((login, deadline)) = login else {
                             return read.await;
                         };
-                        tokio::time::timeout(timeout, login.permit.run(async {
+                        tokio::time::timeout_at(deadline, login.permit.run(async {
                             if !login.current().await {
                                 return Err(eyre!(CloudRecoverySignInChanged));
                             }
@@ -592,19 +582,10 @@ async fn run_worker_with_prepared(
                             }
                             login.permit.check().map_err(|_| eyre!(CLOUD_RECOVERY_NETWORK_BLOCKED))?;
                             result
-                        })).await.map_err(|_| cloud::Error::Timeout)?
+                        })).await.map_err(|_| eyre!(idle::RECOVERY_TIMEOUT))?
                             .map_err(|_| eyre!(CLOUD_RECOVERY_NETWORK_BLOCKED))?
                     } => result,
                 };
-                if recovery_read
-                    && let Err(error) = &result
-                    && let Some(cause) = error.downcast_ref::<cloud::Error>()
-                {
-                    let _ = command
-                        .response
-                        .send(Err(idle::reply_stream_error(Some(cause))));
-                    continue;
-                }
                 if unloads
                     && result.is_ok()
                     && let Some(root) = prepared
@@ -661,13 +642,11 @@ struct PreparedResume {
 
 const PREPARED_EVENT_LIMIT: usize = 8;
 
-fn check_prepared_stream(
-    (mut stream, first): OpenReplyStream,
-) -> Result<OpenReplyStream, Option<cloud::Error>> {
+fn check_prepared_stream((mut stream, first): OpenReplyStream) -> Result<OpenReplyStream> {
     let mut prefix = Vec::new();
     // The regular stream path forwards the prefix and unread tail in order.
     for _ in usize::from(first.is_some())..PREPARED_EVENT_LIMIT {
-        let Some(event) = check_reply_stream(&mut stream)? else {
+        let Some(event) = probe_reply_stream(&mut stream)? else {
             break;
         };
         prefix.push(Ok(event));
@@ -734,9 +713,7 @@ async fn advance_prepared_resume(
         match operation {
             CloudOperation::CommitPreparedResume => {
                 let ready = match candidate.opened {
-                    Some(opened) => check_prepared_stream(opened)
-                        .map(Some)
-                        .map_err(activation_stream_error),
+                    Some(opened) => check_prepared_stream(opened).map(Some),
                     None if replies.admit_turn(id, output).is_ok()
                         && replies.generation == candidate.generation =>
                     {
@@ -940,15 +917,6 @@ fn forward(
                 recovery.observe_busy();
             }
         }
-        if let Ok(status) = serde_json::from_value(serde_json::json!(&status)) {
-            let change = protocol::ThreadStatusChangedNotification {
-                thread_id: id.to_owned(),
-                status,
-            };
-            let _ = output.send(AppServerEvent::CloudInventoryChanged(Some(Box::new(
-                protocol::ServerNotification::ThreadStatusChanged(change),
-            ))));
-        }
         *latest_status = Some((id.to_owned(), status));
         return;
     }
@@ -976,24 +944,7 @@ fn forward(
             thread_id: Some(id.to_owned()),
             message: "This cloud turn requested an unsupported interaction. Open it in another client to continue.".into(),
         }),
-        event @ cloud::Event::Notification(_) => {
-            let lifecycle = match event.inventory_change() {
-                Some(cloud::InventoryChange::Archived(thread_id)) => Some(
-                    protocol::ServerNotification::ThreadArchived(
-                        protocol::ThreadArchivedNotification { thread_id },
-                    ),
-                ),
-                Some(cloud::InventoryChange::Unarchived(thread_id)) => Some(
-                    protocol::ServerNotification::ThreadUnarchived(
-                        protocol::ThreadUnarchivedNotification { thread_id },
-                    ),
-                ),
-                Some(cloud::InventoryChange::Refresh) => None,
-                None => return,
-            };
-            let _ = output.send(AppServerEvent::CloudInventoryChanged(lifecycle.map(Box::new)));
-            return;
-        }
+        cloud::Event::Notification(_) => return,
     };
     send_notification(output, notification);
 }

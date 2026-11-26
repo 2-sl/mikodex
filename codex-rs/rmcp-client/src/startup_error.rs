@@ -77,10 +77,9 @@ fn transport_error_requires_authentication(error: &DynamicTransportError) -> boo
         .is_some_and(|error| match error {
             StreamableHttpError::AuthRequired(_) => true,
             StreamableHttpError::Auth(auth_error) => auth_error_requires_authentication(auth_error),
-            StreamableHttpError::Client(
-                StreamableHttpClientAdapterError::HttpRequest(error)
-                | StreamableHttpClientAdapterError::HandshakeHttpRequest(error),
-            ) => exec_server_error_requires_authentication(error),
+            StreamableHttpError::Client(StreamableHttpClientAdapterError::HttpRequest(error)) => {
+                exec_server_error_requires_authentication(error)
+            }
             _ => false,
         })
 }

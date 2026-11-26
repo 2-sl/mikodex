@@ -3,7 +3,6 @@
 use super::*;
 use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::InternalChatMessageMetadataPassthrough;
-use codex_thread_context_ids_test_support::thread_context_ids;
 use pretty_assertions::assert_eq;
 
 fn file_audio(file_id: &str) -> ContentItem {
@@ -62,7 +61,7 @@ fn previously_accepted_file_only_disambiguates_clip_specific_errors() {
         &codex_history::RetainedContextEvent::AcceptedFileAudio {
             evidence: evidence.into(),
         },
-        &thread_context_ids(),
+        &codex_protocol_test_support::uuid_v7_item_id_generator_for_test(),
     );
     assert!(
         context

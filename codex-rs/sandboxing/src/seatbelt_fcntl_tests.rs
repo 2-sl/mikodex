@@ -113,6 +113,8 @@ fn restricted_policies_deny_mutating_fcntls_through_read_only_descriptors() {
             sandbox_policy_cwd: &workspace,
             enforce_managed_network: false,
             managed_network: None,
+            environment_id: None,
+            network: None,
             extra_allow_unix_sockets: &[],
         })
         .expect("generated Seatbelt arguments");

@@ -168,19 +168,6 @@ impl Selection {
         self.preferred_column = None;
     }
 
-    pub(super) fn set_keyboard_block_range(
-        &mut self,
-        start: Anchor,
-        end: Anchor,
-        layout: Arc<TextLayout>,
-    ) {
-        self.snapshot.pinned.entry(start.key).or_insert(layout);
-        self.set_keyboard_range(start, end);
-        // A parent and child can have identical bounds but different clipboard syntax.
-        self.primary_owner = None;
-        self.pending_copy = None;
-    }
-
     pub(super) fn set_keyboard_table_range(
         &mut self,
         entry: Anchor,
@@ -478,7 +465,7 @@ impl TranscriptView {
         &mut self,
         cells: &[Arc<dyn HistoryCell>],
     ) -> Option<Vec<(Arc<TextLayout>, std::ops::Range<usize>)>> {
-        if !self.has_selection_range() && self.marked_block().is_none() {
+        if !self.has_selection_range() {
             return None;
         }
         let snapshot = self.snapshot_cells();
@@ -517,12 +504,6 @@ impl TranscriptView {
     }
 
     pub(crate) fn selected_text(&mut self, cells: &[Arc<dyn HistoryCell>]) -> Option<String> {
-        if let Some(block) = self.marked_block() {
-            let outer_prefix = block.outer_prefix;
-            let lines = self.selected_copy_lines(cells);
-            let text = crate::markdown_copy::block_selection(&lines, outer_prefix);
-            return (!text.is_empty()).then_some(text);
-        }
         if let Some(table) = self.table_selection() {
             let rectangle_rows = table.rectangle_rows();
             let lines = self.selected_copy_lines(cells);
@@ -596,6 +577,10 @@ impl TranscriptView {
             crate::clipboard_copy::CopyFormat,
         ) -> Result<crate::clipboard_copy::CopyStatus, String>,
     ) -> Result<crate::clipboard_copy::CopyStatus, String> {
+        let lines = self.selected_copy_lines(cells);
+        let rectangle_rows = self
+            .table_selection()
+            .and_then(TableSelection::rectangle_rows);
         let override_payload = self.copy_mode.as_ref().and_then(|mode| {
             if mode.whole {
                 mode.response.as_ref().map(|(_, text)| {
@@ -611,13 +596,6 @@ impl TranscriptView {
             }
         });
         let (text, format) = override_payload.unwrap_or_else(|| {
-            if self.marked_block().is_some() {
-                return (text.to_owned(), CopyFormat::Markdown);
-            }
-            let lines = self.selected_copy_lines(cells);
-            let rectangle_rows = self
-                .table_selection()
-                .and_then(TableSelection::rectangle_rows);
             let (serialized, format) =
                 crate::markdown_copy::selection(&lines, text, rectangle_rows.as_ref());
             if format == CopyFormat::Markdown {
@@ -903,7 +881,6 @@ impl TranscriptView {
         } else {
             (selection.end, selection.start)
         };
-        let marked_block = self.marked_block().is_some();
         for (y, visible) in self.visible.iter().enumerate() {
             if visible.index < start.index || visible.index > end.index {
                 continue;
@@ -924,10 +901,9 @@ impl TranscriptView {
                 self.area.width,
                 /*height*/ 1,
             );
-            if self.copy_mode.is_some() || marked_block {
-                // Block ranges end on the final logical line, even when it is marker-only.
-                let last = if marked_block || (begin == 0 && finish == visible.layout.text().len())
-                {
+            if self.copy_mode.is_some() {
+                // Full-entry selections include final padding; partial ranges stay half-open.
+                let last = if begin == 0 && finish == visible.layout.text().len() {
                     finish
                 } else {
                     finish.saturating_sub(/*rhs*/ 1)

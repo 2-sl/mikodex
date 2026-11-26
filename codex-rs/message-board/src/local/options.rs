@@ -23,7 +23,7 @@ impl Default for LocalBoardOptions {
 }
 
 impl LocalBoardOptions {
-    pub(super) fn validate(&self) -> Result<()> {
+    pub(super) fn database_file(&self) -> Result<String> {
         if self.storage_namespace.is_empty()
             || self.storage_namespace.len() > 64
             || !self.storage_namespace.bytes().all(|byte| {
@@ -34,11 +34,6 @@ impl LocalBoardOptions {
                 "board storage namespaces require 1–64 lowercase ASCII letters, digits, underscores or hyphens",
             ));
         }
-        Ok(())
-    }
-
-    pub(super) fn database_file(&self) -> Result<String> {
-        self.validate()?;
         if self.storage_namespace == DEFAULT_STORAGE_NAMESPACE {
             return Ok("agent_message_board_1.sqlite".into());
         }

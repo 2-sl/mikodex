@@ -1,7 +1,9 @@
 use super::*;
+use crate::CONFIG_TOML_FILE;
 use crate::ConfigLayerStack;
 use crate::ConfigRequirements;
 use crate::ConfigRequirementsToml;
+use crate::config_toml::ConfigToml;
 use crate::first_layer_config_error_from_entries;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::test_support::PathBufExt;
@@ -210,7 +212,7 @@ async fn raw_toml_diagnostics_use_enterprise_layer_name() {
     )
     .expect("cloud config layers should parse");
 
-    let error = first_layer_config_error_from_entries(&layers)
+    let error = first_layer_config_error_from_entries::<ConfigToml>(&layers, CONFIG_TOML_FILE)
         .await
         .expect("invalid raw TOML should produce a layer diagnostic");
 

@@ -44,7 +44,6 @@ use codex_guardian_context::SectionHistory;
 use codex_guardian_context::TranscriptHistory;
 use codex_history::CodexHarnessMetadata;
 use codex_history::GuardianHistoryCheckpoint;
-use codex_history::MessageRetention;
 use codex_history::ResponseItemEnvelope;
 use codex_history::RetainedContext;
 use codex_history::RetainedContextEntry;
@@ -52,6 +51,7 @@ use codex_history::RetainedContextEvent;
 use codex_history::RetainedInputSource;
 use codex_prompts::render_model_instructions;
 use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
+use codex_protocol::ItemIdGenerator;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::AgentMessageInputContent;
 use codex_protocol::models::AudioReference;
@@ -69,7 +69,6 @@ use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::protocol::TurnContextItem;
 use codex_protocol::protocol::WorldStateItem;
-use codex_thread_context_ids::ThreadContextIds;
 use codex_utils_audio::estimate_tool_audio_tokens;
 use codex_utils_cache::BlockingLruCache;
 use codex_utils_cache::sha1_digest;
@@ -104,7 +103,7 @@ fn next_guardian_review_context_revision() -> u64 {
 /// Transcript of thread history
 #[derive(Clone)]
 pub(crate) struct ContextManager {
-    context_ids: ThreadContextIds,
+    item_id_generator: ItemIdGenerator,
     sampling: super::sampling::SamplingProgress,
     /// Inclusive sequence cutoff for calls that may still be running in the fork source.
     pub(crate) restored_through_sequence: u64,
@@ -313,27 +312,20 @@ impl SharedConversationHistory {
 #[cfg(test)]
 impl Default for ContextManager {
     fn default() -> Self {
-        Self::new(
-            codex_thread_context_ids_test_support::thread_context_ids(),
-            /*retention*/ None,
-        )
+        Self::new(codex_protocol_test_support::uuid_v7_item_id_generator_for_test())
     }
 }
 
 impl ContextManager {
-    pub(crate) fn context_ids(&self) -> &ThreadContextIds {
-        &self.context_ids
-    }
-
-    pub(crate) fn new(context_ids: ThreadContextIds, retention: Option<MessageRetention>) -> Self {
+    pub(crate) fn new(item_id_generator: ItemIdGenerator) -> Self {
         Self {
-            context_ids,
+            item_id_generator,
             sampling: Default::default(),
             restored_through_sequence: 0,
             items: Arc::new(Vec::new()),
             review_history: None,
             review_budgeting: ContextBudgeting::Fixed,
-            retained_context: Arc::new(RetainedContext::new(retention)),
+            retained_context: Arc::default(),
             rejected_audio_file_ids: Arc::default(),
             file_audio_durations: Arc::default(),
             guardian_review_mode: GuardianContextMode::ThreadOwned,
@@ -372,12 +364,10 @@ impl ContextManager {
     pub(crate) fn for_session(
         root_capabilities_restricted: bool,
         features: &ManagedFeatures,
-        reuse_parent_compaction: bool,
         budgeting: ContextBudgeting,
-        context_ids: ThreadContextIds,
-        retention: Option<MessageRetention>,
+        item_id_generator: ItemIdGenerator,
     ) -> Self {
-        let independent = !reuse_parent_compaction;
+        let independent = !features.enabled(Feature::GuardianReuseParentCompaction);
         Self {
             retain_inherited_user_messages: !root_capabilities_restricted,
             guardian_include_additional_context: features
@@ -390,7 +380,7 @@ impl ContextManager {
             review_budgeting: budgeting,
             review_history: independent
                 .then(|| TranscriptHistory::new(/*generation*/ 0, budgeting)),
-            ..Self::new(context_ids, retention)
+            ..Self::new(item_id_generator)
         }
     }
 
@@ -406,7 +396,9 @@ impl ContextManager {
         &mut self,
         event: &mut RetainedContextEvent,
     ) -> bool {
-        if !Arc::make_mut(&mut self.retained_context).record_and_capture(event, &self.context_ids) {
+        if !Arc::make_mut(&mut self.retained_context)
+            .record_and_capture(event, &self.item_id_generator)
+        {
             return false;
         }
         match event {
@@ -483,9 +475,6 @@ impl ContextManager {
                                     })
                                     .collect::<Vec<_>>()
                                     .join("\n");
-                                if message.complete && text == message.text {
-                                    return true;
-                                }
                                 guardian_truncate_text(&text, GUARDIAN_MAX_ROOT_MESSAGE_TOKENS).0
                                     == message.text
                             })
@@ -504,7 +493,6 @@ impl ContextManager {
         // Older retained checkpoints cleared oversized instructions. Recover their
         // bounded root excerpts before discarding the legacy source transcript.
         let items = &self.items;
-        let retains_original_messages = self.retained_context.retains_original_user_messages();
         Arc::make_mut(&mut self.retained_context).recover_user_message_excerpts(|id| {
             // Prefer the backup over a compacted copy that retains the original ID.
             let original = checkpoint
@@ -515,12 +503,7 @@ impl ContextManager {
             let Some(TurnItem::UserMessage(original)) = original.and_then(parse_turn_item) else {
                 return None;
             };
-            let text = original.message();
-            Some(if retains_original_messages {
-                text
-            } else {
-                guardian_truncate_text(&text, GUARDIAN_MAX_ROOT_MESSAGE_TOKENS).0
-            })
+            Some(guardian_truncate_text(&original.message(), GUARDIAN_MAX_ROOT_MESSAGE_TOKENS).0)
         });
         let retain_legacy_authorization = self.retain_inherited_user_messages
             && self.retained_context.has_missing_user_messages()
@@ -584,11 +567,7 @@ impl ContextManager {
     }
 
     pub(crate) fn reference_context_item(&self) -> Option<TurnContextItem> {
-        self.reference_context_item_ref().cloned()
-    }
-
-    pub(crate) fn reference_context_item_ref(&self) -> Option<&TurnContextItem> {
-        self.reference_context_item.as_ref()
+        self.reference_context_item.clone()
     }
 
     pub(crate) fn render_step_world_state(
@@ -655,18 +634,6 @@ impl ContextManager {
     ) {
         for envelope in items {
             self.sampling.record(envelope);
-            if self
-                .retained_context
-                .elastic_assistant_record_bytes()
-                .is_some()
-                && let Some((message, _)) =
-                    self.retained_direct_delivery(&envelope.item, envelope.metadata.as_ref())
-                && !message.complete
-            {
-                let metadata = envelope.metadata.get_or_insert_default();
-                metadata.delivered_assistant_message = None;
-                metadata.delivered_assistant_message_incomplete = true;
-            }
             if let Some(source) =
                 self.record_item_with_metadata(&envelope.item, envelope.metadata.as_ref(), policy)
             {
@@ -970,7 +937,7 @@ impl ContextManager {
         self.restored_through_sequence = self
             .restored_through_sequence
             .min(self.sampling.last_sequence);
-        self.retained_context = Arc::new(self.retained_context.empty_with_same_limits());
+        self.retained_context = Arc::default();
         self.user_message_revision = self.user_message_revision.saturating_add(1);
         if let Some(review_history) = &mut self.review_history {
             review_history.reset(

@@ -134,7 +134,6 @@ fn tool_and_notice_projection_uses_normal_transcript_presentation() {
         input_images: Vec::new(),
         imagegen_request_id: None,
         generation_id: None,
-        image_metadata: Default::default(),
     };
     let items = vec![
         ThreadItemPayload::EnteredReviewMode {

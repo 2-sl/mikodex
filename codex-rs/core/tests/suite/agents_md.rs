@@ -1612,11 +1612,7 @@ async fn fork_preserves_thread_instructions(
                 })
                 .await?;
             test.thread_manager
-                .fork_prepared_thread(
-                    options,
-                    prepared,
-                    codex_thread_store::InheritedHistoryVisibility::Full,
-                )
+                .fork_prepared_thread(options, prepared)
                 .await?
         }
     };

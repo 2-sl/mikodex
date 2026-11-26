@@ -8,7 +8,7 @@ use anyhow::Context;
 use anyhow::Result;
 use tempfile::TempDir;
 
-/// Observes launches of the real code-mode host.
+/// Observes host process launches without replacing either transport implementation.
 pub struct CodeModeHostRecorder {
     _directory: TempDir,
     program: PathBuf,

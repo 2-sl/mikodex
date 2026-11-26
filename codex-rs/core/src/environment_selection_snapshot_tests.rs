@@ -57,7 +57,6 @@ async fn capability_roots_follow_attachments_through_configuration_changes() {
         ShellSnapshot::disabled(),
         TurnEnvironmentSnapshot::default(),
         /*non_blocking_snapshots*/ false,
-        /*executor_discovery*/ None,
     );
     parent.update_selections(&[local.clone(), other.clone()]);
     let snapshot = parent.snapshot().await;
@@ -79,7 +78,6 @@ async fn capability_roots_follow_attachments_through_configuration_changes() {
         ShellSnapshot::disabled(),
         snapshot,
         /*non_blocking_snapshots*/ false,
-        /*executor_discovery*/ None,
     );
     child.activate_configured(async_channel::unbounded().0);
     assert_eq!(
@@ -148,7 +146,6 @@ async fn unpolled_snapshot_does_not_delay_canceling_a_removed_environment(shared
         ShellSnapshot::disabled(),
         TurnEnvironmentSnapshot::default(),
         /*non_blocking_snapshots*/ false,
-        /*executor_discovery*/ None,
     );
     if shared_startup {
         environments.update_configured_selections(std::slice::from_ref(&selection));
@@ -225,7 +222,6 @@ async fn updating_another_environment_retries_the_executor_without_canceling_pen
         ShellSnapshot::disabled(),
         TurnEnvironmentSnapshot::default(),
         /*non_blocking_snapshots*/ true,
-        /*executor_discovery*/ None,
     );
     let current = || {
         let state = environments.state.lock().unwrap();
@@ -298,7 +294,6 @@ async fn credential_refresh_does_not_restore_a_removed_environment() {
         shell_snapshot,
         TurnEnvironmentSnapshot::default(),
         /*non_blocking_snapshots*/ false,
-        /*executor_discovery*/ None,
     ));
     environments.update_selections(&[TurnEnvironmentSelection {
         selected_capability_roots: Default::default(),

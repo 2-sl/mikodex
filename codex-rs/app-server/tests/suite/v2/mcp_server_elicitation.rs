@@ -127,7 +127,6 @@ enum StrictReviewScenario {
     ManagedGuardianDisabled,
     ManagedReviewerForbidden,
     AppReviewerUser,
-    ToolReviewerUser,
     AppReviewerNoncanonicalId,
     AppReviewerSpoofedId,
     AppReviewerSpoofedAction,
@@ -150,7 +149,6 @@ impl StrictReviewScenario {
             | Self::ManagedGuardianDisabled
             | Self::ManagedReviewerForbidden
             | Self::AppReviewerUser
-            | Self::ToolReviewerUser
             | Self::AppReviewerNoncanonicalId
             | Self::AppReviewerSpoofedId
             | Self::AppReviewerSpoofedAction
@@ -321,7 +319,6 @@ async fn mcp_server_openai_elicitation_form_round_trip() -> Result<()> {
 #[test_case(Review::ManagedGuardianDisabled; "managed_guardian_disabled")]
 #[test_case(Review::ManagedReviewerForbidden; "managed_reviewer_forbidden")]
 #[test_case(Review::AppReviewerUser; "app_reviewer_user")]
-#[test_case(Review::ToolReviewerUser; "tool_reviewer_user")]
 #[test_case(Review::AppReviewerNoncanonicalId; "app_reviewer_noncanonical_id")]
 #[test_case(Review::AppReviewerSpoofedId; "app_reviewer_spoofed_id")]
 #[test_case(Review::AppReviewerSpoofedAction; "app_reviewer_spoofed_action")]
@@ -659,15 +656,6 @@ impl ElicitationRoundTripFixture {
                     ) {
                         config.insert(
                             format!("apps.{CONNECTOR_ID}.approvals_reviewer"),
-                            json!("user"),
-                        );
-                    } else if strict == Review::ToolReviewerUser {
-                        config.insert(
-                            format!("apps.{CONNECTOR_ID}.approvals_reviewer"),
-                            json!("auto_review"),
-                        );
-                        config.insert(
-                            format!("apps.{CONNECTOR_ID}.tools.{TOOL_NAME}.approvals_reviewer"),
                             json!("user"),
                         );
                     } else if strict == Review::AppDefaultReviewerUser {

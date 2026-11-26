@@ -2483,25 +2483,21 @@ span_attributes = { "service.name" = "managed-service" }"#,
     );
 }
 
-/// Managed booleans override only the corresponding toggle in a feature table.
-#[test_case::test_case("features.multi_agent_v2.enabled"; "multi-agent toggle")]
-#[test_case::test_case("features.send_message_to_user_async"; "async message shorthand")]
+/// Legacy managed feature toggles own their normalized enabled origin and override metadata.
 #[tokio::test]
-async fn managed_feature_boolean_owns_toggle_origin_and_overrides(key_path: &str) {
+async fn multi_agent_v2_boolean_layer_owns_enabled_origin_and_overrides() {
     let tmp = tempdir().expect("tempdir");
     let user_path = tmp.path().join(CONFIG_TOML_FILE);
     std::fs::write(
         &user_path,
-        "[features.multi_agent_v2]\nenabled = true\nsubagent_usage_hint_text = \"keep\"\n\n\
-         [features.network_proxy]\nenabled = true\ncredential_broker = true\n\n\
-         [features.send_message_to_user_async]\nroot_agent = false\nsubagents = true\n",
+        "[features.multi_agent_v2]\nenabled = true\nsubagent_usage_hint_text = \"keep\"\n\n[features.network_proxy]\nenabled = true\ncredential_broker = true\n",
     )
     .expect("user config");
 
     let managed_path = tmp.path().join("managed_config.toml");
     std::fs::write(
         &managed_path,
-        "[features]\nmulti_agent_v2 = false\nnetwork_proxy = false\nsend_message_to_user_async = false\n",
+        "[features]\nmulti_agent_v2 = false\nnetwork_proxy = false\n",
     )
     .expect("managed config");
     let managed_file = AbsolutePathBuf::try_from(managed_path.clone()).expect("managed file");
@@ -2523,8 +2519,6 @@ async fn managed_feature_boolean_owns_toggle_origin_and_overrides(key_path: &str
         "features.multi_agent_v2.enabled",
         "features.network_proxy",
         "features.network_proxy.enabled",
-        "features.send_message_to_user_async",
-        "features.send_message_to_user_async.root_agent",
     ] {
         assert_eq!(
             read.origins.get(path).expect("managed feature origin").name,
@@ -2537,7 +2531,7 @@ async fn managed_feature_boolean_owns_toggle_origin_and_overrides(key_path: &str
     let result = service
         .write_value(ConfigValueWriteParams {
             file_path: Some(user_path.display().to_string()),
-            key_path: key_path.to_string(),
+            key_path: "features.multi_agent_v2.enabled".to_string(),
             value: serde_json::json!(true),
             merge_strategy: MergeStrategy::Upsert,
             expected_version: None,

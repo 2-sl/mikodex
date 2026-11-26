@@ -164,7 +164,6 @@ async fn missing_pong_disconnects_physical_relay() -> Result<()> {
             calls: Arc::new(AtomicUsize::new(0)),
             release: Arc::new(Notify::new()),
         },
-        /*admission*/ None,
     ));
 
     assert_eq!(
@@ -196,7 +195,6 @@ async fn pong_keeps_physical_relay_connected() -> Result<()> {
             calls: Arc::new(AtomicUsize::new(0)),
             release: Arc::new(Notify::new()),
         },
-        /*admission*/ None,
     ));
 
     timeout(Duration::from_secs(1), async {
@@ -309,7 +307,6 @@ async fn processor_exit_resets_noise_harness_stream() -> Result<()> {
             calls: Arc::new(AtomicUsize::new(0)),
             release,
         },
-        /*admission*/ None,
     )));
     let mut connection = noise_harness_connection_from_websocket_with_readiness(
         harness_websocket,
@@ -378,7 +375,6 @@ async fn pending_harness_key_validation_does_not_block_new_handshakes() -> Resul
             calls: Arc::clone(&calls),
             release: Arc::new(Notify::new()),
         },
-        /*admission*/ None,
     ));
 
     for stream_id in ["stream-1", "stream-2"] {
@@ -433,7 +429,6 @@ async fn duplicate_handshakes_pause_admission_without_disconnecting() -> Result<
             calls: Arc::clone(&calls),
             release: Arc::clone(&release),
         },
-        /*admission*/ None,
     ));
 
     let stream_id = "stream-1";
@@ -543,7 +538,6 @@ async fn oversized_harness_authorization_is_rejected_before_validation() -> Resu
             calls: Arc::clone(&calls),
             release: Arc::new(Notify::new()),
         },
-        /*admission*/ None,
     ));
 
     let stream_id = "stream-1";
@@ -623,7 +617,6 @@ async fn malformed_handshakes_preserve_active_streams_and_admission_recovers() -
                 },
                 timeout_started: Arc::clone(&timeout_started),
             },
-            /*admission*/ None,
         )
         .with_subscriber(subscriber),
     ));
@@ -903,7 +896,6 @@ async fn early_data_during_validation_pauses_admission_without_disconnecting() -
             calls: Arc::new(AtomicUsize::new(0)),
             release: Arc::new(Notify::new()),
         },
-        /*admission*/ None,
     ));
 
     for attempt in 0..MAX_FAILED_NOISE_HANDSHAKES {

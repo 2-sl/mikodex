@@ -16,11 +16,12 @@ use codex_protocol::protocol::FileSystemSpecialPath;
 use codex_protocol::protocol::NetworkSandboxPolicy;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
-use mxc_sdk::v1::NetworkAction;
-use mxc_sdk::v1::NetworkEgressPolicy;
-use mxc_sdk::v1::NetworkIngressPolicy;
-use mxc_sdk::v1::NetworkPeerPolicy;
-use mxc_sdk::v1::NetworkRulePolicy;
+use mxc_sdk::mxc_common::models::NetworkAction;
+use mxc_sdk::mxc_common::models::NetworkCidr;
+use mxc_sdk::mxc_common::models::NetworkEgressPolicy;
+use mxc_sdk::mxc_common::models::NetworkIngressPolicy;
+use mxc_sdk::mxc_common::models::NetworkPeer;
+use mxc_sdk::mxc_common::models::NetworkRule;
 use pretty_assertions::assert_eq;
 
 use crate::CreateMxcCommandArgsParams;
@@ -201,21 +202,17 @@ fn wrapper_preserves_exact_argv_and_separate_command_cwd() -> Result<()> {
         ),
         (&profile, root.path(), &argv)
     );
-    let request = build_request(&parsed, &cwd, vec!["CUSTOM=x=y".to_owned()], &[], &[])?;
+    let request = build_request(&parsed, &cwd, vec!["CUSTOM=value".to_owned()], &[], &[])?;
     assert_eq!(
-        (
-            request.command,
-            request.working_directory,
-            request.environment
-        ),
+        (request.script_code, request.working_directory, request.env),
         (
             r#""C:\Program Files\tool.exe" --permissions "" "quotes\" and slash\\""#.to_owned(),
-            Some(cwd.to_str().unwrap().to_owned()),
-            Some(vec![("CUSTOM".to_owned(), "x=y".to_owned())]),
+            cwd.to_str().unwrap().to_owned(),
+            Some(vec!["CUSTOM=value".to_owned()]),
         )
     );
     assert_eq!(
-        build_request(&parsed, &cwd, Vec::new(), &[], &[])?.environment,
+        build_request(&parsed, &cwd, Vec::new(), &[], &[])?.env,
         None
     );
     Ok(())
@@ -253,7 +250,6 @@ fn native_grants_preserve_denies_and_read_only_carveouts() -> Result<()> {
     let profile =
         PermissionProfile::from_runtime_permissions(&fs, NetworkSandboxPolicy::Restricted);
     let request = build_request(&command(&profile, root), root, Vec::new(), &[], &[])?;
-    let request = request.filesystem.unwrap();
     let mut expected_read = [
         root.join(".agents"),
         root.join(".aws"),
@@ -268,9 +264,9 @@ fn native_grants_preserve_denies_and_read_only_carveouts() -> Result<()> {
     expected_read.sort();
     assert_eq!(
         (
-            request.readwrite_paths,
-            request.readonly_paths,
-            request.denied_paths
+            request.policy.readwrite_paths,
+            request.policy.readonly_paths,
+            request.policy.denied_paths
         ),
         (
             vec![
@@ -284,6 +280,7 @@ fn native_grants_preserve_denies_and_read_only_carveouts() -> Result<()> {
             vec![denied.to_str().unwrap().to_owned()],
         )
     );
+    assert!(!request.policy.fallback.allow_dacl_mutation);
     Ok(())
 }
 
@@ -312,7 +309,6 @@ fn volume_expansion_does_not_turn_read_only_child_writable() -> Result<()> {
         &[root.to_owned()],
         &[],
     )?;
-    let request = request.filesystem.unwrap();
     let mut expected_write_paths = vec![root.to_str().unwrap(), writable.to_str().unwrap()];
     if cfg!(windows) {
         expected_write_paths.insert(1, missing.to_str().unwrap());
@@ -325,10 +321,10 @@ fn volume_expansion_does_not_turn_read_only_child_writable() -> Result<()> {
             assert!(!directory.join(".chatgptcreated").exists());
         }
     }
-    assert_eq!(request.readwrite_paths, expected_write_paths);
-    assert_eq!(request.denied_paths, vec![denied.to_str().unwrap()]);
+    assert_eq!(request.policy.readwrite_paths, expected_write_paths);
+    assert_eq!(request.policy.denied_paths, vec![denied.to_str().unwrap()]);
     assert_eq!(
-        request.readonly_paths,
+        request.policy.readonly_paths,
         vec![
             root.join(".agents").to_str().unwrap(),
             root.join(".aws").to_str().unwrap(),
@@ -367,9 +363,8 @@ fn volume_expansion_skips_broken_links_and_preserves_other_grants() -> Result<()
         std::slice::from_ref(&root),
         &[],
     )?;
-    let request = request.filesystem.unwrap();
     assert_eq!(
-        (request.readwrite_paths, request.denied_paths),
+        (request.policy.readwrite_paths, request.policy.denied_paths),
         (
             vec![
                 root.to_str().unwrap().to_owned(),
@@ -412,7 +407,7 @@ fn only_write_access_expands_volume_children() -> Result<()> {
             &volumes,
             &[],
         )?;
-        let native = request.filesystem.unwrap();
+        let native = request.policy;
         let (granted, other) = if access == FileSystemAccessMode::Write {
             (native.readwrite_paths, native.readonly_paths)
         } else {
@@ -452,26 +447,34 @@ fn managed_network_allows_authorized_loopback_without_lan_or_dns_access() -> Res
     })?;
     let parsed = crate::transport::decode(&mut env)?;
     let request = build_request(&parsed, root.path(), Vec::new(), &[], &[])?;
-    let network = request.network.unwrap();
     assert_eq!(
-        network.egress,
+        request.policy.network_egress,
         Some(NetworkEgressPolicy {
-            default: Some(NetworkAction::Deny),
-            allow: Some(vec![NetworkRulePolicy {
-                to: Some(vec![
-                    NetworkPeerPolicy::new("127.0.0.0/8"),
-                    NetworkPeerPolicy::new("::1/128"),
-                ]),
-                ports: None,
-            }]),
-            deny: None,
+            default: NetworkAction::Deny,
+            allow: vec![NetworkRule {
+                to: vec![
+                    NetworkPeer {
+                        cidr: "127.0.0.0/8".parse()?,
+                        except: Vec::new()
+                    },
+                    NetworkPeer {
+                        cidr: NetworkCidr {
+                            address: std::net::Ipv6Addr::LOCALHOST.into(),
+                            prefix_length: 128
+                        },
+                        except: Vec::new()
+                    },
+                ],
+                ports: Vec::new(),
+            }],
+            deny: Vec::new(),
         })
     );
     assert_eq!(
-        network.ingress,
+        request.policy.network_ingress,
         Some(NetworkIngressPolicy {
-            default: Some(NetworkAction::Deny),
-            host_loopback: Some(NetworkAction::Allow),
+            default: NetworkAction::Deny,
+            host_loopback: NetworkAction::Allow,
         })
     );
     Ok(())
@@ -533,17 +536,16 @@ fn deny_globs_expand_files_and_directories_before_launch() -> Result<()> {
     let profile =
         PermissionProfile::from_runtime_permissions(&fs, NetworkSandboxPolicy::Restricted);
     let request = build_request(&command(&profile, &root), &nested, Vec::new(), &[], &[])?;
-    let request = request.filesystem.unwrap();
     #[cfg(windows)]
     {
         assert!(missing.parent().unwrap().is_dir());
         assert!(!missing.exists());
     }
-    assert_eq!(request.readwrite_paths, vec![root.to_str().unwrap()]);
+    assert_eq!(request.policy.readwrite_paths, vec![root.to_str().unwrap()]);
     let mut expected = [file, directory, missing];
     expected.sort();
     assert_eq!(
-        request.denied_paths,
+        request.policy.denied_paths,
         expected.map(|path| path.to_str().unwrap().to_owned())
     );
     Ok(())
@@ -572,11 +574,10 @@ fn denied_parents_are_created_before_glob_expansion() -> Result<()> {
         let profile =
             PermissionProfile::from_runtime_permissions(&fs, NetworkSandboxPolicy::Restricted);
         let request = build_request(&command(&profile, &root), &root, Vec::new(), &[], &[])?;
-        let request = request.filesystem.unwrap();
         assert!(missing.is_dir());
         assert!(!missing.join("child").exists());
         assert_eq!(
-            request.denied_paths,
+            request.policy.denied_paths,
             vec![
                 missing.to_str().unwrap(),
                 missing.join("child").to_str().unwrap()
@@ -653,7 +654,6 @@ fn root_deny_keeps_only_narrow_explicit_grants() -> Result<()> {
             &[root.to_owned()],
             &[],
         )?;
-        let request = request.filesystem.unwrap();
         let allowed = vec![child.to_str().unwrap().to_owned()];
         let expected = match access {
             FileSystemAccessMode::Read => (Vec::new(), allowed),
@@ -665,8 +665,14 @@ fn root_deny_keeps_only_narrow_explicit_grants() -> Result<()> {
             ),
             FileSystemAccessMode::Deny => unreachable!(),
         };
-        assert_eq!((request.readwrite_paths, request.readonly_paths), expected);
-        assert_eq!(request.denied_paths, Vec::<String>::new());
+        assert_eq!(
+            (
+                request.policy.readwrite_paths,
+                request.policy.readonly_paths
+            ),
+            expected
+        );
+        assert_eq!(request.policy.denied_paths, Vec::<String>::new());
     }
     Ok(())
 }
@@ -706,12 +712,11 @@ fn windows_temp_roots_use_filtered_environment_and_keep_explicit_denies() -> Res
         &[],
         &[],
     )?;
-    let request = request.filesystem.unwrap();
     assert_eq!(
-        request.readwrite_paths,
+        request.policy.readwrite_paths,
         vec![first.to_str().unwrap(), second.to_str().unwrap()]
     );
-    assert_eq!(request.denied_paths, vec![denied.to_str().unwrap()]);
+    assert_eq!(request.policy.denied_paths, vec![denied.to_str().unwrap()]);
 
     for value in [
         None,
@@ -731,9 +736,8 @@ fn windows_temp_roots_use_filtered_environment_and_keep_explicit_denies() -> Res
             &[],
             &[],
         )?;
-        let request = request.filesystem.unwrap();
-        assert_eq!(request.readwrite_paths, Vec::<String>::new());
-        assert_eq!(request.denied_paths, vec![denied.to_str().unwrap()]);
+        assert_eq!(request.policy.readwrite_paths, Vec::<String>::new());
+        assert_eq!(request.policy.denied_paths, vec![denied.to_str().unwrap()]);
     }
     Ok(())
 }
@@ -765,14 +769,13 @@ fn minimal_platform_roots_preserve_explicit_denies() -> Result<()> {
             &[],
             &[allowed.clone(), denied.clone()],
         )?;
-        let request = request.filesystem.unwrap();
         let expected_read = if include_defaults {
             vec![allowed.to_str().unwrap().to_owned()]
         } else {
             Vec::new()
         };
         assert_eq!(
-            (request.readonly_paths, request.denied_paths),
+            (request.policy.readonly_paths, request.policy.denied_paths),
             (expected_read, vec![denied.to_str().unwrap().to_owned()])
         );
     }
@@ -810,9 +813,8 @@ fn symbolic_root_preserves_equal_path_precedence_and_denies() -> Result<()> {
         &volumes,
         &[],
     )?;
-    let request = request.filesystem.unwrap();
     assert_eq!(
-        request.readwrite_paths,
+        request.policy.readwrite_paths,
         vec![
             volumes[0].to_str().unwrap().to_owned(),
             volumes[0].join("child").to_str().unwrap().to_owned(),
@@ -821,6 +823,7 @@ fn symbolic_root_preserves_equal_path_precedence_and_denies() -> Result<()> {
         ]
     );
     let reads_in_volumes: Vec<_> = request
+        .policy
         .readonly_paths
         .into_iter()
         .filter(|path| Path::new(path).starts_with(&base))
@@ -838,7 +841,10 @@ fn symbolic_root_preserves_equal_path_precedence_and_denies() -> Result<()> {
             )
             .collect::<Vec<_>>()
     );
-    assert_eq!(request.denied_paths, vec![volumes[2].to_str().unwrap()]);
+    assert_eq!(
+        request.policy.denied_paths,
+        vec![volumes[2].to_str().unwrap()]
+    );
     Ok(())
 }
 
@@ -872,11 +878,10 @@ fn narrowing_one_volume_keeps_the_other_volume_root_grant() -> Result<()> {
             &volumes,
             &[],
         )?;
-        let request = request.filesystem.unwrap();
         let granted = if root_access == FileSystemAccessMode::Write {
-            request.readwrite_paths
+            request.policy.readwrite_paths
         } else {
-            request.readonly_paths
+            request.policy.readonly_paths
         };
         let second_grants: Vec<_> = granted
             .into_iter()
@@ -912,9 +917,8 @@ fn volume_enumeration_uses_windows_identity_for_read_write_overrides() -> Result
         std::slice::from_ref(&root),
         &[],
     )?;
-    let request = request.filesystem.unwrap();
     assert_eq!(
-        request.readwrite_paths,
+        request.policy.readwrite_paths,
         vec![
             PathUri::from_host_native_path(&alias)?
                 .to_abs_path()?
@@ -925,6 +929,7 @@ fn volume_enumeration_uses_windows_identity_for_read_write_overrides() -> Result
         ]
     );
     let readonly_child: Vec<_> = request
+        .policy
         .readonly_paths
         .into_iter()
         .filter(|path| path.eq_ignore_ascii_case(child.to_str().unwrap()))

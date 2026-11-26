@@ -1,5 +1,5 @@
 use crate::ConfigLayerMetadata;
-use crate::merge::structured_feature_toggle_field;
+use crate::merge::is_structured_feature_path;
 use serde_json::Value as JsonValue;
 use sha2::Digest;
 use sha2::Sha256;
@@ -33,16 +33,14 @@ pub(super) fn record_origins(
                 if !include(path) {
                     return;
                 }
-                if matches!(value, TomlValue::Boolean(_))
-                    && let Some(toggle_field) = structured_feature_toggle_field(path)
-                {
-                    if matches!(
-                        path.last().map(String::as_str),
-                        Some("network_proxy" | "send_message_to_user_async")
-                    ) {
+                if matches!(value, TomlValue::Boolean(_)) && is_structured_feature_path(path) {
+                    if path
+                        .last()
+                        .is_some_and(|feature| feature == "network_proxy")
+                    {
                         origins.insert(path.join("."), meta.clone());
                     }
-                    path.push(toggle_field.to_string());
+                    path.push("enabled".to_string());
                     origins.insert(path.join("."), meta.clone());
                     path.pop();
                     return;

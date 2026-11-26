@@ -38,14 +38,11 @@ impl App {
                 } else {
                     match self.chat_widget.paste_image(context, text_fallback) {
                         Ok(()) => {}
-                        Err(err) if text_fallback.is_some() && err.allows_text_fallback() => {
-                            let image_error = matches!(err, PasteImageError::ImageReadFailed(_))
-                                .then(|| format!("Failed to paste image: {err}"));
+                        Err(PasteImageError::NoImage(_)) if text_fallback.is_some() => {
                             self.start_clipboard_text_paste(
                                 tui,
                                 PasteSource::Clipboard,
                                 text_fallback,
-                                image_error,
                             );
                         }
                         Err(err) => {

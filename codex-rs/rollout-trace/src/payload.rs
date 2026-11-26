@@ -71,7 +71,7 @@ pub enum RawPayloadKind {
     PreparedPrompt,
     /// One exact item in a prepared prompt or oversized provider input/output array.
     ModelItem,
-    /// A shared JSON value, such as inline media or a large tool-result string.
+    /// An inline image or oversized text part. Losing its bytes preserves its message and position.
     ContentValue,
     /// Provider-formatted context for replay of a continuation from an untraced warmup.
     WarmupContext,
@@ -94,7 +94,8 @@ pub enum RawPayloadKind {
     AgentResult,
 }
 
-/// Select input items and inline content from model-facing payloads.
+/// Select whole JSON values whose bytes can be stored independently. Only model-facing
+/// payloads use this layout. Other consumers can continue reading their single raw record.
 pub(crate) fn capture_parts(
     kind: RawPayloadKind,
     body: &[u8],

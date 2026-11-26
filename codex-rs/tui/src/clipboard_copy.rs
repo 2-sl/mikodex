@@ -2,12 +2,12 @@
 //!
 //! Local copying uses the native clipboard, or the Windows clipboard directly on WSL.
 //! WSL sessions over SSH with a forwarded X11 display use the native clipboard instead.
-//! In tmux, Herdr, and Rex, also forward to the attached terminal so clients attached after Mikodex
+//! In tmux and Herdr, also forward to the attached terminal so clients attached after Mikodex
 //! started receive the copy. Over SSH, wrap OSC 52 for GNU screen when detected.
 //!
 //! Terminal writes have no delivery acknowledgement: a successful send must not
 //! suppress native copying. Both the host and attached client's clipboards may
-//! change. Outside tmux, Herdr, Rex, and SSH, use OSC 52 only if native copying fails.
+//! change. Outside tmux, Herdr, and SSH, use OSC 52 only if native copying fails.
 //!
 //! On Linux, X11 and some Wayland compositors require the process that wrote the
 //! clipboard to keep its handle open. `ClipboardLease` wraps the `arboard::Clipboard`
@@ -25,10 +25,6 @@ mod tmux;
 pub(crate) mod worker;
 mod wsl;
 
-use crate::terminal_capabilities::ClipboardCapabilities;
-use crate::terminal_capabilities::ClipboardCopyMode;
-pub(crate) use crate::terminal_capabilities::is_ssh_session;
-use crate::terminal_capabilities::is_tmux_session;
 use base64::Engine;
 use std::io::Write;
 use std::sync::Arc;
@@ -90,7 +86,7 @@ impl CopyStatus {
 /// Copy text to the system clipboard.
 ///
 /// Try native copying, then independently attempt terminal forwarding in tmux,
-/// Herdr, Rex, or SSH. A terminal send is best effort and does not confirm clipboard delivery.
+/// Herdr, or SSH. A terminal send is best effort and does not confirm clipboard delivery.
 /// Terminal forwarding may replace native HTML with plain text.
 ///
 /// Native or WSL success returns `Copied`, even if terminal forwarding fails.
@@ -105,11 +101,14 @@ fn copy_to_clipboard(
     osc52: impl Fn(&str) -> Result<(), String>,
 ) -> Result<CopyOutcome, String> {
     let wsl_deadline = std::time::Instant::now() + std::time::Duration::from_secs(/*secs*/ 5);
-    let capabilities = ClipboardCapabilities::detect();
+    let ssh_session = is_ssh_session();
     let environment = CopyEnvironment {
-        terminal_copy: capabilities.copy_mode,
-        forwarded_x11: capabilities.forwarded_x11,
+        herdr_session: std::env::var("HERDR_ENV").is_ok_and(|value| value == "1"),
+        ssh_session,
+        forwarded_x11: ssh_session
+            && std::env::var("DISPLAY").is_ok_and(|display| !display.is_empty()),
         wsl_session: is_wsl_session(),
+        tmux_session: is_tmux_session(),
     };
     #[cfg(not(target_os = "android"))]
     let native_copy = {
@@ -171,12 +170,15 @@ impl ClipboardLease {
     }
 }
 
-/// Inputs to clipboard routing, independent of terminal identity.
+/// Core copy logic with injected backends, enabling deterministic unit tests
+/// without touching real clipboards or terminal I/O.
 #[derive(Clone, Copy)]
 struct CopyEnvironment {
-    terminal_copy: ClipboardCopyMode,
+    herdr_session: bool,
+    ssh_session: bool,
     forwarded_x11: bool,
     wsl_session: bool,
+    tmux_session: bool,
 }
 
 fn copy_to_clipboard_with(
@@ -193,7 +195,7 @@ fn copy_to_clipboard_with(
     }
 
     let terminal_copy = || {
-        if environment.terminal_copy == ClipboardCopyMode::Tmux {
+        if environment.tmux_session {
             let raw_bytes = text.len();
             let result = if raw_bytes > OSC52_MAX_RAW_BYTES {
                 Err(format!(
@@ -235,7 +237,8 @@ fn copy_to_clipboard_with(
     // Persistent multiplexer sessions may gain remote clients after Mikodex starts, so still
     // forward even when no SSH variables were inherited or native copying succeeded.
     let terminal_result =
-        (environment.terminal_copy != ClipboardCopyMode::FallbackOsc52).then(terminal_copy);
+        (environment.tmux_session || environment.herdr_session || environment.ssh_session)
+            .then(terminal_copy);
     match native_result {
         Ok(lease) => Ok(CopyOutcome::Copied(lease)),
         Err(native_error) => terminal_result
@@ -245,6 +248,16 @@ fn copy_to_clipboard_with(
                 format!("{native_error}; terminal clipboard: {terminal_error}")
             }),
     }
+}
+
+/// Detect whether the current process is running inside an SSH session.
+pub(crate) fn is_ssh_session() -> bool {
+    std::env::var_os("SSH_TTY").is_some() || std::env::var_os("SSH_CONNECTION").is_some()
+}
+
+/// Detect whether the current process is running inside tmux.
+fn is_tmux_session() -> bool {
+    std::env::var_os("TMUX").is_some() || std::env::var_os("TMUX_PANE").is_some()
 }
 
 #[cfg(target_os = "linux")]
@@ -352,7 +365,6 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::cell::Cell;
 
-    use super::ClipboardCopyMode;
     use super::CopyEnvironment;
     use super::CopyFormat;
     use super::CopyOutcome;
@@ -364,24 +376,28 @@ mod tests {
 
     fn remote_environment() -> CopyEnvironment {
         CopyEnvironment {
-            terminal_copy: ClipboardCopyMode::Osc52,
+            herdr_session: false,
+            ssh_session: true,
             forwarded_x11: false,
             wsl_session: true,
+            tmux_session: false,
         }
     }
 
     fn remote_tmux_environment() -> CopyEnvironment {
         CopyEnvironment {
-            terminal_copy: ClipboardCopyMode::Tmux,
+            tmux_session: true,
             ..remote_environment()
         }
     }
 
     fn local_environment() -> CopyEnvironment {
         CopyEnvironment {
-            terminal_copy: ClipboardCopyMode::FallbackOsc52,
+            herdr_session: false,
+            ssh_session: false,
             forwarded_x11: false,
             wsl_session: false,
+            tmux_session: false,
         }
     }
 
@@ -721,7 +737,7 @@ mod tests {
             "hello",
             CopyFormat::PlainText,
             CopyEnvironment {
-                terminal_copy: ClipboardCopyMode::Tmux,
+                tmux_session: true,
                 ..local_environment()
             },
             |_| {

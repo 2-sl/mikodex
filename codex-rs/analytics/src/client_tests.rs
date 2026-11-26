@@ -115,8 +115,6 @@ use tokio::sync::mpsc::error::TryRecvError;
 
 #[path = "client_product_tests.rs"]
 mod product_tests;
-#[path = "client_transport_tests.rs"]
-mod transport_tests;
 
 #[cfg(debug_assertions)]
 impl AnalyticsEventsClient {
@@ -126,7 +124,6 @@ impl AnalyticsEventsClient {
                 auth_manager,
                 AnalyticsEventsDestination::CaptureFile { path },
                 /*runtime_auth*/ None,
-                /*event_transport*/ None,
             )),
         }
     }
@@ -539,7 +536,6 @@ async fn api_key_auth_sends_only_plugin_events_to_codex_backend() {
         ],
         &ThreadProducts::default(),
         /*runtime_auth*/ None,
-        /*event_transport*/ None,
     )
     .await;
 
@@ -682,7 +678,6 @@ fn sample_thread(thread_id: &str) -> Thread {
         section_entered_at: None,
         project_id: None,
         daybreak_enabled: None,
-        daybreak_program_propagation_enrolled: None,
         history_mode: Default::default(),
         model_provider: "openai".to_string(),
         model: None,
@@ -692,7 +687,7 @@ fn sample_thread(thread_id: &str) -> Thread {
         recency_at: Some(2),
         status: AppServerThreadStatus::Idle,
         path: None,
-        cwd: test_path_buf("/tmp").abs().into(),
+        cwd: test_path_buf("/tmp").abs(),
         cli_version: "0.0.0".to_string(),
         source: AppServerSessionSource::Exec,
         can_accept_direct_input: None,
@@ -712,7 +707,7 @@ fn sample_thread_start_response() -> ClientResponsePayload {
         model: "gpt-5".to_string(),
         model_provider: "openai".to_string(),
         service_tier: None,
-        cwd: test_path_buf("/tmp").abs().into(),
+        cwd: test_path_buf("/tmp").abs(),
         runtime_workspace_roots: Vec::new(),
         instruction_sources: Vec::new(),
         approval_policy: AppServerAskForApproval::OnRequest,
@@ -731,7 +726,7 @@ fn sample_thread_resume_response() -> ClientResponsePayload {
         model: "gpt-5".to_string(),
         model_provider: "openai".to_string(),
         service_tier: None,
-        cwd: test_path_buf("/tmp").abs().into(),
+        cwd: test_path_buf("/tmp").abs(),
         runtime_workspace_roots: Vec::new(),
         instruction_sources: Vec::new(),
         approval_policy: AppServerAskForApproval::OnRequest,
@@ -754,7 +749,7 @@ fn sample_thread_fork_response() -> ClientResponsePayload {
         model: "gpt-5".to_string(),
         model_provider: "openai".to_string(),
         service_tier: None,
-        cwd: test_path_buf("/tmp").abs().into(),
+        cwd: test_path_buf("/tmp").abs(),
         runtime_workspace_roots: Vec::new(),
         instruction_sources: Vec::new(),
         approval_policy: AppServerAskForApproval::OnRequest,
@@ -940,7 +935,10 @@ fn track_response_ignores_unserializable_thread_responses() {
     let ClientResponsePayload::ThreadStart(thread_start) = &mut response else {
         panic!("expected thread/start response");
     };
-    thread_start.thread.path = Some(OsString::from_vec(b"/bad\xff".to_vec()).into());
+    thread_start.cwd = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(
+        std::path::PathBuf::from(OsString::from_vec(vec![b'/', b'b', b'a', b'd', 0xff])),
+    )
+    .expect("non-UTF-8 Unix paths are valid absolute paths");
 
     client.track_response(/*connection_id*/ 7, RequestId::Integer(1), &response);
 
@@ -1272,7 +1270,6 @@ async fn account_switch_between_batches_does_not_send_old_credentials() {
         events,
         &ThreadProducts::default(),
         /*runtime_auth*/ None,
-        /*event_transport*/ None,
     )
     .await;
     server.abort();

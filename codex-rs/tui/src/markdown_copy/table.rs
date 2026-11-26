@@ -220,10 +220,7 @@ pub(super) fn render(
                 .and_then(|copy| copy.table.as_ref())
                 .is_some_and(|table| table.fragments.is_empty())
     });
-    let standalone = !matches!(output, SelectionOutput::Blocks(_))
-        && rectangle.is_none()
-        && cells.len() == 1
-        && !includes_separator;
+    let standalone = rectangle.is_none() && cells.len() == 1 && !includes_separator;
     if entire_selection
         && standalone
         && let Some(parts) = cells.values().next()

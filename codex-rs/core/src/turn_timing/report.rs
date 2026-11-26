@@ -2,7 +2,6 @@
 
 use super::TurnProfileState;
 use super::duration_to_u64_ms;
-use codex_analytics::IncompleteReason;
 use codex_analytics::TurnCriticalPath;
 use codex_analytics::TurnCriticalPathDurations;
 use codex_otel::TURN_CRITICAL_PATH_CAPTURE_METRIC;
@@ -15,14 +14,7 @@ pub(super) fn completed_critical_path(state: &TurnProfileState, end: Instant) ->
         return TurnCriticalPath::Disabled;
     }
     let (Some(path), Some(start)) = (&state.path, state.started_at) else {
-        let mut reasons = state.incomplete_reasons.clone();
-        if state.started_at.is_none() && !reasons.contains(&IncompleteReason::MissingTurnStart) {
-            reasons.push(IncompleteReason::MissingTurnStart);
-        }
-        if reasons.is_empty() {
-            reasons.push(IncompleteReason::Unclassified);
-        }
-        return TurnCriticalPath::Incomplete(reasons);
+        return TurnCriticalPath::Incomplete;
     };
     let totals = path.durations(start, end);
     TurnCriticalPath::Complete(TurnCriticalPathDurations {

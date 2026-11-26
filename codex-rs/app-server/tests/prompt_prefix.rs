@@ -27,9 +27,10 @@ async fn prompt_prefix_matches_release() -> Result<()> {
     // current catalog so normal model and prompt updates cannot cause skew.
     let catalog_dir = TempDir::new()?;
     let catalog_path = catalog_dir.path().join("models.json");
-    const MODEL: &str = "gpt-6-astra";
-    let catalog = codex_models_manager::bundled_models_response()?;
-    std::fs::write(&catalog_path, serde_json::to_vec(&catalog)?)?;
+    std::fs::write(
+        &catalog_path,
+        serde_json::to_vec(&codex_models_manager::bundled_models_response()?)?,
+    )?;
     let mut prefixes = Vec::new();
 
     for program in [release.as_deref(), None] {
@@ -45,7 +46,7 @@ async fn prompt_prefix_matches_release() -> Result<()> {
         .await;
         let home = TempDir::new()?;
         MockResponsesConfig::new(&server.uri())
-            .with_model(MODEL)
+            .with_model("gpt-6-astra")
             .with_root_config(&format!(
                 "model_catalog_json = {}",
                 serde_json::to_string(&catalog_path)?
@@ -109,7 +110,7 @@ async fn prompt_prefix_matches_release() -> Result<()> {
         let environment = app.auto_env_params()?;
         for (value, replacement) in [
             (environment.cwd.as_str(), "<ENVIRONMENT_CWD>"),
-            (thread.cwd.as_str(), "<CWD>"),
+            (thread.cwd.to_string_lossy().as_ref(), "<CWD>"),
             (home.path().to_string_lossy().as_ref(), "<MIKODEX_HOME>"),
             (thread.id.as_str(), "<THREAD_ID>"),
             (thread.session_id.as_str(), "<SESSION_ID>"),
@@ -129,27 +130,6 @@ async fn prompt_prefix_matches_release() -> Result<()> {
         let current: Value = serde_json::from_str(&prefixes[1])?;
         accept_spawn_agent_shortlist_rollout(&mut released, &current);
         accept_default_tool_description_rollouts(&mut released, &current);
-        // Releases before #19024 append the catalog's Default block after permissions.
-        // Accept only its removal from this position in the startup developer message.
-        if let Some(default) = catalog
-            .models
-            .iter()
-            .find(|model| model.slug == MODEL)
-            .and_then(|model| model.model_messages.as_ref())
-            .and_then(|messages| messages.collaboration_modes.as_ref())
-            .and_then(|modes| modes.default.as_deref())
-            && released["input"][2]["role"] == "developer"
-            && current.pointer("/input/2/content/1").is_none()
-            && let Some(content) = released["input"][2]["content"].as_array_mut()
-            && content.len() == 2
-            && content[1]
-                == json!({
-                    "type": "input_text",
-                    "text": format!("<collaboration_mode>{default}</collaboration_mode>"),
-                })
-        {
-            content.pop();
-        }
         prefixes[0] = serde_json::to_string_pretty(&released)?;
     }
     assert_eq!(

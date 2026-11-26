@@ -63,7 +63,6 @@ async fn v2_rpc_refreshes_metadata_and_enforces_sandbox() -> anyhow::Result<()> 
     let project = tempfile::tempdir()?;
     let cwd = PathUri::from_host_native_path(project.path())?;
     let params = DiscoverV2CapabilitiesRequest {
-        force_reload: false,
         cwd: cwd.clone(),
         sandbox: None,
     };
@@ -139,7 +138,6 @@ async fn v2_rpc_refreshes_metadata_and_enforces_sandbox() -> anyhow::Result<()> 
             ..sandbox
         };
         let restricted = DiscoverV2CapabilitiesRequest {
-            force_reload: false,
             cwd: cwd.clone(),
             sandbox: Some(sandbox),
         };
@@ -178,7 +176,6 @@ async fn v2_rpc_refreshes_metadata_and_enforces_sandbox() -> anyhow::Result<()> 
             sandbox.windows_sandbox_selection =
                 codex_exec_server::WindowsSandboxSelection::RestrictedToken;
             let permitted = DiscoverV2CapabilitiesRequest {
-                force_reload: false,
                 cwd: cwd.clone(),
                 sandbox: Some(sandbox),
             };

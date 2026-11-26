@@ -161,16 +161,8 @@ pub(super) fn directory_group_key(cwd: &Path, worktrees_enabled: bool) -> PathBu
         .unwrap_or_else(|| cwd.to_path_buf())
 }
 
-/// The item painted under the pointer, identified across task-list refreshes.
-#[derive(Clone, Copy)]
-enum RowTarget {
-    Thread(ThreadId),
-    ShowMore,
-}
-
 #[derive(Default)]
 pub(super) struct AgentsOverviewViewState {
-    row_hits: Vec<(RowTarget, Rect)>,
     scroll: usize,
     page_height: usize,
     status_filter: usize,
@@ -238,8 +230,6 @@ impl AgentsOverviewViewState {
 }
 
 pub(super) struct AgentsOverviewView {
-    /// Some when shown beside the conversation. The value records keyboard focus.
-    pub(super) dock_focused: Option<bool>,
     use_theme_colors: bool,
     docked_focus: bool,
     pub(super) rows: Vec<AgentsOverviewRow>,
@@ -319,7 +309,6 @@ impl AgentsOverviewView {
             }
         }
         let mut view = Self {
-            dock_focused: None,
             editor_keymap: keymap.clone(),
             use_theme_colors,
             docked_focus: true,
@@ -344,29 +333,6 @@ impl AgentsOverviewView {
         view.state().completion = None;
         view.reconcile_command_center_selection();
         view
-    }
-
-    pub(super) fn owns_nested_input(&self) -> bool {
-        let state = self.state();
-        state.editing_metadata() || state.help || state.removal.is_some() || state.creating_worktree
-    }
-
-    /// Follow a newly displayed task once its row arrives. Ordinary refreshes keep the browse position.
-    pub(super) fn follow_changed_conversation(&mut self, previous: &Self) {
-        let Some((index, current)) = self.rows.iter().enumerate().find(|(_, row)| row.is_current)
-        else {
-            return;
-        };
-        if !previous
-            .rows
-            .iter()
-            .any(|row| row.is_current && row.thread_id == current.thread_id)
-            && !self.owns_nested_input()
-            && self.visible_indices().contains(&index)
-        {
-            self.selected = index;
-            self.state().show_more_selected = false;
-        }
     }
 
     pub(super) fn thread_ids(&self) -> Vec<ThreadId> {
@@ -610,7 +576,7 @@ impl AgentsOverviewView {
             reasoning,
             Line::default(),
             Line::from("Project".dim()),
-            Line::from(row.thread.cwd.to_string()),
+            Line::from(row.thread.cwd.display().to_string()),
         ];
         lines.extend(row.details.usage_lines.clone());
         if let Some(branch) = row
@@ -878,7 +844,7 @@ impl BottomPaneView for AgentsOverviewView {
         if self.agents_keymap.new_task.is_pressed(key) {
             self.app_event_tx.send(AppEvent::NewAgentsOverviewSession {
                 backend_id: self.selected_row().and_then(|row| row.backend_id),
-                cwd: self.selected_row().map(|row| row.thread.cwd.to_path_buf()),
+                cwd: self.selected_row().map(|row| row.thread.cwd.clone()),
             });
             return;
         }
@@ -886,9 +852,7 @@ impl BottomPaneView for AgentsOverviewView {
             if self.worktrees_enabled {
                 self.app_event_tx.send(AppEvent::NewAgentsOverviewWorktree {
                     backend_id: self.selected_row().and_then(|row| row.backend_id),
-                    cwd: self
-                        .selected_row()
-                        .and_then(|row| row.thread.cwd.to_inferred_abs_path()),
+                    cwd: self.selected_row().map(|row| row.thread.cwd.clone()),
                 });
             }
             return;

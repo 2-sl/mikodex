@@ -261,23 +261,20 @@ async fn config_requirements_read_includes_remote_control_and_managed_hooks() ->
 
 [hooks]
 
-[[hooks.PreToolUse]]
-matcher = "config-read-fixture"
+[[hooks.SessionStart]]
 
-[[hooks.PreToolUse.hooks]]
+[[hooks.SessionStart.hooks]]
 type = "command"
 command = "echo managed"
 additionalContextLimit = 4096
-onFailure = "block"
 
-[[hooks.PreToolUse.hooks]]
+[[hooks.SessionStart.hooks]]
 type = "mcp_tool"
 server = "security"
 tool = "scan"
 input = { path = "${tool_input.file_path}", metadata = { enabled = true, retries = 2 } }
 timeout = 30
 statusMessage = "Scanning file"
-onFailure = "continue"
 "#,
     )?;
     let mut mcp = TestAppServer::builder()
@@ -297,10 +294,7 @@ onFailure = "continue"
         requirements
             .hooks
             .expect("managed hooks should be returned")
-            .pre_tool_use
-            .into_iter()
-            .find(|group| group.matcher.as_deref() == Some("config-read-fixture"))
-            .expect("fixture hook group should be returned")
+            .session_start[0]
             .hooks,
         vec![
             ConfiguredHookHandler::Command {
@@ -309,7 +303,6 @@ onFailure = "continue"
                 timeout_sec: None,
                 r#async: false,
                 status_message: None,
-                on_failure: Some(codex_app_server_protocol::ConfiguredHookFailurePolicy::Block),
                 additional_context_limit: Some(4_096),
             },
             ConfiguredHookHandler::McpTool {
@@ -321,7 +314,6 @@ onFailure = "continue"
                 }))?,
                 timeout_sec: Some(30),
                 status_message: Some("Scanning file".to_string()),
-                on_failure: Some(codex_app_server_protocol::ConfiguredHookFailurePolicy::Continue),
             },
         ]
     );
@@ -1424,7 +1416,6 @@ omit_tools_from = ["deferred"]
 approvals_reviewer = "user"
 destructive_enabled = false
 default_tools_approval_mode = "prompt"
-tools.list.approvals_reviewer = "auto_review"
 
 [apps.app1.links.link_work]
 approvals_reviewer = "auto_review"
@@ -1472,10 +1463,6 @@ enabled = false
         response["config"]["apps"]["app_with_empty_links"].get("links"),
         Some(&json!({})),
     );
-    assert_eq!(
-        response["config"]["apps"]["app1"]["tools"]["list"].get("approvals_reviewer"),
-        Some(&json!("auto_review")),
-    );
     let ConfigReadResponse {
         config,
         origins,
@@ -1503,9 +1490,7 @@ enabled = false
                         open_world_enabled: None,
                         default_tools_approval_mode: Some(AppToolApproval::Prompt),
                         default_tools_enabled: None,
-                        tools: Some(serde_json::from_value(json!({
-                            "list": {"enabled": false, "approvals_reviewer": "auto_review"}
-                        }))?),
+                        tools: Some(serde_json::from_value(json!({"list": {"enabled": false}}))?),
                         links: Some(AppLinksConfig {
                             links: std::collections::HashMap::from([
                                 (
@@ -1912,20 +1897,14 @@ writable_roots = [{}]
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn config_value_write_replaces_value_despite_stale_daemon_update_setting() -> Result<()> {
+async fn config_value_write_replaces_value() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let codex_home = temp_dir.path().canonicalize()?;
     write_config(
         &temp_dir,
         r#"
 model = "gpt-old"
-[features]
-daemon_updates = true
 "#,
-    )?;
-    std::fs::write(
-        codex_home.join("requirements.toml"),
-        "[features]\ndaemon_updates = false\n",
     )?;
 
     let mut mcp = TestAppServer::builder()

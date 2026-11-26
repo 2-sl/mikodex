@@ -9,6 +9,7 @@ use codex_guardian_reviewer::ReviewDeadline;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::AskForApproval;
 use codex_tools::FunctionCallError;
 use codex_tools::ToolName;
 use tokio_util::sync::CancellationToken;
@@ -143,15 +144,19 @@ pub(crate) async fn review_tool_call(
                 PreToolUseError::Cancelled(_) => CodexErr::TurnAborted,
             })?;
         let step = &invocation.step_context;
-        let context = GuardianReviewContext::from(step);
-        let (approval, request) = if let Some(tool_info) = advertised_mcp_tool {
-            let request = mcp_tool_call::recorded::prepare_review_request(&invocation, tool_info)
+        let (requirement, action) = if let Some(tool_info) = advertised_mcp_tool {
+            let prepared = mcp_tool_call::recorded::prepare_approval_action(&invocation, tool_info)
                 .await
                 .map_err(tool_error)?;
-            (None, request)
+            let Some(action) = prepared else {
+                return Ok(GuardianReviewResult {
+                    call_id: invocation.call_id,
+                    assessment: None,
+                });
+            };
+            (None, action)
         } else {
-            let name = invocation.tool_name.name.as_str();
-            let (requirement, action) = match (name, &invocation.payload) {
+            match (invocation.tool_name.name.as_str(), &invocation.payload) {
                 ("exec_command", ToolPayload::Function { arguments }) => {
                     let args: ToolEnvironmentArgs =
                         parse_arguments(arguments).map_err(tool_error)?;
@@ -203,6 +208,25 @@ pub(crate) async fn review_tool_call(
                             .map_err(tool_error)?;
                     let prepared = PreparedPermissionRequest::parse(arguments, environment)
                         .map_err(tool_error)?;
+                    match step.settings.approval_policy() {
+                        AskForApproval::Never => {
+                            return Ok(GuardianReviewResult {
+                                call_id: invocation.call_id,
+                                assessment: None,
+                            });
+                        }
+                        AskForApproval::Granular(policy)
+                            if !policy.allows_request_permissions() =>
+                        {
+                            return Ok(GuardianReviewResult {
+                                call_id: invocation.call_id,
+                                assessment: None,
+                            });
+                        }
+                        AskForApproval::OnRequest
+                        | AskForApproval::UnlessTrusted
+                        | AskForApproval::Granular(_) => {}
+                    }
                     let action = prepared.approval_action(&invocation.call_id, &step.turn.sub_id);
                     (None, action)
                 }
@@ -211,24 +235,30 @@ pub(crate) async fn review_tool_call(
                         "unsupported tool or payload for direct review".into(),
                     ));
                 }
-            };
-            let approval = match &requirement {
-                None | Some(ExecApprovalRequirement::Skip { .. }) => None,
-                Some(ExecApprovalRequirement::NeedsApproval { reason, .. }) => reason.clone(),
-                Some(ExecApprovalRequirement::NeedsHumanApproval { .. }) => {
-                    return Err(CodexErr::InvalidRequest(
-                        "Managed command policy requires human approval.".into(),
-                    ));
-                }
-                Some(ExecApprovalRequirement::Forbidden { reason }) => {
-                    return Err(CodexErr::InvalidRequest(reason.clone()));
-                }
-            };
-            let request = from_approval_action(action, &context)
-                .request
-                .map_err(CodexErr::InvalidRequest)?;
-            (approval, request)
+            }
         };
+        let approval = match &requirement {
+            None => None,
+            Some(ExecApprovalRequirement::Skip { .. }) => {
+                return Ok(GuardianReviewResult {
+                    call_id: invocation.call_id,
+                    assessment: None,
+                });
+            }
+            Some(ExecApprovalRequirement::NeedsApproval { reason, .. }) => reason.clone(),
+            Some(ExecApprovalRequirement::NeedsHumanApproval { .. }) => {
+                return Err(CodexErr::InvalidRequest(
+                    "Managed command policy requires human approval.".into(),
+                ));
+            }
+            Some(ExecApprovalRequirement::Forbidden { reason }) => {
+                return Err(CodexErr::InvalidRequest(reason.clone()));
+            }
+        };
+        let context = GuardianReviewContext::from(step);
+        let request = from_approval_action(action, &context)
+            .request
+            .map_err(CodexErr::InvalidRequest)?;
         let input = ReviewInput {
             session: Arc::clone(session),
             context,
@@ -248,8 +278,8 @@ pub(crate) async fn review_tool_call(
                 other => CodexErr::Fatal(format!("Guardian assessment failed: {other:?}")),
             })?;
         Ok(GuardianReviewResult {
-            call_id: invocation.call_id.into(),
-            assessment,
+            call_id: invocation.call_id,
+            assessment: Some(assessment),
         })
     };
     tokio::select! {

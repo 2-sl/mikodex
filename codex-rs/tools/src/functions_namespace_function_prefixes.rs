@@ -4,10 +4,9 @@
 use crate::ResponsesApiNamespaceTool;
 use crate::ToolName;
 use crate::ToolSpec;
-use crate::indirect_namespace_prefixes::prepend;
 use std::collections::BTreeMap;
 
-/// Trimmed description prefixes for the available `functions.*` tools.
+/// Trimmed, size-bounded description prefixes for the available `functions.*` tools.
 #[derive(Default)]
 pub struct FunctionsNamespaceFunctionPrefixes(BTreeMap<String, String>);
 
@@ -15,10 +14,11 @@ impl FunctionsNamespaceFunctionPrefixes {
     pub fn new(
         prefixes: Option<&BTreeMap<String, String>>,
         available_tools: impl IntoIterator<Item = ToolName>,
-    ) -> Self {
+    ) -> Result<Self, &'static str> {
         let Some(prefixes) = prefixes.filter(|prefixes| !prefixes.is_empty()) else {
-            return Self::default();
+            return Ok(Self::default());
         };
+        let mut remaining = 256usize;
         let mut normalized = BTreeMap::new();
         for tool in available_tools {
             if !tool.is_default_namespace() || normalized.contains_key(&tool.name) {
@@ -31,9 +31,15 @@ impl FunctionsNamespaceFunctionPrefixes {
             if prefix.is_empty() {
                 continue;
             }
+            remaining = remaining
+                .checked_sub(prefix.len())
+                .and_then(|remaining| remaining.checked_sub(2))
+                .ok_or(
+                    "Available functions' description prefixes exceed the 256-byte combined limit",
+                )?;
             normalized.insert(tool.name, prefix.to_owned());
         }
-        Self(normalized)
+        Ok(Self(normalized))
     }
 
     /// Returns an owned replacement only for a configured function. Unaffected tools
@@ -67,7 +73,11 @@ impl FunctionsNamespaceFunctionPrefixes {
 
     fn prepend(&self, name: &str, description: &mut String) {
         if let Some(prefix) = self.0.get(name) {
-            prepend(prefix, description);
+            *description = if description.is_empty() {
+                prefix.clone()
+            } else {
+                format!("{prefix}\n\n{description}")
+            };
         }
     }
 }

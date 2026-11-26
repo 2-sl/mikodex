@@ -117,7 +117,6 @@ fn visible_split(app: &App, tui: &Tui, area: Rect) -> Option<SidebarLayout> {
 }
 
 pub(super) fn split_layout(app: &App, tui: &Tui, area: Rect) -> Option<SidebarLayout> {
-    let area = app.workspace_chat_area(area);
     let content = app.sidebar()?.visible_content()?;
     if area.width < 100
         || app.conversation_frame.has_caller_inset()
@@ -271,7 +270,6 @@ impl App {
         if key.kind == KeyEventKind::Release {
             return true;
         }
-        let screen = self.workspace_chat_area(screen);
         let current = screen.right() - divider.right();
         let step = match (key.code, key.modifiers) {
             (KeyCode::Left | KeyCode::Char('h'), KeyModifiers::NONE) => 1,
@@ -326,7 +324,6 @@ impl App {
             100 - focused_percent
         };
         // The sidebar gets the spare column when an equal split is odd.
-        let screen = self.workspace_chat_area(screen);
         let available = u32::from(screen.width - GAP);
         let preferred = (available * u32::from(side_percent)).div_ceil(100);
         let width = sidebar_width(preferred as i32, screen.width);
@@ -372,7 +369,7 @@ impl App {
                 visible_split(self, tui, screen).and_then(|layout| layout.divider_area())
             {
                 let current = screen.right() - divider.right();
-                let total = self.workspace_chat_area(screen).width;
+                let total = screen.width;
                 let step = (i32::from(total) * percent.abs() + 50) / 100;
                 let next = sidebar_width(i32::from(current) + step * percent.signum(), total);
                 if next != current {
@@ -441,7 +438,6 @@ impl App {
                 let Some(target) = self.sidebar_resize_target() else {
                     return Ok(false);
                 };
-                let screen = self.workspace_chat_area(screen);
                 let width = screen.right() - divider.right();
                 self.divider_drag = Some(DividerDrag {
                     target,
@@ -459,18 +455,14 @@ impl App {
                 let Some(mut drag) = self.divider_drag.take() else {
                     return Ok(false);
                 };
-                let screen = tui.terminal.last_known_screen_size.into();
-                let workspace_chat = self.workspace_chat_area(screen);
-                let viewport = super::agents_overview_dock::conversation_viewport(
+                let screen = super::agents_overview_dock::conversation_viewport(
                     self,
-                    workspace_chat,
+                    tui.terminal.last_known_screen_size.into(),
                 );
-                if drag.matches(viewport, self) && visible_split(self, tui, viewport).is_some()
-                {
+                if drag.matches(screen, self) && visible_split(self, tui, screen).is_some() {
                     let width = i32::from(drag.initial_width) + i32::from(drag.press)
                         - i32::from(mouse.column);
-                    let total = drag.screen.width;
-                    let width = sidebar_width(width, total);
+                    let width = sidebar_width(width, screen.width);
                     let changed = drag.width != width;
                     drag.width = width;
                     if mouse.kind == Drag(Left) {
@@ -481,7 +473,7 @@ impl App {
                     } else if let Some(percent) = drag.percent()
                         && self.save_sidebar_width(percent).await
                     {
-                        self.exact_sidebar_width = Some((total, width));
+                        self.exact_sidebar_width = Some((screen.width, width));
                     }
                 }
             }
@@ -621,6 +613,6 @@ pub(super) fn paint_divider(
         } else {
             guide
         };
-        super::panel_separators::draw_vertical_at(frame.buffer, x, y, style, None);
+        frame.buffer[(x, y)].set_symbol("│").set_style(style);
     }
 }

@@ -10,7 +10,6 @@ mod extension;
 mod metrics;
 mod observation;
 mod parent_compaction;
-mod probe_shadow;
 mod request;
 mod sampler;
 mod score;

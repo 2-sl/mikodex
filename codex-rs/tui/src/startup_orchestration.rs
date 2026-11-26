@@ -783,7 +783,6 @@ pub(super) async fn run_main_inner(
             TerminalName::AppleTerminal => "apple_terminal",
             TerminalName::Ghostty => "ghostty",
             TerminalName::Rex => "rex",
-            TerminalName::Orca => "orca",
             TerminalName::Iterm2 => "iterm2",
             TerminalName::WarpTerminal => "warp",
             TerminalName::VsCode => "vscode",

@@ -3,25 +3,12 @@
 
 use serde::Serialize;
 
-/// Reasons a turn's critical path could not be measured.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum IncompleteReason {
-    CodeModeUnsupported,
-    UnsupportedOperation,
-    MissingTurnStart,
-    UnattributedReview,
-    UnattributedUserWait,
-    ForcedTeardown,
-    Unclassified,
-}
-
 /// Capture coverage for one finalized turn, independent of its completion status.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub enum TurnCriticalPath {
     #[default]
     Disabled,
-    Incomplete(Vec<IncompleteReason>),
+    Incomplete,
     Complete(TurnCriticalPathDurations),
 }
 
@@ -29,7 +16,7 @@ impl TurnCriticalPath {
     pub fn status(&self) -> &'static str {
         match self {
             Self::Disabled => "disabled",
-            Self::Incomplete(_) => "incomplete",
+            Self::Incomplete => "incomplete",
             Self::Complete(_) => "complete",
         }
     }
@@ -37,7 +24,7 @@ impl TurnCriticalPath {
     pub fn durations(&self) -> Option<&TurnCriticalPathDurations> {
         match self {
             Self::Complete(durations) => Some(durations),
-            Self::Disabled | Self::Incomplete(_) => None,
+            Self::Disabled | Self::Incomplete => None,
         }
     }
 }
@@ -74,8 +61,6 @@ pub(crate) struct CriticalPathEventParams {
     critical_path_tools_ms: Option<u64>,
     critical_path_overhead_ms: Option<u64>,
     critical_path_unknown_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    critical_path_incomplete_reasons: Vec<IncompleteReason>,
 }
 
 impl From<TurnCriticalPath> for CriticalPathEventParams {
@@ -94,10 +79,6 @@ impl From<TurnCriticalPath> for CriticalPathEventParams {
             critical_path_tools_ms: durations.map(|value| value.tools_ms),
             critical_path_overhead_ms: durations.map(|value| value.overhead_ms),
             critical_path_unknown_ms: durations.map(|value| value.unknown_ms),
-            critical_path_incomplete_reasons: match path {
-                TurnCriticalPath::Incomplete(reasons) => reasons,
-                TurnCriticalPath::Disabled | TurnCriticalPath::Complete(_) => Vec::new(),
-            },
         }
     }
 }

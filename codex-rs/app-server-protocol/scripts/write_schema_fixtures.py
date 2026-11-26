@@ -2,9 +2,8 @@
 
 import argparse
 import os
-import subprocess
-import sys
 from pathlib import Path
+import subprocess
 
 
 def main() -> None:
@@ -64,10 +63,11 @@ def main() -> None:
         sdk_root = workspace_root.parent / "sdk" / "python"
         subprocess.run(
             [
-                sys.executable,
-                str(workspace_root / "scripts" / "run_locked_python_tool.py"),
+                "uv",
+                "run",
                 "--project",
                 str(sdk_root),
+                "--frozen",
                 "--only-group",
                 "test",
                 "python",

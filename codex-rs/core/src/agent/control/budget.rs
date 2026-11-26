@@ -11,10 +11,10 @@ impl LocalAgentControl {
     pub(crate) fn record_rollout_budget_usage(
         &self,
         usage: Option<&TokenUsage>,
-        hook_units: f64,
+        hook_charge: codex_hooks::HookCharge,
     ) -> CodexResult<()> {
         // The caller keeps a consumed response even when its bill stops new work.
-        self.runtime.rollout_budget.record_usage(usage, hook_units)
+        self.runtime.rollout_budget.record_usage(usage, hook_charge)
     }
 
     pub(crate) fn pending_budget_reminder(

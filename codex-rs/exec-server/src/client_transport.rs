@@ -361,7 +361,6 @@ impl ExecServerClient {
         transport_params: ExecServerTransportParams,
         http_client_factory: HttpClientFactory,
         started: &mut Option<Instant>,
-        provisioning_deadline: &mut Option<Instant>,
     ) -> Result<Self, ExecServerError> {
         let (transport_params, deferred_readiness) = match transport_params {
             ExecServerTransportParams::Deferred(deferred) => {
@@ -370,31 +369,28 @@ impl ExecServerClient {
             transport_params => (transport_params, None),
         };
 
-        let effective_provisioning_deadline =
-            if let Some(mut readiness) = deferred_readiness {
-                let provisioning_result = readiness
-                    .wait_for(Option::is_some)
-                    .await
-                    .map_err(|_| {
-                        ExecServerError::Disconnected(
+        let provisioning_deadline = if let Some(mut readiness) = deferred_readiness {
+            let provisioning_result = readiness
+                .wait_for(Option::is_some)
+                .await
+                .map_err(|_| {
+                    ExecServerError::Disconnected(
                         "environment unavailable: environment provisioning ended before completion"
                             .to_string(),
                     )
-                    })?
-                    .clone()
-                    .ok_or_else(|| {
-                        ExecServerError::Disconnected(
+                })?
+                .clone()
+                .ok_or_else(|| {
+                    ExecServerError::Disconnected(
                         "environment unavailable: provisioning remained pending after completion"
                             .to_string(),
                     )
-                    })?;
-                provisioning_result.map_err(ExecServerError::ProvisioningFailed)?;
-                Some(*provisioning_deadline.get_or_insert_with(|| {
-                    Instant::now() + PROVISIONED_ENVIRONMENT_CONNECT_TIMEOUT
-                }))
-            } else {
-                None
-            };
+                })?;
+            provisioning_result.map_err(ExecServerError::ProvisioningFailed)?;
+            Some(Instant::now() + PROVISIONED_ENVIRONMENT_CONNECT_TIMEOUT)
+        } else {
+            None
+        };
 
         *started = Some(Instant::now());
         let websocket = match transport_params {
@@ -419,7 +415,7 @@ impl ExecServerClient {
                     &provider,
                     &identity,
                     http_client_factory.clone(),
-                    effective_provisioning_deadline,
+                    provisioning_deadline,
                 )
                 .await?;
                 let reconnect_strategy = ExecServerReconnectStrategy::NoiseRendezvous {
@@ -662,7 +658,6 @@ impl ExecServerClient {
             http_client_factory,
         } = args;
         let NoiseRendezvousConnectBundle {
-            http_headers,
             websocket_url,
             environment_id,
             executor_registration_id,
@@ -681,21 +676,6 @@ impl ExecServerClient {
                 url: diagnostic_url.clone(),
                 source,
             })?;
-        if !http_headers.is_empty() && request.uri().scheme_str() != Some("wss") {
-            return Err(ExecServerError::Protocol(
-                "Noise WebSocket admission headers require wss://".to_string(),
-            ));
-        }
-        for (name, value) in &http_headers {
-            if is_websocket_handshake_header(name) {
-                return Err(ExecServerError::Protocol(
-                    "invalid Noise WebSocket admission header".to_string(),
-                ));
-            }
-            let mut value = value.clone();
-            value.set_sensitive(true);
-            request.headers_mut().insert(name, value);
-        }
         request.headers_mut().extend(current_rendezvous_headers());
         let (stream, _) = timeout(
             connect_timeout,

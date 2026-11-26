@@ -224,12 +224,7 @@ fn prepare_root_assistant_messages(
             let text = retained
                 .and_then(|retained| root_retained_assistant(retained.message, budgeting))
                 .unwrap_or_else(|| match budgeting {
-                    ContextBudgeting::Fixed => {
-                        let bounded = crate::truncate_text(&text, MAX_ROOT_MESSAGE_TOKENS);
-                        missing_assistant_context |=
-                            retained.is_some() && bounded.len() < text.len();
-                        bounded
-                    }
+                    ContextBudgeting::Fixed => crate::truncate_text(&text, MAX_ROOT_MESSAGE_TOKENS),
                     ContextBudgeting::Elastic => text,
                 });
             let message = if order.is_some() {

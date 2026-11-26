@@ -123,7 +123,6 @@ fn evaluator_reuses_one_snapshot_across_tools() {
                         AppToolConfig {
                             enabled: Some(true),
                             approval_mode: Some(AppToolApproval::Prompt),
-                            approvals_reviewer: None,
                         },
                     )]),
                 }),
@@ -547,7 +546,6 @@ fn managed_approval_overrides_user_tool_approval() {
                         AppToolConfig {
                             enabled: None,
                             approval_mode: Some(AppToolApproval::Prompt),
-                            approvals_reviewer: None,
                         },
                     )]),
                 }),
@@ -700,7 +698,6 @@ fn per_tool_enable_overrides_app_level_hints() {
                         AppToolConfig {
                             enabled: Some(true),
                             approval_mode: None,
-                            approvals_reviewer: None,
                         },
                     )]),
                 }),
@@ -874,7 +871,6 @@ fn evaluator_matches_tool_title_for_user_config() {
                         AppToolConfig {
                             enabled: Some(true),
                             approval_mode: Some(AppToolApproval::Approve),
-                            approvals_reviewer: None,
                         },
                     )]),
                 }),

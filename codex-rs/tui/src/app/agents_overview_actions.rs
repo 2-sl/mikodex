@@ -8,7 +8,6 @@ use crate::app_event::AgentsOverviewAction;
 use crate::app_event::AppEvent;
 use crate::app_server_session::AppServerSession;
 use crate::backend_id::BackendId;
-use crate::bottom_pane::BottomPaneView;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::chatwidget::ChatWidget;
@@ -72,9 +71,7 @@ async fn run_lifecycle_modal<T>(
                 if matches!(&event, tui::TuiEvent::Paste(_) | tui::TuiEvent::FocusLost) {
                     app.cancel_pending_key_chord();
                 }
-                let dock_owns_input = app.workspace_center_owns_input();
-                let dashboard_active = dock_owns_input
-                    || app.agents_overview.sidebar_focused
+                let dashboard_active = app.agents_overview.sidebar_focused
                     || app
                         .chat_widget
                         .selected_index_for_active_view(AGENTS_OVERVIEW_VIEW_ID)
@@ -83,11 +80,7 @@ async fn run_lifecycle_modal<T>(
                     tui::TuiEvent::Key(key) if dashboard_active => {
                         if let Some(key) = app.route_key_chord_event(tui, key) {
                             let activation_key = app.routed_key_activation.take();
-                            if dock_owns_input {
-                                if let Some(view) = &mut app.agents_overview.workspace.view {
-                                    view.handle_key_event(key);
-                                }
-                            } else if app.agents_overview.sidebar_focused
+                            if app.agents_overview.sidebar_focused
                                 && app.chat_widget.no_modal_or_popup_active()
                             {
                                 app.handle_agents_overview_sidebar_key_event(
@@ -102,15 +95,7 @@ async fn run_lifecycle_modal<T>(
                         tui.frame_requester().schedule_frame();
                     }
                     tui::TuiEvent::Paste(text) if dashboard_active => {
-                        if dock_owns_input {
-                            if let Some(view) = &mut app.agents_overview.workspace.view {
-                                view.handle_paste(text);
-                            }
-                        } else if app.agents_overview.sidebar_focused {
-                            if !app.handle_agents_overview_sidebar_paste(text.clone()) {
-                                app.chat_widget.handle_paste(text);
-                            }
-                        } else {
+                        if !app.handle_agents_overview_sidebar_paste(text.clone()) {
                             app.chat_widget.handle_paste(text);
                         }
                         tui.frame_requester().schedule_frame();
@@ -429,10 +414,22 @@ impl App {
             self.cancel_agents_overview_refresh(app_server.backend_id());
         }
         if detach_primary {
-            self.agents_overview.selection_after_removal = self
-                .agents_overview
-                .selection_after_removal
-                .or_else(|| self.overview_selected_thread_id());
+            self.agents_overview.selection_after_removal =
+                self.agents_overview.selection_after_removal.or_else(|| {
+                    self.agents_overview
+                        .sidebar_view
+                        .as_ref()
+                        .and_then(
+                            super::agents_overview_view::AgentsOverviewView::selected_thread_id,
+                        )
+                        .or_else(|| {
+                            self.chat_widget
+                                .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
+                                .and_then(|index| {
+                                    self.agents_overview.visible_thread_ids.get(index).copied()
+                                })
+                        })
+                });
             self.reset_for_thread_switch(tui)?;
             self.pending_thread_switch_resets += 1;
             self.app_event_tx

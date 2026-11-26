@@ -14,14 +14,20 @@ fn cloud_validation_checks_network_spellings_per_fragment() {
         let conflicting = format!("[{alias}]\nenabled = true");
         for (contents, expected) in [
             (vec![format!("{nested}\n{top_level}")], Ok(())),
-            (vec![nested.to_owned(), conflicting.clone()], Ok(())),
-            (vec![conflicting.clone(), nested.to_owned()], Ok(())),
+            (
+                vec![nested.to_owned(), conflicting.clone()],
+                Err(CloudConfigBundleLoadErrorCode::InvalidBundle),
+            ),
+            (
+                vec![conflicting.clone(), nested.to_owned()],
+                Err(CloudConfigBundleLoadErrorCode::InvalidBundle),
+            ),
             (
                 vec![
                     "[permissions.network]\ndenied_domains = ['shared.test']".to_string(),
                     format!("[{alias}]\nallowed_domains = ['shared.test']"),
                 ],
-                Ok(()),
+                Err(CloudConfigBundleLoadErrorCode::InvalidBundle),
             ),
             (
                 vec![format!(

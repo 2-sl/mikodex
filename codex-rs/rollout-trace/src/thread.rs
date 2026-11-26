@@ -240,11 +240,49 @@ impl ThreadTraceContext {
         );
     }
 
-    /// Records turn lifecycle from existing protocol events.
+    /// Records turn lifecycle and history acceptance from existing protocol events.
     pub fn record_codex_turn_event(&self, default_turn_id: &str, event: &EventMsg) {
         let ThreadTraceContextState::Enabled(context) = &self.state else {
             return;
         };
+        if let EventMsg::RawResponseItem(event) = event {
+            let Some(item_id) = event.item.id().map(ToString::to_string) else {
+                return;
+            };
+            let accepted = move |agent_message_payload, tool_output_payload| {
+                RawTraceEventPayload::HistoryItemAccepted {
+                    item_id,
+                    agent_message_payload,
+                    tool_output_payload,
+                }
+            };
+            let turn = RawTraceEventContext::turn(&context.thread_id, default_turn_id);
+            let is_delivery = matches!(event.item, ResponseItem::AgentMessage { .. });
+            if is_delivery
+                || matches!(
+                    event.item,
+                    ResponseItem::FunctionCallOutput { .. }
+                        | ResponseItem::CustomToolCallOutput { .. }
+                )
+            {
+                // Publish the receipt and its history event together, in worker order.
+                let _ = context.writer.event_with_payload(
+                    turn,
+                    RawPayloadKind::ProtocolEvent,
+                    &event.item,
+                    move |payload| {
+                        if is_delivery {
+                            accepted(Some(payload), None)
+                        } else {
+                            accepted(None, Some(payload))
+                        }
+                    },
+                );
+            } else {
+                let _ = context.writer.enqueue_event(turn, accepted(None, None));
+            }
+            return;
+        }
         let Some(trace_event) =
             codex_turn_trace_event(context.thread_id.clone(), default_turn_id, event)
         else {
@@ -275,7 +313,7 @@ impl ThreadTraceContext {
                 kind,
                 payload,
             } => {
-                let tool_call_id = ToolCallId::from(tool_call_id);
+                let tool_call_id = tool_call_id.to_owned();
                 let _ = context.writer.event_with_payload(
                     envelope,
                     RawPayloadKind::ToolRuntimeEvent,
@@ -292,7 +330,7 @@ impl ThreadTraceContext {
                 status,
                 payload,
             } => {
-                let tool_call_id = ToolCallId::from(tool_call_id);
+                let tool_call_id = tool_call_id.to_owned();
                 let _ = context.writer.event_with_payload(
                     envelope,
                     RawPayloadKind::ToolRuntimeEvent,
@@ -312,7 +350,7 @@ impl ThreadTraceContext {
     pub fn record_mcp_tool_result(
         &self,
         codex_turn_id: &str,
-        tool_call_id: &ToolCallId,
+        tool_call_id: &str,
         result: &Result<CallToolResult, String>,
     ) {
         let ThreadTraceContextState::Enabled(context) = &self.state else {
@@ -322,7 +360,7 @@ impl ThreadTraceContext {
         struct Payload<'a> {
             result: &'a Result<CallToolResult, String>,
         }
-        let tool_call_id = tool_call_id.clone();
+        let tool_call_id = tool_call_id.to_owned();
         let status = if result.is_ok() {
             ExecutionStatus::Completed
         } else {
@@ -340,54 +378,6 @@ impl ThreadTraceContext {
         );
     }
 
-    /// Records the accepted wire item and, for agent-tool deliveries, its originating call.
-    pub fn record_history_item_accepted(
-        &self,
-        default_turn_id: &str,
-        item: &ResponseItem,
-        source_tool_call_id: Option<&ToolCallId>,
-    ) {
-        let ThreadTraceContextState::Enabled(context) = &self.state else {
-            return;
-        };
-        let Some(item_id) = item.id().map(ToString::to_string) else {
-            return;
-        };
-        let source_tool_call_id = source_tool_call_id.cloned();
-        let accepted = move |agent_message_payload, tool_output_payload| {
-            RawTraceEventPayload::HistoryItemAccepted {
-                item_id,
-                source_tool_call_id,
-                agent_message_payload,
-                tool_output_payload,
-            }
-        };
-        let turn = RawTraceEventContext::turn(&context.thread_id, default_turn_id);
-        let is_delivery = matches!(item, ResponseItem::AgentMessage { .. });
-        if is_delivery
-            || matches!(
-                item,
-                ResponseItem::FunctionCallOutput { .. } | ResponseItem::CustomToolCallOutput { .. }
-            )
-        {
-            // Publish the receipt and its history event together, in worker order.
-            let _ = context.writer.event_with_payload(
-                turn,
-                RawPayloadKind::ProtocolEvent,
-                item,
-                move |payload| {
-                    if is_delivery {
-                        accepted(Some(payload), None)
-                    } else {
-                        accepted(None, Some(payload))
-                    }
-                },
-            );
-        } else {
-            let _ = context.writer.enqueue_event(turn, accepted(None, None));
-        }
-    }
-
     /// Records the exec actually selected by stdin, since its process handle can be reused.
     pub fn record_stdin_target(
         &self,
@@ -401,8 +391,8 @@ impl ThreadTraceContext {
         context.append_with_context_best_effort(
             codex_turn_id.to_string(),
             RawTraceEventPayload::StdinTargetResolved {
-                tool_call_id: tool_call_id.into(),
-                exec_tool_call_id: exec_tool_call_id.into(),
+                tool_call_id: tool_call_id.to_string(),
+                exec_tool_call_id: exec_tool_call_id.to_string(),
             },
         );
     }
@@ -564,14 +554,14 @@ impl ThreadTraceContext {
     /// Dispatch-level tool IDs remain compact and UI-friendly. This UUID is
     /// deliberately separate: it is only for cross-process log joins where a
     /// rollout-local counter would collide across samples.
-    pub fn start_mcp_call_trace(&self, tool_call_id: &ToolCallId) -> McpCallTraceContext {
+    pub fn start_mcp_call_trace(&self, tool_call_id: impl Into<ToolCallId>) -> McpCallTraceContext {
         let ThreadTraceContextState::Enabled(context) = &self.state else {
             return McpCallTraceContext::disabled();
         };
         let mcp_call_id = Uuid::new_v4().to_string();
         let trace = McpCallTraceContext::enabled(mcp_call_id.clone());
         context.append_best_effort(RawTraceEventPayload::McpToolCallCorrelationAssigned {
-            tool_call_id: tool_call_id.clone(),
+            tool_call_id: tool_call_id.into(),
             mcp_call_id,
         });
         trace

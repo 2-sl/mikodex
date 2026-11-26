@@ -88,11 +88,28 @@ pub(super) fn running_in_vscode_terminal() -> bool {
 }
 
 pub(crate) fn detect_vscode_terminal() -> VscodeDetection {
-    if terminal_info().name == TerminalName::VsCode {
+    if term_program_is_vscode(std::env::var("TERM_PROGRAM").ok().as_deref()) {
+        return VscodeDetection::VsCode;
+    }
+    vscode_terminal_detected(
+        std::env::var("TERM_PROGRAM").ok().as_deref(),
+        windows_vscode_detection(),
+    )
+}
+
+fn vscode_terminal_detected(
+    linux_term_program: Option<&str>,
+    windows_detection: VscodeDetection,
+) -> VscodeDetection {
+    if term_program_is_vscode(linux_term_program) {
         VscodeDetection::VsCode
     } else {
-        windows_vscode_detection()
+        windows_detection
     }
+}
+
+fn term_program_is_vscode(value: Option<&str>) -> bool {
+    value.is_some_and(|value| value.eq_ignore_ascii_case("vscode"))
 }
 
 fn windows_vscode_detection() -> VscodeDetection {
@@ -181,7 +198,7 @@ fn read_windows_vscode_detection_with_timeout(
         .lines()
         .find_map(|line| line.trim_end_matches('\r').strip_prefix("TERM_PROGRAM="))
         .filter(|value| !value.trim().is_empty());
-    if term_program.is_some_and(|value| value.eq_ignore_ascii_case("vscode")) {
+    if term_program_is_vscode(term_program) {
         VscodeDetection::VsCode
     } else {
         VscodeDetection::Other
@@ -374,6 +391,7 @@ mod tests {
     use super::parse_bool_env;
     use super::tmux_session_detected;
     use super::tmux_should_enable_modify_other_keys_for;
+    use super::vscode_terminal_detected;
     use codex_terminal_detection::TerminalName;
     use crossterm::Command;
     use crossterm::event::PushKeyboardEnhancementFlags;
@@ -517,6 +535,24 @@ mod tests {
                 /*is_wsl*/ false,
                 detection
             ));
+        }
+    }
+
+    #[test]
+    fn vscode_terminal_detection_uses_linux_and_windows_term_program() {
+        for detection in [
+            VscodeDetection::VsCode,
+            VscodeDetection::Other,
+            VscodeDetection::Unknown,
+        ] {
+            assert_eq!(
+                vscode_terminal_detected(Some("vscode"), detection),
+                VscodeDetection::VsCode,
+            );
+            assert_eq!(
+                vscode_terminal_detected(/*linux_term_program*/ None, detection),
+                detection,
+            );
         }
     }
 

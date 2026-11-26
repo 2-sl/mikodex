@@ -74,11 +74,7 @@ impl AgentControl for LocalAgentControl {
             } = request;
             let input = match input {
                 AgentInput::UserInput(input) => SpawnInitialInput::UserInput(input),
-                AgentInput::Message {
-                    message,
-                    mode,
-                    source_tool_call_id,
-                } => {
+                AgentInput::Message { message, mode } => {
                     if mode != MessageDeliveryMode::TriggerTurn {
                         return Err(CodexErr::InvalidRequest(
                             "spawn input must start the child turn".to_string(),
@@ -98,11 +94,7 @@ impl AgentControl for LocalAgentControl {
                         })?;
                     SpawnInitialInput::InterAgentCommunication(
                         message.into_communication(author, recipient, mode),
-                        AgentCommunicationContext {
-                            kind: AgentCommunicationKind::Spawn,
-                            sender_thread_id: caller,
-                            source_tool_call_id,
-                        },
+                        AgentCommunicationContext::new(AgentCommunicationKind::Spawn, caller),
                     )
                 }
             };
@@ -132,11 +124,7 @@ impl AgentControl for LocalAgentControl {
                     let submission_id = self.send_input(target, input, start_options).await?;
                     (receiver.unwrap_or_default(), submission_id)
                 }
-                AgentInput::Message {
-                    message,
-                    mode,
-                    source_tool_call_id,
-                } => {
+                AgentInput::Message { message, mode } => {
                     let receiver = self.runtime.ensure_agent_known(target)?;
                     let author = self
                         .runtime
@@ -180,11 +168,7 @@ impl AgentControl for LocalAgentControl {
                         .send_inter_agent_communication(
                             target,
                             communication,
-                            AgentCommunicationContext {
-                                kind,
-                                sender_thread_id: caller,
-                                source_tool_call_id,
-                            },
+                            AgentCommunicationContext::new(kind, caller),
                             start_options,
                         )
                         .await?;
@@ -306,9 +290,9 @@ impl AgentControl for LocalAgentControl {
     fn record_usage(
         &self,
         usage: Option<TokenUsage>,
-        hook_units: f64,
+        hook_charge: codex_hooks::HookCharge,
     ) -> BoxFuture<'_, Result<()>> {
-        Box::pin(async move { self.record_rollout_budget_usage(usage.as_ref(), hook_units) })
+        Box::pin(async move { self.record_rollout_budget_usage(usage.as_ref(), hook_charge) })
     }
 
     fn turn_finished<'a>(

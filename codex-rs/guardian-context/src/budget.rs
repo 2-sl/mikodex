@@ -199,8 +199,7 @@ impl ElasticBudgetConfig {
         Ok(())
     }
 
-    /// Returns the configured limits or the default for an omitted section.
-    pub fn section_limits(&self, section: ElasticSection) -> ElasticSectionLimits {
+    pub(crate) fn section_limits(&self, section: ElasticSection) -> ElasticSectionLimits {
         self.sections.get(&section).copied().unwrap_or_else(|| {
             let entries = crate::ContextProfile::synchronous().transcript.entry_limits;
             let tokens = match section {
@@ -231,7 +230,7 @@ impl ElasticBudgetConfig {
 /// complete selected duplicates. Only the headroom between each minimum and
 /// maximum is scaled to the remaining budget.
 /// Actual request admission still accounts for history, framing and exact actions.
-/// The shared recorder also uses the retained-instructions entry limit.
+/// These settings do not change storage bounds or activate elastic allocation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct ElasticSectionLimits {
     min_total_section_tokens: usize,
@@ -500,13 +499,6 @@ fn compaction_ciphertext(item: &ResponseItem) -> Option<&str> {
     }
 }
 
-/// Encoded bytes available to an Elastic sender snapshot after message and text framing.
-pub fn elastic_sender_text_entry_bytes(tokens: usize) -> usize {
-    TruncationPolicy::Tokens(tokens.saturating_sub(content_framing_tokens(/*item_count*/ 1)))
-        .byte_budget()
-        .saturating_sub(input_text_framing_bytes())
-}
-
 pub(super) fn section_content_tokens(item: &SectionContent) -> usize {
     match item {
         SectionContent::Transcript(record) => record.rendered().tokens,
@@ -520,22 +512,17 @@ pub(super) fn content_tokens(item: &ContentItem) -> usize {
         let extra_parts = crate::composition::bounded_text_parts(text)
             .count()
             .saturating_sub(1);
-        bytes = bytes.saturating_add(
-            extra_parts.saturating_mul(input_text_framing_bytes().saturating_add(1)),
-        );
+        let framing = ByteCount::measure(|counter| {
+            serde_json::to_writer(
+                counter,
+                &ContentItem::InputText {
+                    text: String::new(),
+                },
+            )
+        });
+        bytes = bytes.saturating_add(extra_parts.saturating_mul(framing.saturating_add(1)));
     }
     adjusted_tokens(bytes, std::slice::from_ref(item))
-}
-
-fn input_text_framing_bytes() -> usize {
-    ByteCount::measure(|counter| {
-        serde_json::to_writer(
-            counter,
-            &ContentItem::InputText {
-                text: String::new(),
-            },
-        )
-    })
 }
 
 pub(super) fn section_tokens(section: &SectionOutput) -> usize {

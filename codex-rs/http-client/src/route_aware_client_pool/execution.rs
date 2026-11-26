@@ -21,7 +21,6 @@ use crate::RouteFailureClass;
 use crate::client::TransportClient;
 use crate::client::apply_default_headers;
 use crate::request_draft::RequestDraft;
-use crate::request_draft::prevent_body_redirects;
 use crate::route_aware_redirect::MAX_REDIRECTS;
 use crate::route_aware_redirect::insert_referer;
 use crate::route_aware_redirect::is_redirect;
@@ -105,12 +104,7 @@ impl RouteAwareClientPool {
                     .await?;
                 client.request_logging = self.client_builder.request_logging;
                 if let Some(headers) = draft_headers.take() {
-                    request = RequestDraft {
-                        request,
-                        headers,
-                        private_body: draft.private_body,
-                    }
-                    .build(&client)?;
+                    request = RequestDraft { request, headers }.build(&client)?;
                     request_url = request.url().to_string();
                     apply_default_headers(request.headers_mut(), &self.default_headers);
                 }
@@ -128,11 +122,6 @@ impl RouteAwareClientPool {
                 let version = request.version();
                 let timeout = request.timeout().copied();
                 let replay = request.try_clone();
-                let private_body = draft.private_body && redirects == 0;
-                if private_body {
-                    // Connection recovery uses the original URL and clients with redirects disabled.
-                    prevent_body_redirects(&mut request);
-                }
                 let result = if follows_redirects_manually {
                     client.execute_without_request_logging(request).await
                 } else {
@@ -185,7 +174,7 @@ impl RouteAwareClientPool {
                             headers,
                             version,
                             timeout,
-                            replay.filter(|_| !private_body),
+                            replay,
                             next_url,
                         )
                     })

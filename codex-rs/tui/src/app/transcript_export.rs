@@ -126,7 +126,7 @@ pub(super) async fn load_export_transcript(
         } else {
             cells.extend(thread_items_to_transcript_cells(
                 Some(thread_id),
-                thread.cwd.as_path(),
+                &thread.cwd,
                 [item],
                 visibility,
                 config,

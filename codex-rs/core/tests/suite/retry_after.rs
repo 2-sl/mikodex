@@ -1445,9 +1445,6 @@ async fn assert_terminal_failure(
 }
 
 #[test_case::test_case("flex_unavailable", 429, CodexErrorInfo::FlexUnavailable, "Flex capacity unavailable."; "flex")]
-#[test_case::test_case("api_key_spend_limit_exceeded", 429, CodexErrorInfo::ApiKeySpendLimitExceeded, "Your API key has reached its spend limit."; "api_key_spend_limit_exceeded")]
-#[test_case::test_case("project_spend_limit_exceeded", 429, CodexErrorInfo::ProjectSpendLimitExceeded, "Your API project has reached its spend limit."; "project_spend_limit_exceeded")]
-#[test_case::test_case("organization_spend_limit_exceeded", 429, CodexErrorInfo::OrganizationSpendLimitExceeded, "Your API organization has reached its spend limit."; "organization_spend_limit_exceeded")]
 #[test_case::test_case("model_not_found", 404, CodexErrorInfo::ModelNotFound, "Access to this deployment ended."; "model")]
 #[test_case::test_case("inference_hook_denied", 403, CodexErrorInfo::InferenceHookDenied, "Blocked by the workspace hook."; "inference_hook_denied")]
 #[tokio::test(flavor = "current_thread")]
@@ -1460,7 +1457,7 @@ async fn http_and_sse_provider_errors_are_terminal(
     skip_if_no_network!(Ok(()));
 
     let error = json!({
-        "code": code, "message": message, "headers": {"retry-after": "300"},
+        "code": code, "message": message
     });
     for response in [
         ResponseTemplate::new(status)
@@ -1469,9 +1466,7 @@ async fn http_and_sse_provider_errors_are_terminal(
         responses::sse_response(responses::sse(vec![
             json!({"type": "error", "error": error}),
         ])),
-        responses::sse_response(responses::sse(vec![
-            json!({"type": "response.failed", "response": {"error": error}}),
-        ])),
+        responses::sse_response(responses::sse_failed("failed", code, message)),
     ] {
         let server = responses::start_mock_server().await;
         let response_mock = responses::mount_response_once(&server, response).await;
@@ -1508,9 +1503,6 @@ async fn http_and_sse_provider_errors_are_terminal(
 }
 
 #[test_case::test_case("flex_unavailable", 429, CodexErrorInfo::FlexUnavailable, "Flex capacity unavailable."; "flex")]
-#[test_case::test_case("api_key_spend_limit_exceeded", 429, CodexErrorInfo::ApiKeySpendLimitExceeded, "Your API key has reached its spend limit."; "api_key_spend_limit_exceeded")]
-#[test_case::test_case("project_spend_limit_exceeded", 429, CodexErrorInfo::ProjectSpendLimitExceeded, "Your API project has reached its spend limit."; "project_spend_limit_exceeded")]
-#[test_case::test_case("organization_spend_limit_exceeded", 429, CodexErrorInfo::OrganizationSpendLimitExceeded, "Your API organization has reached its spend limit."; "organization_spend_limit_exceeded")]
 #[test_case::test_case("model_not_found", 404, CodexErrorInfo::ModelNotFound, "Access to this deployment ended."; "model")]
 #[test_case::test_case("inference_hook_denied", 403, CodexErrorInfo::InferenceHookDenied, "Blocked by the workspace hook."; "inference_hook_denied")]
 #[tokio::test(flavor = "current_thread")]
@@ -1523,11 +1515,11 @@ async fn websocket_provider_errors_are_terminal(
     skip_if_no_network!(Ok(()));
 
     let error = json!({
-        "code": code, "message": message, "headers": {"retry-after": "300"},
+        "code": code, "message": message
     });
     for event in [
         json!({"type": "error", "status": status, "headers": {"retry-after": "300"}, "error": error}),
-        json!({"type": "error", "error": error}),
+        json!({"type": "error", "error": {"code": code, "message": message, "headers": {"retry-after": "300"}}}),
         json!({"type": "response.failed", "response": {"error": error}}),
     ] {
         let server = responses::start_websocket_server(vec![vec![

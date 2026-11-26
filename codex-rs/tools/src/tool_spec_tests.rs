@@ -163,17 +163,7 @@ fn responses_lite_function(name: &str) -> ResponsesApiTool {
 
 #[test]
 fn responses_lite_groups_default_function_and_custom_tools() {
-    let custom = FreeformTool {
-        name: "exec".to_string(),
-        description: "Run code".to_string(),
-        defer_loading: None,
-        format: FreeformToolFormat {
-            r#type: "grammar".to_string(),
-            syntax: "lark".to_string(),
-            definition: "start: /.+/".to_string(),
-        },
-    };
-    let specs = [
+    let tools = create_tools_json_for_responses_lite(&[
         ToolSpec::ToolSearch {
             execution: "client".to_string(),
             description: "Search tools".to_string(),
@@ -191,7 +181,16 @@ fn responses_lite_groups_default_function_and_custom_tools() {
                 responses_lite_function("edit"),
             )],
         }),
-        ToolSpec::Freeform(custom.clone()),
+        ToolSpec::Freeform(FreeformTool {
+            name: "exec".to_string(),
+            description: "Run code".to_string(),
+            defer_loading: None,
+            format: FreeformToolFormat {
+                r#type: "grammar".to_string(),
+                syntax: "lark".to_string(),
+                definition: "start: /.+/".to_string(),
+            },
+        }),
         ToolSpec::Namespace(ResponsesApiNamespace {
             name: "functions".to_string(),
             description: "Existing default tools".to_string(),
@@ -200,28 +199,30 @@ fn responses_lite_groups_default_function_and_custom_tools() {
             )],
         }),
         ToolSpec::Function(responses_lite_function("last")),
-    ];
-    let tools =
-        create_tools_json_for_responses_lite(&specs).expect("serialize Responses Lite tools");
-    let expected = create_tools_json_for_responses_api(&[
-        specs[0].clone(),
-        ToolSpec::Namespace(ResponsesApiNamespace {
-            name: "functions".to_string(),
-            description: "Existing default tools".to_string(),
-            tools: vec![
-                ResponsesApiNamespaceTool::Function(responses_lite_function("lookup_order")),
-                ResponsesApiNamespaceTool::Custom(custom),
-                ResponsesApiNamespaceTool::Function(responses_lite_function("existing")),
-                ResponsesApiNamespaceTool::Function(responses_lite_function("last")),
-            ],
-        }),
-        specs[2].clone(),
     ])
-    .expect("serialize expected tool namespaces");
-    // These serialized bytes contribute to the additional_tools item ID.
+    .expect("serialize Responses Lite tools");
+
+    assert_eq!(tools.len(), 3);
+    assert_eq!(tools[0]["type"], "tool_search");
+    assert_eq!(tools[2]["type"], "namespace");
+    assert_eq!(tools[2]["name"], "editor");
+    assert_eq!(tools[2]["tools"][0]["name"], "edit");
+    assert_eq!(tools[1]["type"], "namespace");
+    assert_eq!(tools[1]["name"], "functions");
+    assert_eq!(tools[1]["description"], "Existing default tools");
     assert_eq!(
-        serde_json::to_string(&tools).unwrap(),
-        serde_json::to_string(&expected).unwrap(),
+        tools[1]["tools"]
+            .as_array()
+            .expect("functions namespace should contain tools")
+            .iter()
+            .map(|tool| (tool["type"].as_str(), tool["name"].as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (Some("function"), Some("lookup_order")),
+            (Some("custom"), Some("exec")),
+            (Some("function"), Some("existing")),
+            (Some("function"), Some("last")),
+        ]
     );
 }
 

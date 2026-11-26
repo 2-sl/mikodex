@@ -276,7 +276,7 @@ impl AgentControl for TestAgentControl {
     fn record_usage(
         &self,
         _usage: Option<TokenUsage>,
-        _hook_units: f64,
+        _hook_charge: codex_core::HookCharge,
     ) -> BoxFuture<'_, CodexResult<()>> {
         Box::pin(async { Ok(()) })
     }
@@ -723,11 +723,7 @@ async fn hosted_child_persists_inherited_session_id(
                 })
                 .await?;
             manager
-                .fork_prepared_thread(
-                    child_options,
-                    prepared,
-                    codex_thread_store::InheritedHistoryVisibility::Full,
-                )
+                .fork_prepared_thread(child_options, prepared)
                 .await?
         }
     };

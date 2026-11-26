@@ -645,7 +645,6 @@ pub(crate) async fn create_ready_async_managed_client(tools: Vec<ToolInfo>) -> A
         codex_apps_tools_cache_context: None,
         tool_catalog_cache_context: None,
         startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-        startup_warning_emitted: None,
         connection_slot: None,
         startup_reconnect: None,
         cancel_token: CancellationToken::new(),
@@ -933,7 +932,6 @@ fn create_gated_async_managed_client(
             codex_apps_tools_cache_context: None,
             tool_catalog_cache_context: None,
             startup_complete,
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: None,
             cancel_token: CancellationToken::new(),
@@ -1008,7 +1006,6 @@ pub(crate) async fn create_test_manager_with_ready_apps_client(
             codex_apps_tools_cache_context: Some(cache_context),
             tool_catalog_cache_context: None,
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: None,
             cancel_token: CancellationToken::new(),
@@ -1066,7 +1063,6 @@ fn create_test_manager_with_failed_apps_startup(
             codex_apps_tools_cache_context: Some(cache_context),
             tool_catalog_cache_context: None,
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: Some(Arc::new(CodexAppsStartupReconnect::new(reconnect_factory))),
             cancel_token: CancellationToken::new(),
@@ -2631,7 +2627,6 @@ async fn list_all_tools_uses_shared_codex_apps_cache_while_client_is_pending() {
             codex_apps_tools_cache_context: Some(cache_context),
             tool_catalog_cache_context: None,
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: None,
             cancel_token: CancellationToken::new(),
@@ -2711,7 +2706,6 @@ async fn capture_binding_preserves_ready_client_catalog_and_shares_prepared_meta
             codex_apps_tools_cache_context: Some(cache_context),
             tool_catalog_cache_context: None,
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: None,
             cancel_token: CancellationToken::new(),
@@ -3169,7 +3163,6 @@ async fn list_available_server_infos_uses_cache_while_client_is_pending() {
             codex_apps_tools_cache_context: None,
             tool_catalog_cache_context: None,
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: None,
             cancel_token: CancellationToken::new(),
@@ -3269,7 +3262,6 @@ async fn capture_binding_exposes_cached_tools_before_startup() {
             codex_apps_tools_cache_context: Some(cache_context),
             tool_catalog_cache_context: None,
             startup_complete,
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: None,
             cancel_token: CancellationToken::new(),
@@ -3379,7 +3371,6 @@ async fn capture_binding_skips_pending_optional_servers_after_configured_shared_
                 codex_apps_tools_cache_context: None,
                 tool_catalog_cache_context: None,
                 startup_complete: Arc::new(AtomicBool::new(false)),
-                startup_warning_emitted: None,
                 connection_slot: None,
                 startup_reconnect: None,
                 cancel_token: CancellationToken::new(),
@@ -3671,7 +3662,6 @@ async fn capture_binding_shares_optional_startup_grace_across_connection_sets() 
                 codex_apps_tools_cache_context: None,
                 tool_catalog_cache_context: Some(cache_context.clone()),
                 startup_complete: Arc::new(AtomicBool::new(false)),
-                startup_warning_emitted: None,
                 connection_slot: None,
                 startup_reconnect: None,
                 cancel_token: CancellationToken::new(),
@@ -4115,47 +4105,6 @@ async fn capture_binding_resolves_concurrently_and_rechecks_cached_clients() {
     );
 }
 
-#[tokio::test(start_paused = true)]
-async fn capture_binding_does_not_warn_for_optional_server_ready_before_catalog_capture() {
-    let (mut optional, optional_started, release_optional) = create_gated_async_managed_client(
-        create_test_managed_client(vec![create_test_tool("optional", "ready_tool")]).await,
-    );
-    let warning_emitted = Arc::new(AtomicBool::new(false));
-    optional.startup_warning_emitted = Some(Arc::clone(&warning_emitted));
-    let (required, required_started, release_required) =
-        create_gated_async_managed_client(create_test_managed_client(vec![]).await);
-    let mut manager = McpConnectionSet::new_uninitialized(
-        &Constrained::allow_any(AskForApproval::OnRequest),
-        &Constrained::allow_any(PermissionProfile::default()),
-        /*prefix_mcp_tool_names*/ true,
-    );
-    manager.insert_test_client("optional", optional);
-    manager.insert_test_client("required", required);
-    manager.required_servers = vec![McpServerKey::unscoped("required")];
-    let manager = Arc::new(manager);
-    let manager_for_startup = Arc::clone(&manager);
-    let startup = tokio::spawn(async move {
-        manager_for_startup
-            .wait_for_server_startup(&McpServerKey::unscoped("optional"))
-            .await
-    });
-    optional_started.await.expect("optional startup began");
-    let binding = capture_binding(&manager);
-    tokio::pin!(binding);
-    assert!(futures::poll!(&mut binding).is_pending());
-    required_started.await.expect("required startup began");
-    tokio::time::advance(crate::mcp::DEFAULT_OPTIONAL_MCP_STARTUP_GRACE).await;
-    assert!(futures::poll!(&mut binding).is_pending());
-    release_optional.send(()).expect("release optional startup");
-    assert!(startup.await.expect("optional startup task"));
-    release_required.send(()).expect("release required startup");
-    assert_eq!(
-        model_tool_names(binding.await.tools()),
-        HashSet::from([ToolName::namespaced("mcp__optional", "ready_tool")])
-    );
-    assert!(!warning_emitted.load(Ordering::Relaxed));
-}
-
 #[tokio::test]
 async fn list_all_tools_applies_legacy_mcp_prefix_by_default() {
     let managed_client =
@@ -4425,7 +4374,6 @@ async fn list_all_tools_blocks_while_client_is_pending_without_cached_tools() {
             codex_apps_tools_cache_context: None,
             tool_catalog_cache_context: None,
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: None,
             cancel_token: CancellationToken::new(),
@@ -4486,7 +4434,6 @@ async fn shutdown_cancels_pending_tool_listing() {
             codex_apps_tools_cache_context: None,
             tool_catalog_cache_context: None,
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: None,
             cancel_token,
@@ -4536,7 +4483,6 @@ async fn shutdown_continues_after_caller_is_aborted() {
             codex_apps_tools_cache_context: None,
             tool_catalog_cache_context: None,
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: None,
             cancel_token: CancellationToken::new(),
@@ -4592,7 +4538,6 @@ async fn list_all_tools_does_not_block_when_shared_codex_apps_cache_is_empty() {
             codex_apps_tools_cache_context: Some(cache_context),
             tool_catalog_cache_context: None,
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: None,
             cancel_token: CancellationToken::new(),
@@ -4650,7 +4595,6 @@ async fn list_all_tools_uses_shared_codex_apps_cache_when_client_startup_fails()
             codex_apps_tools_cache_context: Some(cache_context),
             tool_catalog_cache_context: None,
             startup_complete,
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: None,
             cancel_token: CancellationToken::new(),
@@ -6368,7 +6312,6 @@ async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> a
                     codex_apps_tools_cache_context: None,
                     tool_catalog_cache_context: None,
                     startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-                    startup_warning_emitted: None,
                     connection_slot: None,
                     startup_reconnect: None,
                     cancel_token: CancellationToken::new(),
@@ -7217,7 +7160,6 @@ async fn reconciliation_replaces_closed_connections() -> anyhow::Result<()> {
             codex_apps_tools_cache_context: None,
             tool_catalog_cache_context: None,
             startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            startup_warning_emitted: None,
             connection_slot: None,
             startup_reconnect: None,
             cancel_token: CancellationToken::new(),

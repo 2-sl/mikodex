@@ -3,8 +3,6 @@
 use super::*;
 use crate::history_cell::StartupWarningsCell;
 use codex_app_server_protocol::McpServerStartupFailureReason;
-use codex_utils_path_uri::LegacyAppPathString;
-use codex_utils_path_uri::PathConvention;
 use pretty_assertions::assert_eq;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -270,16 +268,10 @@ async fn startup_skill_load_order_preserves_runtime_error_recurrence() -> Result
         let (mut app, mut events, _op_rx) = make_test_app_with_channels().await;
         let mut tui = crate::tui::test_support::make_test_tui()?;
         let mut server = start_config_write_test_app_server(&app).await?;
-        let server_cwd = r"/\repo";
-        let cwd =
-            LegacyAppPathString::from_string(server_cwd).to_path_uri(PathConvention::Posix)?;
-        let mut session = test_thread_session(ThreadId::new(), app.config.cwd.to_path_buf());
-        session.cwd = cwd.clone();
-        app.chat_widget.app_server_path_convention = Some(PathConvention::Posix);
-        app.chat_widget.handle_thread_session_quiet(session);
+        let cwd = app.config.cwd.to_path_buf();
         let response = SkillsListResponse {
             data: vec![codex_app_server_protocol::SkillsListEntry {
-                cwd: PathBuf::from(server_cwd),
+                cwd: cwd.clone(),
                 skills: vec![],
                 errors: vec![SkillErrorInfo {
                     path: PathBuf::from("bad/SKILL.md"),

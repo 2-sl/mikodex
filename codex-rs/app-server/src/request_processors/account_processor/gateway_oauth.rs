@@ -102,11 +102,6 @@ impl AccountRequestProcessor {
         owner: ConnectionId,
         connection_gate: &crate::connection_rpc_gate::ConnectionRpcGate,
     ) -> Result<GatewayOAuthLoginResponse, JSONRPCErrorError> {
-        if params.target.is_some() {
-            return Err(invalid_request(
-                "Explicit gateway OAuth targets are available only during startup",
-            ));
-        }
         let cancel = CancellationToken::new();
         let guard = {
             let mut active = self

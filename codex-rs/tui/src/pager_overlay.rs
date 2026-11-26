@@ -48,14 +48,6 @@ pub(crate) enum Overlay {
 }
 
 impl Overlay {
-    /// The transcript currently receiving input, if any.
-    pub(crate) fn input_transcript(&self) -> Option<&TranscriptOverlay> {
-        match self {
-            Self::Transcript(view) => Some(view),
-            _ => None,
-        }
-    }
-
     pub(crate) fn new_transcript(
         cells: Vec<Arc<dyn HistoryCell>>,
         keymap: PagerKeymap,

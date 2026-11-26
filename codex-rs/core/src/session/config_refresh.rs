@@ -48,35 +48,41 @@ impl Session {
             .binding
             .as_ref()
             .map(codex_config::CloudConfigBundleBinding::read);
-        if binding
+        match binding
             .as_ref()
-            .is_some_and(|guard| guard.status != CloudConfigBundleBindingStatus::Current)
+            .map(|guard| guard.status)
+            .unwrap_or(CloudConfigBundleBindingStatus::Current)
         {
-            return ConfigRefreshOutcome::Rejected;
+            CloudConfigBundleBindingStatus::Stale => return ConfigRefreshOutcome::Stale,
+            CloudConfigBundleBindingStatus::Suspended => return ConfigRefreshOutcome::Rejected,
+            CloudConfigBundleBindingStatus::Current => {}
         }
         let mut config = current.as_ref().clone();
-        if config.apply_guardian_policy(snapshot).is_err() {
+        config.config_layer_stack.apply_guardian_policy(snapshot);
+        let Ok(fallback) = config.config_layer_stack.guardian_config() else {
             return ConfigRefreshOutcome::Rejected;
-        }
+        };
+        (config.guardian_policy_config, config.guardian_extra_policy) =
+            crate::config::resolve_guardian_policy_text(
+                config.config_layer_stack.requirements_toml(),
+                Some(&fallback),
+            );
         let configuration = &state.session_configuration;
-        let was_blocked = configuration
-            .step_settings
-            .validate(&configuration.step_settings_constraints(&configuration.environments))
-            .is_err();
         let model = (!configuration.trusted_guardian_reviewer)
             .then_some(configuration.step_settings.collaboration_mode.model());
         let requested = config
             .requested_approvals_reviewer
             .unwrap_or(configuration.step_settings.approvals_reviewer);
-        let requirements = config.config_layer_stack.requirements();
-        let resolved = crate::config::resolve_guardian_reviewer(requested, model, requirements);
-        // Publish both restrictions even when they rule out the current model.
-        let reviewer = resolved
-            .as_ref()
-            .copied()
-            .unwrap_or_else(|_| requirements.approvals_reviewer.value());
+        let Ok(reviewer) = crate::config::resolve_guardian_reviewer(
+            requested,
+            model,
+            config.config_layer_stack.requirements(),
+        ) else {
+            return ConfigRefreshOutcome::Rejected;
+        };
         config.requested_approvals_reviewer = Some(requested);
         config.approvals_reviewer = reviewer;
+        config.guardian_policy_revision = snapshot.revision;
         let previous = Arc::downgrade(current);
         let config = Arc::new(config);
         let snapshots = &mut state.guardian_config_snapshots;
@@ -94,24 +100,7 @@ impl Session {
             Arc::make_mut(settings).approvals_reviewer = reviewer;
         }
         state.session_configuration.original_config_do_not_use = config;
-        let configuration = &state.session_configuration;
-        let validation = resolved.and_then(|_| {
-            configuration
-                .step_settings
-                .validate(&configuration.step_settings_constraints(&configuration.environments))
-        });
-        match validation {
-            Ok(()) => {
-                if was_blocked && !state.shutting_down {
-                    self.input_queue.pending_work_wake.notify_one();
-                }
-                ConfigRefreshOutcome::Published
-            }
-            Err(error) => {
-                warn!(%error, "Guardian policy blocks the current model");
-                ConfigRefreshOutcome::Rejected
-            }
-        }
+        ConfigRefreshOutcome::Published
     }
 
     pub(crate) async fn refresh_runtime_config(
@@ -269,7 +258,7 @@ impl Session {
                     .refresh(&next_config.features);
             }
             let previous_config = notify_contributors
-                .then(|| Self::build_effective_session_config(&state.session_configuration));
+                .then(|| self.build_effective_session_config(&state.session_configuration));
             if config.mcp_enterprise_managed_auth.is_none() {
                 config.config_layer_stack.mcp_ema_cancellation().cancel();
             }
@@ -293,7 +282,7 @@ impl Session {
                 RuntimeConfigRefresh::UserFiles => McpRefreshReason::UserConfigFilesReloaded,
             });
             let new_config = notify_contributors
-                .then(|| Self::build_effective_session_config(&state.session_configuration));
+                .then(|| self.build_effective_session_config(&state.session_configuration));
             (previous_config, new_config)
         };
         if config

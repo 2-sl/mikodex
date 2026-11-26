@@ -21,11 +21,12 @@ All agents share the same directory. In detail:
 /// Multi-agent role text and the captured capabilities used to render its context segment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MultiAgentRoleInstructions {
-    /// Complete role body.
+    /// Complete configured instructions, emitted verbatim without catalog markers.
     Configured(String),
     /// Selected catalog or bundled text, composed with captured runtime guidance.
     Composed {
         base: String,
+        marked: bool,
         omit_update_plan_instructions: bool,
         max_concurrency: usize,
         wait_agent_enabled: bool,
@@ -36,10 +37,6 @@ pub enum MultiAgentRoleInstructions {
 impl MultiAgentRoleInstructions {
     /// Content classification shared by role producers and inherited-history filtering.
     pub const KIND: &str = "multi_agent.role_instructions";
-
-    pub fn concurrency_only(max_concurrency: usize) -> Self {
-        Self::Configured(concurrency_guidance(max_concurrency))
-    }
 }
 
 impl ContextualUserFragment for MultiAgentRoleInstructions {
@@ -53,8 +50,8 @@ impl ContextualUserFragment for MultiAgentRoleInstructions {
 
     fn markers(&self) -> (&'static str, &'static str) {
         match self {
-            Self::Configured(text) if Self::matches_text(text) => ("", ""),
-            Self::Configured(_) | Self::Composed { .. } => Self::type_markers(),
+            Self::Composed { marked: true, .. } => Self::type_markers(),
+            Self::Configured(_) | Self::Composed { marked: false, .. } => ("", ""),
         }
     }
 
@@ -71,6 +68,7 @@ impl ContextualUserFragment for MultiAgentRoleInstructions {
                 max_concurrency,
                 wait_agent_enabled,
                 expose_model_overrides,
+                ..
             } => {
                 let base = if *omit_update_plan_instructions {
                     without_update_plan_instructions(base)
@@ -83,8 +81,9 @@ impl ContextualUserFragment for MultiAgentRoleInstructions {
                     String::new()
                 };
                 let shared = DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT;
-                let concurrency = concurrency_guidance(*max_concurrency);
-                let mut text = format!("{base}\n{shared}\n{wait_agent_guidance}{concurrency}");
+                let mut text = format!(
+                    "{base}\n{shared}\n{wait_agent_guidance}There are {max_concurrency} available concurrency slots, meaning that up to {max_concurrency} agents can be active at once, including you."
+                );
                 if *expose_model_overrides {
                     text.push_str("\n\n");
                     text.push_str(DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT);
@@ -93,12 +92,6 @@ impl ContextualUserFragment for MultiAgentRoleInstructions {
             }
         })
     }
-}
-
-fn concurrency_guidance(max_concurrency: usize) -> String {
-    format!(
-        "There are {max_concurrency} available concurrency slots, meaning that up to {max_concurrency} agents can be active at once, including you."
-    )
 }
 
 #[cfg(test)]

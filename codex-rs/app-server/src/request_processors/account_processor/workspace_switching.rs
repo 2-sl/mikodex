@@ -228,8 +228,7 @@ impl AccountRequestProcessor {
 
     async fn reload_workspace_config(&self) {
         self.config_manager
-            .update_managed_config_loader(self.auth_manager.clone(), &self.config)
-            .await;
+            .update_managed_config_loader(self.auth_manager.clone(), &self.config);
         self.config_manager
             .sync_default_client_residency_requirement()
             .await;

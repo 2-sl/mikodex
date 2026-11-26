@@ -108,10 +108,6 @@ pub(crate) async fn run(
     let input = match serde_json::to_value(build_command_input(&request)) {
         Ok(input) => input,
         Err(error) => {
-            let decision = matched
-                .iter()
-                .find_map(ConfiguredHandler::failure_block_reason)
-                .map(|message| PermissionRequestDecision::Deny { message });
             let hook_events = common::serialization_failure_hook_events_for_tool_use(
                 matched,
                 Some(request.turn_id.clone()),
@@ -120,7 +116,7 @@ pub(crate) async fn run(
             );
             return PermissionRequestOutcome {
                 hook_events,
-                decision,
+                decision: None,
             };
         }
     };
@@ -291,10 +287,6 @@ fn parse_completed(
                 });
             }
         },
-    }
-
-    if let Some(message) = common::apply_failure_policy(handler, &mut status, &mut entries) {
-        decision = Some(PermissionRequestDecision::Deny { message });
     }
 
     let completed = HookCompletedEvent {

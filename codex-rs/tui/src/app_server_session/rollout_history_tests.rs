@@ -151,7 +151,6 @@ async fn resume_with_saved_server_profile() -> Result<()> {
         .fork_thread_at(
             &local_settings,
             client_config.clone(),
-            /*workspace_roots*/ None,
             thread_id,
             /*last_turn_id*/ None,
             /*before_turn_id*/ None,
@@ -179,7 +178,6 @@ async fn resume_with_saved_server_profile() -> Result<()> {
         .fork_side_thread(
             &local_settings,
             client_config,
-            /*workspace_roots*/ None,
             thread_id,
             /*selected_profile*/ None,
             crate::app_server_session::SideChatStorage::Temporary,
@@ -241,11 +239,7 @@ async fn resume_with_saved_server_profile() -> Result<()> {
         .await?;
     assert_eq!(
         resumed.session.runtime_workspace_roots,
-        config
-            .workspace_roots
-            .iter()
-            .map(codex_utils_path_uri::PathUri::from_abs_path)
-            .collect::<Vec<_>>()
+        config.workspace_roots
     );
     assert!(
         resumed

@@ -20,13 +20,6 @@ use crate::client::TransportClient;
 pub(crate) struct RequestDraft {
     pub(crate) request: reqwest::Request,
     pub(crate) headers: Vec<HeaderUpdate>,
-    pub(crate) private_body: bool,
-}
-
-/// Streaming preserves the exact length but prevents reqwest from replaying the body on redirects.
-pub(crate) fn prevent_body_redirects(request: &mut reqwest::Request) {
-    let body = request.body_mut();
-    *body = body.take().map(reqwest::Body::wrap);
 }
 
 pub(crate) enum HeaderUpdate {
@@ -37,11 +30,7 @@ pub(crate) enum HeaderUpdate {
 impl From<reqwest::Request> for RequestDraft {
     fn from(mut request: reqwest::Request) -> Self {
         let headers = vec![HeaderUpdate::Replace(std::mem::take(request.headers_mut()))];
-        Self {
-            request,
-            headers,
-            private_body: false,
-        }
+        Self { request, headers }
     }
 }
 

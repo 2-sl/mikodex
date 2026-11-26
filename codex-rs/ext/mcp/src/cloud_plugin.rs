@@ -12,7 +12,6 @@ use codex_core_plugins::PluginIdentity;
 use codex_extension_api::CatalogRefreshBackoff;
 use codex_extension_api::CatalogRefreshInput as StepCatalogRefreshInput;
 use codex_extension_api::CloudCatalogRefreshInput;
-use codex_extension_api::CloudCatalogRefreshOutcome;
 use codex_extension_api::ConfigContributor;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionFuture;
@@ -233,26 +232,17 @@ impl TurnLifecycleContributor for PluginContributor {
     fn refresh_cloud_catalog<'a>(
         &'a self,
         input: CloudCatalogRefreshInput<'a>,
-    ) -> ExtensionFuture<'a, CloudCatalogRefreshOutcome> {
+    ) -> ExtensionFuture<'a, Result<(), String>> {
         Box::pin(async move {
             let Some(state) = input.thread_store.get::<PluginsThreadState>() else {
-                return CloudCatalogRefreshOutcome::UNCHANGED;
+                return Ok(());
             };
             // A failed explicit attempt gets an immediate retry on the next step.
             state.contributor_state().cloud_retry = None;
-            match self
-                .discover_cloud_catalog(&state, cloud_catalog_query(input, /*turn_id*/ None))
+            self.discover_cloud_catalog(&state, cloud_catalog_query(input, /*turn_id*/ None))
                 .await
-            {
-                Ok(needs_mcp_refresh) => CloudCatalogRefreshOutcome {
-                    result: Ok(()),
-                    needs_mcp_refresh,
-                },
-                Err(failure) => CloudCatalogRefreshOutcome {
-                    result: Err(failure.error),
-                    needs_mcp_refresh: failure.catalog_cleared,
-                },
-            }
+                .map(|_| ())
+                .map_err(|failure| failure.error)
         })
     }
 }

@@ -22,7 +22,6 @@ use super::TraceReducer;
 use crate::model::CodeCell;
 use crate::model::CodeCellId;
 use crate::model::CodeCellRuntimeStatus;
-use crate::model::ConversationItemId;
 use crate::model::ConversationItemKind;
 use crate::model::ExecutionStatus;
 use crate::model::ExecutionWindow;
@@ -222,7 +221,7 @@ impl TraceReducer {
     fn source_item_id_for_pending_code_cell(
         &self,
         pending: &PendingCodeCellStart,
-    ) -> Result<Option<ConversationItemId>> {
+    ) -> Result<Option<String>> {
         Ok(self
             .model_visible_code_cell_item_ids(
                 &pending.thread_id,
@@ -478,9 +477,7 @@ impl TraceReducer {
             // ownership can be proven.
             return Ok(());
         };
-        if !cell.nested_tool_call_ids.contains(tool_call_id) {
-            cell.nested_tool_call_ids.push(tool_call_id.clone());
-        }
+        push_unique(&mut cell.nested_tool_call_ids, tool_call_id);
         Ok(())
     }
 
@@ -539,7 +536,7 @@ impl TraceReducer {
     /// the runtime cell already exists.
     pub(super) fn attach_model_visible_code_cell_item(
         &mut self,
-        item_id: &ConversationItemId,
+        item_id: &str,
         call_id: Option<&str>,
         kind: &ConversationItemKind,
     ) -> Result<()> {
@@ -664,7 +661,7 @@ impl TraceReducer {
         thread_id: &str,
         call_id: &str,
         kind: ConversationItemKind,
-    ) -> Vec<ConversationItemId> {
+    ) -> Vec<String> {
         self.rollout
             .threads
             .get(thread_id)
@@ -681,7 +678,7 @@ impl TraceReducer {
         thread_id: &str,
         code_cell_id: &str,
         model_visible_call_id: &str,
-    ) -> Result<ConversationItemId> {
+    ) -> Result<String> {
         self.model_visible_code_cell_item_ids(
             thread_id,
             model_visible_call_id,
@@ -697,17 +694,11 @@ impl TraceReducer {
         })
     }
 
-    fn add_code_cell_output_item(
-        &mut self,
-        code_cell_id: &str,
-        item_id: &ConversationItemId,
-    ) -> Result<()> {
+    fn add_code_cell_output_item(&mut self, code_cell_id: &str, item_id: &str) -> Result<()> {
         let Some(cell) = self.rollout.code_cells.get_mut(code_cell_id) else {
             bail!("code cell {code_cell_id} disappeared during output linking");
         };
-        if !cell.output_item_ids.contains(item_id) {
-            cell.output_item_ids.push(item_id.clone());
-        }
+        push_unique(&mut cell.output_item_ids, item_id);
 
         let Some(item) = self.rollout.conversation_items.get_mut(item_id) else {
             bail!("conversation item {item_id} disappeared during code-cell output linking");
@@ -730,6 +721,12 @@ fn execution_status_for_code_cell(status: &CodeCellRuntimeStatus) -> ExecutionSt
         CodeCellRuntimeStatus::Completed => ExecutionStatus::Completed,
         CodeCellRuntimeStatus::Failed => ExecutionStatus::Failed,
         CodeCellRuntimeStatus::Terminated => ExecutionStatus::Cancelled,
+    }
+}
+
+fn push_unique(items: &mut Vec<String>, item_id: &str) {
+    if !items.iter().any(|existing| existing == item_id) {
+        items.push(item_id.to_string());
     }
 }
 

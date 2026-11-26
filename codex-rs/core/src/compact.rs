@@ -754,7 +754,6 @@ fn build_compacted_history_with_limit(
         items,
         audio_durations,
         ResponseItemEnvelope::is_always_retained,
-        /*window_features*/ None,
     );
     if max_tokens > 0 {
         let mut remaining = max_tokens;
@@ -772,8 +771,8 @@ fn build_compacted_history_with_limit(
             else {
                 continue;
             };
-            // A user already selected by retained_client_items is explicitly pinned.
             if selected.contains_key(&position) {
+                remaining = remaining.saturating_sub(tokens);
                 continue;
             }
             let mut harness_metadata = message.harness_metadata.cloned();

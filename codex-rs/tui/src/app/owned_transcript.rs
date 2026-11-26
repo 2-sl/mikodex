@@ -39,7 +39,6 @@ use ratatui::widgets::Widget;
 #[derive(Default)]
 pub(super) struct ConversationFrame {
     inset: Option<Rect>,
-    pub(super) command_center: Option<Rect>,
     pub(super) sidebar: Option<sidebar::SidebarLayout>,
     pub(super) chat_strip: Option<Rect>,
     pub(super) sidebar_input: Option<sidebar::SidebarInputState>,
@@ -52,10 +51,7 @@ pub(super) struct ConversationFrame {
 
 impl ConversationFrame {
     pub(super) fn has_caller_inset(&self) -> bool {
-        self.inset.is_some()
-            && self.command_center.is_none()
-            && self.sidebar.is_none()
-            && self.chat_strip.is_none()
+        self.inset.is_some() && self.sidebar.is_none() && self.chat_strip.is_none()
     }
 
     pub(super) fn side_pane(&self) -> Option<&side_pane::SidePaneLayout> {
@@ -256,9 +252,7 @@ impl App {
         self.ensure_agents_overview_sidebar_view();
         self.transcript_view.image_protocol = self.prepare_frame_images(tui);
         let frames = tui.frame_requester();
-        if self.conversation_frame.command_center.is_some()
-            || self.conversation_frame.sidebar.is_some()
-            || self.conversation_frame.chat_strip.is_some()
+        if self.conversation_frame.sidebar.is_some() || self.conversation_frame.chat_strip.is_some()
         {
             // Recompute our own inset on every frame, including the first narrow frame.
             self.conversation_frame = ConversationFrame::default();
@@ -275,21 +269,7 @@ impl App {
         {
             pane.sync_agent_rows(&self.agent_navigation);
         }
-        let viewport: Rect = screen_size.into();
-        let workspace = &mut self.agents_overview.workspace;
-        let fraction = workspace.motion.advance(
-            workspace.is_open(),
-            (self.local_settings.tui.animations && viewport.width >= 86).then(|| frames.clone()),
-        );
-        workspace.fraction = Some(fraction);
-        let (center, available) = if caller_inset.is_none() && fraction > 0.0 {
-            self.workspace_areas(viewport)
-        } else {
-            (None, Some(viewport))
-        };
-        self.conversation_frame.command_center = center;
-        let content = available.unwrap_or_default();
-
+        let full_viewport = Rect::new(0, 0, screen_size.width, screen_size.height);
         let agents_overview_present = self
             .chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
@@ -298,7 +278,7 @@ impl App {
             self.agents_overview.command_reference_focused = false;
         }
         let agents_dock = (caller_inset.is_none() && !agents_overview_present)
-            .then(|| agents_overview_dock::layout(self, content))
+            .then(|| agents_overview_dock::layout(self, full_viewport))
             .flatten();
         if agents_dock
             .as_ref()
@@ -308,14 +288,14 @@ impl App {
         }
         let conversation_viewport = agents_dock
             .as_ref()
-            .map_or(content, |dock| dock.conversation);
+            .map_or(full_viewport, |dock| dock.conversation);
         let command_items = agents_dock
             .as_ref()
             .filter(|dock| !dock.command_reference.is_empty())
             .map(|_| self.chat_widget.command_reference_items())
             .unwrap_or_default();
         let command_scroll = self.agents_overview.command_reference_scroll;
-        let layout = available.and_then(|_| sidebar::paint_layout(self, tui, conversation_viewport));
+        let layout = sidebar::paint_layout(self, tui, conversation_viewport);
         let displayed = self.current_displayed_thread_id();
         let chat = match displayed.and_then(|id| self.side_pair_key(id)) {
             Some(child) if Some(child) == displayed => TabState::Active,
@@ -338,11 +318,8 @@ impl App {
             }
             None => (None, None),
         };
-        let mut prepared = self.prepare_conversation(
-            conversation_viewport,
-            caller_inset.or(live).or(center.map(|_| conversation_viewport)),
-            &frames,
-        );
+        let mut prepared =
+            self.prepare_conversation(conversation_viewport, caller_inset.or(live), &frames);
         self.conversation_frame.sidebar = layout;
         self.conversation_frame.chat_strip = strip;
         self.conversation_frame.sidebar_input =
@@ -376,7 +353,6 @@ impl App {
         let sidebar_image_protocol = self.preview_image_protocol(tui);
         let sidebar_motion =
             MotionMode::from_animations_enabled(self.local_settings.tui.animations);
-        let hover_mouse = self.hover_pointer(tui, tui.link_hover.mouse);
         // An input refresh opens a fresh terminal buffer. Carry the outer owner's
         // completed cells through it when only the conversation is being redrawn.
         let backdrop = caller_inset.map(|_| {
@@ -679,16 +655,10 @@ impl App {
                 self.conversation_frame.close_buttons = buttons;
             }
             if let Some(dock) = agents_dock {
-                let left_junction_rows = if !dock.sidebar.is_empty()
-                    && let Some(view) = self.agents_overview.sidebar_view.as_ref()
-                {
-                    let rows = view.docked_separator_rows(dock.sidebar);
+                if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
                     view.render_docked(dock.sidebar, frame.buffer);
-                    rows
-                } else {
-                    Vec::new()
-                };
-                dock.render_divider(frame.buffer, self, &left_junction_rows);
+                }
+                dock.render_divider(frame.buffer, self);
                 if !dock.command_reference.is_empty() {
                     command_reference::render(
                         dock.command_reference,
@@ -699,18 +669,8 @@ impl App {
                     );
                 }
             }
-            if let Some(area) = self.hover_target_area(hover_mouse, frame.buffer) {
-                super::link_hover::paint_hover_foreground(area, frame.buffer);
-            }
-            if let Some(center) = center {
-                self.paint_command_center(frame, center, available);
-            }
             self.paint_centered_dialog(frame);
         })?;
-        // A shortcut HUD is painted after the conversation and can move over a stationary pointer.
-        if hover_mouse != self.hover_pointer(tui, tui.link_hover.mouse) {
-            frames.schedule_frame();
-        }
         self.finish_conversation(tui, painted)
     }
 
@@ -824,16 +784,6 @@ impl App {
         } else {
             self.prompt_navigation_footer(area.width.saturating_sub(/*rhs*/ 2))
         };
-        let unfocused = self.workspace_center_owns_input()
-            || self.agents_overview.sidebar_focused
-            || self.agents_overview.command_reference_focused
-            || matches!(
-                self.conversation_frame.sidebar,
-                Some(sidebar::SidebarLayout::Panel {
-                    focus: PaneFocus::Sidebar,
-                    ..
-                })
-            );
         let chat_widget = &self.chat_widget;
         let view = &mut self.transcript_view;
         let active_key = chat_widget.active_cell_transcript_key();
@@ -843,6 +793,15 @@ impl App {
         // which can change the footer hint and the composer's measured height.
         let footer = view.footer_with_navigation(footer_width, motion, latest_navigation);
         let max_composer_height = side_pane::composer_height_limit(area.height);
+        let unfocused = self.agents_overview.sidebar_focused
+            || self.agents_overview.command_reference_focused
+            || matches!(
+                self.conversation_frame.sidebar,
+                Some(sidebar::SidebarLayout::Panel {
+                    focus: PaneFocus::Sidebar,
+                    ..
+                })
+            );
         let options = |interacting| ComposerRenderOptions {
             unfocused,
             max_height: Some(max_composer_height),

@@ -282,7 +282,6 @@ impl LocalSettings {
                         | TerminalName::WarpTerminal
                         | TerminalName::WezTerm
                         | TerminalName::Rex
-                        | TerminalName::Orca
                         | TerminalName::Alacritty
                         | TerminalName::Konsole
                         | TerminalName::GnomeTerminal

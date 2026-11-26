@@ -19,7 +19,6 @@ mod raw_event;
 mod reducer;
 mod shard;
 mod thread;
-mod tool_content;
 mod tool_dispatch;
 mod writer;
 

@@ -13,7 +13,6 @@ use codex_app_server_protocol::ThreadBackgroundTerminalsListResponse as ListResp
 pub(super) fn background_terminals_blocker(
     result: Result<ListResponse, TypedRequestError>,
     target: &AppServerTarget,
-    features: &codex_features::Features,
 ) -> Option<&'static str> {
     match result {
         Ok(response) if response.data.is_empty() => None,
@@ -25,11 +24,9 @@ pub(super) fn background_terminals_blocker(
                         && (source.message.contains("unknown variant")
                             || source.message.contains("unknown method"))) =>
         {
-            Some(if features.enabled(Feature::DaemonUpdates) {
-                "The local Mikodex service cannot check background terminals. Run mikodex app-server daemon update, then restart Mikodex."
-            } else {
-                "The local Mikodex service cannot check background terminals. Contact your administrator to update it."
-            })
+            Some(
+                "The local Mikodex service cannot check background terminals. Run `mikodex app-server daemon update`, then restart Mikodex.",
+            )
         }
         _ => Some("Active background terminals block /cd."),
     }
@@ -38,7 +35,6 @@ pub(super) fn background_terminals_blocker(
 pub(super) async fn check_background_terminals(
     app_server: &mut AppServerSession,
     target: &AppServerTarget,
-    features: &codex_features::Features,
     thread_ids: impl IntoIterator<Item = ThreadId>,
 ) -> Option<&'static str> {
     for thread_id in thread_ids {
@@ -54,7 +50,7 @@ pub(super) async fn check_background_terminals(
             .request_handle()
             .request_typed::<ListResponse>(request)
             .await;
-        if let Some(message) = background_terminals_blocker(result, target, features) {
+        if let Some(message) = background_terminals_blocker(result, target) {
             return Some(message);
         }
     }
@@ -157,13 +153,8 @@ impl App {
                     .iter()
                     .filter_map(|(id, agent)| (!agent.is_closed).then_some(*id)),
             );
-            if let Some(message) = check_background_terminals(
-                app_server,
-                &self.app_server_target,
-                &self.config.features,
-                ids,
-            )
-            .await
+            if let Some(message) =
+                check_background_terminals(app_server, &self.app_server_target, ids).await
             {
                 return self.working_directory_error(message);
             }

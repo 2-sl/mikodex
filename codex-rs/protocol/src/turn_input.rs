@@ -91,11 +91,6 @@ pub enum ItemRetention {
     Default,
     /// Carry the item into later context windows and newly spawned children.
     Always,
-    /// Carry the item into later windows of this thread and exclude it from spawned agents.
-    AlwaysInThread,
-    /// Carry the item into spawned agents while it is in the parent's context.
-    /// Each thread applies ordinary retention when its own context window changes.
-    AlwaysInChildren,
 }
 
 impl From<ResponseItem> for InjectedResponseItem {
@@ -122,8 +117,7 @@ pub struct TurnInputRequest<I = UserInput> {
     pub user_input_extension_data: BTreeMap<String, Value>,
     pub thread_settings: ThreadSettingsOverrides,
     pub start: TurnStartOptions,
-    /// Replaces submitted client context when present; omission preserves it and an empty map clears it.
-    pub additional_context: Option<BTreeMap<String, AdditionalContextEntry>>,
+    pub additional_context: BTreeMap<String, AdditionalContextEntry>,
     pub responsesapi_client_metadata: ResponsesApiClientMetadataUpdate,
     pub trace: Option<W3cTraceContext>,
 }
@@ -184,7 +178,7 @@ impl<I> TurnInputRequest<I> {
             user_input_extension_data: BTreeMap::new(),
             thread_settings: ThreadSettingsOverrides::default(),
             start: TurnStartOptions::default(),
-            additional_context: None,
+            additional_context: BTreeMap::new(),
             responsesapi_client_metadata: ResponsesApiClientMetadataUpdate::default(),
             trace: None,
         }
@@ -215,12 +209,12 @@ impl<I> TurnInputRequest<I> {
         self
     }
 
-    /// Context submitted with the input whether this request starts or steers.
+    /// Context merged whether this request starts or steers.
     pub fn with_additional_context(
         mut self,
-        additional_context: impl Into<Option<BTreeMap<String, AdditionalContextEntry>>>,
+        additional_context: BTreeMap<String, AdditionalContextEntry>,
     ) -> Self {
-        self.additional_context = additional_context.into();
+        self.additional_context = additional_context;
         self
     }
 

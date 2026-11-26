@@ -202,7 +202,6 @@ impl App {
             .fork_thread_at(
                 &self.local_settings,
                 retry_config,
-                Some(self.chat_widget.session_workspace_roots()),
                 thread_id,
                 /*last_turn_id*/ None,
                 /*before_turn_id*/ Some(turn_id),

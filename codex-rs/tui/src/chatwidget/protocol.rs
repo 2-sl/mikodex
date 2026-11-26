@@ -1,21 +1,6 @@
 use super::*;
 
 impl ChatWidget {
-    fn on_keyed_agent_message_delta(&mut self, key: (String, String), delta: String) {
-        if self.transcript.replayed_cloud_text.is_some()
-            && self.stream_controller.is_some()
-            && self
-                .transcript
-                .active_streamed_agent_message
-                .as_ref()
-                .is_some_and(|active| active != &key)
-        {
-            self.flush_answer_stream_with_separator();
-        }
-        self.transcript.active_streamed_agent_message = Some(key);
-        self.on_agent_message_delta(delta);
-    }
-
     pub(crate) fn handle_server_notification(
         &mut self,
         notification: ServerNotification,
@@ -159,10 +144,9 @@ impl ChatWidget {
                             &notification.item_id,
                         ))
                 {
-                    self.on_keyed_agent_message_delta(
-                        (notification.turn_id, notification.item_id),
-                        notification.delta,
-                    );
+                    self.transcript.active_streamed_agent_message =
+                        Some((notification.turn_id, notification.item_id));
+                    self.on_agent_message_delta(notification.delta);
                 }
             }
             ServerNotification::PlanDelta(notification) => {
@@ -639,7 +623,8 @@ impl ChatWidget {
                 if self.transcript.active_streamed_agent_message.as_ref() != Some(&key)
                     && self.transcript.last_flushed_agent_message.as_ref() != Some(&key)
                 {
-                    self.on_keyed_agent_message_delta(key, text);
+                    self.transcript.active_streamed_agent_message = Some(key);
+                    self.on_agent_message_delta(text);
                 }
             }
             ThreadItemPayload::Reasoning {
@@ -753,8 +738,6 @@ impl ChatWidget {
         {
             return;
         }
-        let was_finished =
-            std::mem::replace(&mut self.transcript.recording_finished_cloud_text, true);
         match notification.item.payload {
             item @ ThreadItemPayload::CommandExecution { .. } => {
                 self.on_command_execution_completed(item)
@@ -765,7 +748,6 @@ impl ChatWidget {
                 replay_kind.map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
             ),
         }
-        self.transcript.recording_finished_cloud_text = was_finished;
     }
 }
 

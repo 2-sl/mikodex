@@ -434,7 +434,6 @@ async fn exercise_harness(server_uri: String) -> Result<()> {
                 ..StartThreadOptions::new(child_config.clone())
             },
             prepared,
-            codex_thread_store::InheritedHistoryVisibility::Full,
         )
         .await?;
     turn(&child.thread, "child-assertion").await?;

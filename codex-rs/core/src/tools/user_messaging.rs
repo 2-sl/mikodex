@@ -8,7 +8,6 @@ use crate::session::session::Session;
 use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolCallState;
 use crate::tools::registry::AnyToolResult;
-use codex_guardian_context::ContextBudgeting;
 use codex_history::RetainedUserMessage;
 use codex_mcp::PreparedMcpCall;
 use codex_protocol::mcp::CallToolResult;
@@ -34,15 +33,11 @@ pub(super) fn admit_code_mode_send(
 }
 
 /// Captures confirmed delivery before any further await, including post-tool hooks.
-pub(super) fn capture_delivery(
-    result: &AnyToolResult,
-    call_state: Option<&ToolCallState>,
-    budgeting: ContextBudgeting,
-) {
+pub(super) fn capture_delivery(result: &AnyToolResult, call_state: Option<&ToolCallState>) {
     if let Some(call_state) = call_state
-        && let Some(delivery) = result.delivered_assistant_message(budgeting)
+        && let Some(text) = result.delivered_assistant_message()
     {
-        let _ = call_state.delivered_assistant_message.set(delivery);
+        let _ = call_state.delivered_assistant_message.set(text);
     }
 }
 
@@ -75,19 +70,20 @@ pub(crate) fn record_confirmed_code_mode_send(
     if text.trim().is_empty() {
         return;
     }
+    let (text, truncated) = guardian_truncate_text(text, GUARDIAN_MAX_ROOT_MESSAGE_TOKENS);
     let message = RetainedUserMessage {
         origin: codex_history::UserInputOrigin::User,
         turn_id: turn_id.to_owned(),
         message_id: Some(call_id.to_owned()),
-        text: text.to_owned(),
-        complete: true,
+        text,
+        complete: !truncated,
         phase: None,
     };
     let _ = session.record_delivered_assistant_message(message);
 }
 
 impl AnyToolResult {
-    fn delivered_assistant_message(&self, budgeting: ContextBudgeting) -> Option<String> {
+    fn delivered_assistant_message(&self) -> Option<String> {
         if !self.result.success_for_logging() {
             return None;
         }
@@ -107,13 +103,7 @@ impl AnyToolResult {
         if text.trim().is_empty() {
             return None;
         }
-        Some(match budgeting {
-            ContextBudgeting::Fixed => {
-                guardian_truncate_text(text, GUARDIAN_MAX_ROOT_MESSAGE_TOKENS).0
-            }
-            // History can account for the complete record once it has the call's IDs.
-            ContextBudgeting::Elastic => text.to_owned(),
-        })
+        Some(guardian_truncate_text(text, GUARDIAN_MAX_ROOT_MESSAGE_TOKENS).0)
     }
 }
 

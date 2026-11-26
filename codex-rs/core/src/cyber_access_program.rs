@@ -39,22 +39,12 @@ pub enum ApiKeyCyberAccessPrograms {
 impl ApiKeyCyberAccessPrograms {
     /// Captures the same provider and feature policy used by ordinary model requests.
     pub fn from_config(config: &crate::config::Config) -> Self {
-        Self::for_provider(
-            &config.model_provider,
-            &config.model_provider_id,
-            &config.features,
-        )
-    }
-
-    /// Resolves API-key policy for the provider that will receive the request.
-    pub fn for_provider(
-        provider: &codex_model_provider_info::ModelProviderInfo,
-        provider_id: &str,
-        features: &codex_features::Features,
-    ) -> Self {
-        if !provider.supports_cyber_access_programs(provider_id) {
+        if !config
+            .model_provider
+            .supports_cyber_access_programs(&config.model_provider_id)
+        {
             Self::UnsupportedProvider
-        } else if features.enabled(Feature::ApiKeyCyberAccessPrograms) {
+        } else if config.features.enabled(Feature::ApiKeyCyberAccessPrograms) {
             Self::Enabled
         } else {
             Self::Disabled

@@ -255,30 +255,34 @@ fn multi_agent_v2_cli_overrides_preserve_boolean_and_nested_configuration() {
     }
 }
 
-#[test_case::test_case("code_mode", "enabled", "experimental_show_cell_overhead"; "code mode")]
-#[test_case::test_case("send_message_to_user_async", "root_agent", "subagents"; "async user messages")]
-fn boolean_overrides_preserve_nested_option(feature: &str, toggle_field: &str, option: &str) {
+#[test]
+fn code_mode_overrides_preserve_enabled_state_and_cell_overhead() {
     for feature_path in ["features", "profiles.work.features"] {
         for enabled in [true, false] {
             let toggle = (
-                format!("{feature_path}.{feature}"),
+                format!("{feature_path}.code_mode"),
                 TomlValue::Boolean(enabled),
             );
-            let nested = (
-                format!("{feature_path}.{feature}.{option}"),
+            let overhead = (
+                format!("{feature_path}.code_mode.experimental_show_cell_overhead"),
                 TomlValue::Boolean(true),
             );
             let expected = parse_toml(&format!(
-                "[{feature_path}.{feature}]\n{toggle_field} = {enabled}\n{option} = true\n",
+                "[{feature_path}.code_mode]\nenabled = {enabled}\nexperimental_show_cell_overhead = true\n",
             ));
 
-            for overrides in [vec![toggle.clone(), nested.clone()], vec![nested, toggle]] {
+            // Adding a display option must preserve the toggle in either override order.
+            for overrides in [
+                vec![toggle.clone(), overhead.clone()],
+                vec![overhead, toggle],
+            ] {
                 assert_eq!(crate::build_cli_overrides_layer(&overrides), expected);
             }
 
-            let boolean_layer = parse_toml(&format!("[{feature_path}]\n{feature} = {enabled}\n"));
-            let table_layer =
-                parse_toml(&format!("[{feature_path}.{feature}]\n{option} = true\n",));
+            let boolean_layer = parse_toml(&format!("[{feature_path}]\ncode_mode = {enabled}\n"));
+            let table_layer = parse_toml(&format!(
+                "[{feature_path}.code_mode]\nexperimental_show_cell_overhead = true\n",
+            ));
             for (mut base, overlay) in [
                 (boolean_layer.clone(), table_layer.clone()),
                 (table_layer, boolean_layer),
@@ -291,38 +295,30 @@ fn boolean_overrides_preserve_nested_option(feature: &str, toggle_field: &str, o
 }
 
 #[test]
-fn structured_feature_overrides_preserve_disabled_state_and_settings() {
-    for (feature, key, value) in [
-        ("sleep_tool", "mode", "always_on"),
-        ("runtime_agent_instances", "mode", "assertion_only"),
-        (
-            "guardianv3",
-            "reviewer.retrieval_instructions",
-            "Check revocations.",
-        ),
+fn structured_mode_overrides_preserve_disabled_state_and_mode() {
+    for (feature, selected_mode) in [
+        ("sleep_tool", "always_on"),
+        ("runtime_agent_instances", "assertion_only"),
     ] {
         for feature_path in ["features", "profiles.work.features"] {
             let disabled = (
                 format!("{feature_path}.{feature}"),
                 TomlValue::Boolean(false),
             );
-            let setting = (
-                format!("{feature_path}.{feature}.{key}"),
-                TomlValue::String(value.to_string()),
+            let mode = (
+                format!("{feature_path}.{feature}.mode"),
+                TomlValue::String(selected_mode.to_string()),
             );
             let expected = parse_toml(&format!(
-                "[{feature_path}.{feature}]\nenabled = false\n{key} = \"{value}\"\n",
+                "[{feature_path}.{feature}]\nenabled = false\nmode = \"{selected_mode}\"\n",
             ));
-            for overrides in [
-                vec![disabled.clone(), setting.clone()],
-                vec![setting, disabled],
-            ] {
+            for overrides in [vec![disabled.clone(), mode.clone()], vec![mode, disabled]] {
                 assert_eq!(crate::build_cli_overrides_layer(&overrides), expected);
             }
 
             let boolean_layer = parse_toml(&format!("[{feature_path}]\n{feature} = false\n"));
             let table_layer = parse_toml(&format!(
-                "[{feature_path}.{feature}]\n{key} = \"{value}\"\n",
+                "[{feature_path}.{feature}]\nmode = \"{selected_mode}\"\n",
             ));
             for (mut base, overlay) in [
                 (boolean_layer.clone(), table_layer.clone()),

@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::McpRefreshReason;
-use codex_extension_api::CloudCatalogRefreshOutcome;
 use codex_mcp::McpResourceClient;
 use codex_mcp::McpResourceClientCacheKey;
 use codex_protocol::models::ResponseInputItem;
@@ -64,15 +63,8 @@ async fn step_discovery_reconciles_mcp_skips_prewarm_and_releases_lock_on_cancel
         .new_startup_prewarm_turn_with_sub_id(INITIAL_SUBMIT_ID.to_owned())
         .await;
     session
-        .mcp_runtime_for_step(
-            &prewarm,
-            &[],
-            /*captured_executor_discovery_v2*/ None,
-            &[],
-            &HashSet::new(),
-        )
-        .await
-        .expect("prepare MCP without cloud callbacks");
+        .mcp_runtime_for_step(&prewarm, &[], &[], &HashSet::new())
+        .await;
     assert!(recorder.keys.lock().expect("recorded keys").is_empty());
     let initial_key = recorder.client.cache_key();
 
@@ -105,15 +97,8 @@ async fn step_discovery_reconciles_mcp_skips_prewarm_and_releases_lock_on_cancel
 
     // Prewarm also skips discovery while a regular turn is preparing a step.
     session
-        .mcp_runtime_for_step(
-            &prewarm,
-            &[],
-            /*captured_executor_discovery_v2*/ None,
-            &[],
-            &HashSet::new(),
-        )
-        .await
-        .expect("prepare MCP without cloud callbacks");
+        .mcp_runtime_for_step(&prewarm, &[], &[], &HashSet::new())
+        .await;
     assert_eq!(recorder.keys.lock().expect("recorded keys").len(), 1);
     cancellation.cancel();
     assert!(capture.await.is_err());
@@ -141,24 +126,24 @@ async fn step_discovery_reconciles_mcp_skips_prewarm_and_releases_lock_on_cancel
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }
 
-/// A published catalog queues MCP prewarm while a sibling is still holding up the refresh.
+/// Explicit refresh overlaps providers under one lock and retains publication while a sibling waits.
 #[tokio::test]
 async fn explicit_cloud_refresh_runs_concurrently_and_awaits_all_results() {
     struct CatalogGate {
         entered: Arc<tokio::sync::Barrier>,
         finish: tokio::sync::Notify,
-        outcome: CloudCatalogRefreshOutcome,
+        result: Result<(), &'static str>,
     }
 
     impl codex_extension_api::TurnLifecycleContributor for CatalogGate {
         fn refresh_cloud_catalog<'a>(
             &'a self,
             _input: codex_extension_api::CloudCatalogRefreshInput<'a>,
-        ) -> codex_extension_api::ExtensionFuture<'a, CloudCatalogRefreshOutcome> {
+        ) -> codex_extension_api::ExtensionFuture<'a, Result<(), String>> {
             Box::pin(async move {
                 self.entered.wait().await;
                 self.finish.notified().await;
-                self.outcome.clone()
+                self.result.map_err(str::to_string)
             })
         }
     }
@@ -168,25 +153,17 @@ async fn explicit_cloud_refresh_runs_concurrently_and_awaits_all_results() {
     let failing = Arc::new(CatalogGate {
         entered: Arc::clone(&entered),
         finish: Default::default(),
-        outcome: CloudCatalogRefreshOutcome {
-            result: Err("skill discovery failed".to_string()),
-            needs_mcp_refresh: false,
-        },
+        result: Err("plugin discovery failed"),
     });
     let succeeding = Arc::new(CatalogGate {
         entered: Arc::clone(&entered),
         finish: Default::default(),
-        outcome: CloudCatalogRefreshOutcome {
-            result: Ok(()),
-            needs_mcp_refresh: true,
-        },
+        result: Ok(()),
     });
     let mut builder = codex_extension_api::ExtensionRegistryBuilder::new();
     builder.turn_lifecycle_contributor(failing.clone());
     builder.turn_lifecycle_contributor(succeeding.clone());
     session.services.extensions = Arc::new(builder.build());
-    let (tx, prewarm_requests) = async_channel::bounded(1);
-    session.mcp_prewarm_tx = tx;
     let session = Arc::new(session);
     let mut refresh = Box::pin(session.refresh_cloud_plugins());
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -203,19 +180,14 @@ async fn explicit_cloud_refresh_runs_concurrently_and_awaits_all_results() {
     assert!(futures::poll!(&mut lock).is_pending());
     drop(lock);
 
-    assert!(prewarm_requests.is_empty());
-    succeeding.finish.notify_one();
+    failing.finish.notify_one();
     assert!(futures::poll!(&mut refresh).is_pending());
     assert!(session.mcp_refresh.is_pending());
-    prewarm_requests
-        .try_recv()
-        .expect("the worker must be notified before the remaining provider finishes");
-    failing.finish.notify_one();
+    succeeding.finish.notify_one();
     assert_eq!(
         refresh.await.expect_err("one provider failed").to_string(),
-        "skill discovery failed"
+        "plugin discovery failed"
     );
-    assert!(prewarm_requests.is_empty());
     drop(
         tokio::time::timeout(
             std::time::Duration::from_secs(5),

@@ -1883,7 +1883,6 @@ mod tests {
         let environment = manager
             .get_environment("executor-a")
             .expect("first remote environment");
-        let retained_filesystem = environment.get_filesystem();
         let (observed_tx, mut observed_rx) = tokio::sync::mpsc::unbounded_channel();
         environment.observe_connection_attempts(move |_, outcome| {
             observed_tx
@@ -1924,7 +1923,6 @@ mod tests {
         })
         .await
         .expect("replacing the environment should cancel its startup task");
-        drop(retained_filesystem);
         assert_eq!(
             observed_rx.try_recv(),
             Ok(super::ConnectionAttemptOutcome::Cancelled)

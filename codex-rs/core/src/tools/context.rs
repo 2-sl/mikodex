@@ -3,7 +3,6 @@ use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
 use crate::session::turn_context::TurnEnvironment;
-use crate::tools::executed_tool_calls::PendingResultBody;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::unified_exec::output::CapturedStream;
 use crate::unified_exec::resolve_max_tokens;
@@ -15,9 +14,7 @@ use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::models::ToolResultMetadata;
 use codex_protocol::models::function_call_output_content_items_to_text;
-use codex_tool_call_id::ToolCallId;
 use codex_tools::LoadableToolSpec;
 use codex_tools::ToolName;
 use codex_utils_audio::estimate_tool_audio_tokens;
@@ -119,7 +116,7 @@ pub struct ToolInvocation {
     pub(crate) step_context: Arc<StepContext>,
     pub cancellation_token: CancellationToken,
     pub tracker: SharedTurnDiffTracker,
-    pub call_id: ToolCallId,
+    pub call_id: String,
     pub tool_name: ToolName,
     pub source: ToolCallSource,
     pub payload: ToolPayload,
@@ -158,7 +155,7 @@ impl ToolInvocation {
             .find_map(|item| match item {
                 ResponseItem::FunctionCall { id, call_id, .. }
                 | ResponseItem::CustomToolCall { id, call_id, .. }
-                    if call_id == self.call_id.as_str() =>
+                    if call_id == &self.call_id =>
                 {
                     id.clone()
                 }
@@ -177,7 +174,6 @@ pub struct McpToolOutput {
     pub tool_input: JsonValue,
     // Keep the original metadata for hooks; this flag only controls analytics capture.
     pub(crate) result_metadata_capture_allowed: bool,
-    pub(crate) result_capture: Option<Arc<PendingResultBody>>,
     pub wall_time: Duration,
     pub original_image_detail_supported: bool,
     pub truncation_policy: TruncationPolicy,
@@ -219,21 +215,11 @@ impl ToolOutput for McpToolOutput {
         self.result.code_mode_result(payload)
     }
 
-    fn tool_result_metadata(&self) -> ToolResultMetadata {
+    fn tool_result_metadata(&self) -> Option<&JsonValue> {
         if !self.result_metadata_capture_allowed {
-            return ToolResultMetadata::default();
+            return None;
         }
-        let result_id = self
-            .result_capture
-            .as_ref()
-            .filter(|_| self.result.success())
-            .and_then(|capture| capture.accept());
-        self.result
-            .meta
-            .as_ref()
-            .map(ToolResultMetadata::new)
-            .unwrap_or_default()
-            .with_result_id(result_id)
+        self.result.meta.as_ref()
     }
 
     fn post_tool_use_input(&self, _payload: &ToolPayload) -> Option<JsonValue> {

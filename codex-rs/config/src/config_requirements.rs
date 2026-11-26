@@ -40,7 +40,6 @@ use crate::browser_computer_use_requirements::ComputerUseRequirementsToml;
 use crate::config_toml::ConfigToml;
 use crate::mcp_requirements::validate_mcp_server_requirement;
 use crate::mcp_types::AppToolApproval;
-use crate::permissions_toml::CredentialPermissionsToml;
 use crate::permissions_toml::PermissionProfileToml;
 use crate::types::AuthCredentialsStoreMode;
 use crate::types::FeedbackConfigToml;
@@ -393,17 +392,14 @@ pub enum NetworkDomainPermissionToml {
 }
 
 impl NetworkDomainPermissionToml {
-    pub(crate) fn canonical_pattern(self, pattern: &str) -> anyhow::Result<String> {
+    /// Unsupported patterns retain their exact spelling. They can never compare equal
+    /// to a valid selector and disappear when two published declarations are combined.
+    pub(crate) fn pattern_identity(self, pattern: &str) -> Result<String, String> {
         match self {
             Self::Allow => codex_network_proxy::canonical_allow_pattern(pattern),
             Self::Deny => codex_network_proxy::canonical_deny_pattern(pattern),
         }
-    }
-
-    /// Unsupported patterns compare only by their exact spelling.
-    pub(crate) fn pattern_identity(self, pattern: &str) -> Result<String, String> {
-        self.canonical_pattern(pattern)
-            .map_err(|_| pattern.to_owned())
+        .map_err(|_| pattern.to_owned())
     }
 }
 
@@ -476,16 +472,6 @@ pub struct NetworkRequirementsToml {
 }
 
 impl NetworkRequirementsToml {
-    pub(crate) fn validate_domain_patterns(&self) -> anyhow::Result<()> {
-        for (pattern, rule) in self.domains.iter().flat_map(|domains| &domains.entries) {
-            rule.canonical_pattern(pattern)?;
-        }
-        for pattern in self.review_domains.iter().flatten() {
-            codex_network_proxy::canonical_review_pattern(pattern)?;
-        }
-        Ok(())
-    }
-
     /// Compare the selector identities used by the proxy without modifying the published
     /// representation. Keep allow and deny contributions distinct, including shadowed grants.
     pub(crate) fn describes_same_policy(&self, other: &Self) -> bool {
@@ -625,7 +611,9 @@ impl<'de> Deserialize<'de> for NetworkRequirementsToml {
     }
 }
 
-/// Empty legacy domain lists contribute no keyed rules.
+/// Legacy list normalization is intentionally lossy: explicit empty legacy
+/// lists are treated as unset when converted to the canonical network
+/// permission shape.
 fn legacy_domain_permissions_from_lists(
     allowed_domains: Option<Vec<String>>,
     denied_domains: Option<Vec<String>>,
@@ -774,9 +762,8 @@ pub struct PermissionsRequirementsToml {
     // Keep the optional raw payload out of config-loading futures' inline storage.
     #[serde(default, deserialize_with = "deserialize_permissions_network")]
     pub network: Option<Box<NetworkRequirementsToml>>,
-    #[serde(default, deserialize_with = "deserialize_permissions_credentials")]
-    pub credentials: Option<CredentialPermissionsToml>,
-    // Shared requirements tables cannot name profiles.
+    // `filesystem` and `network` are reserved for requirements-level
+    // constraints and cannot name profiles.
     #[serde(default, flatten)]
     pub profiles: BTreeMap<String, PermissionProfileToml>,
 }
@@ -786,10 +773,7 @@ impl PermissionsRequirementsToml {
     pub(crate) fn take_network(table: &mut Option<Self>) -> Option<Box<NetworkRequirementsToml>> {
         let permissions = table.as_mut()?;
         let network = permissions.network.take()?;
-        if permissions.filesystem.is_none()
-            && permissions.credentials.is_none()
-            && permissions.profiles.is_empty()
-        {
+        if permissions.filesystem.is_none() && permissions.profiles.is_empty() {
             *table = None;
         }
         Some(network)
@@ -801,32 +785,6 @@ fn deserialize_permissions_network<'de, D>(
 ) -> Result<Option<Box<NetworkRequirementsToml>>, D::Error>
 where
     D: serde::Deserializer<'de>,
-{
-    deserialize_shared_permission_table(
-        deserializer,
-        "`permissions.network` in requirements.toml is reserved for shared network constraints; rename the managed profile (for example, to `network-access`) and update `default_permissions`, `allowed_permission_profiles`, and `extends`; check saved session profile references. Profiles named `network` in config.toml remain valid",
-    )
-}
-
-fn deserialize_permissions_credentials<'de, D>(
-    deserializer: D,
-) -> Result<Option<CredentialPermissionsToml>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    deserialize_shared_permission_table(
-        deserializer,
-        "`permissions.credentials` in requirements.toml is reserved for shared credential policy; rename the managed profile (for example, to `credential-access`) and update `default_permissions`, `allowed_permission_profiles`, and `extends`; check saved session profile references. Profiles named `credentials` in config.toml remain valid",
-    )
-}
-
-fn deserialize_shared_permission_table<'de, D, T>(
-    deserializer: D,
-    rename_error: &'static str,
-) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: serde::de::DeserializeOwned,
 {
     let table = toml::Table::deserialize(deserializer)?;
     if table.is_empty()
@@ -840,7 +798,9 @@ where
         .iter()
         .any(|key| table.contains_key(*key))
     {
-        return Err(D::Error::custom(rename_error));
+        return Err(D::Error::custom(
+            "`permissions.network` in requirements.toml is reserved for shared network constraints; rename the managed profile (for example, to `network-access`) and update `default_permissions`, `allowed_permission_profiles`, and `extends`; check saved session profile references. Profiles named `network` in config.toml remain valid",
+        ));
     }
     toml::Value::Table(table)
         .try_into()
@@ -2784,9 +2744,9 @@ mod tests {
     use crate::McpServerIdentity;
     use crate::McpServerValueMatcher;
     use anyhow::Result;
-    use codex_execpolicy_rules::Decision;
-    use codex_execpolicy_rules::Evaluation;
-    use codex_execpolicy_rules::RuleMatch;
+    use codex_execpolicy::Decision;
+    use codex_execpolicy::Evaluation;
+    use codex_execpolicy::RuleMatch;
     use codex_protocol::permissions::NetworkSandboxPolicy;
     use codex_utils_absolute_path::AbsolutePathBuf;
     use codex_utils_absolute_path::AbsolutePathBufGuard;

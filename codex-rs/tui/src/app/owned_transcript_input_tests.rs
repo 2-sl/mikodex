@@ -137,7 +137,7 @@ async fn configured_ctrl_space_submit_wins_over_transcript_selection() -> Result
 }
 
 #[tokio::test]
-async fn markdown_shortcut_respects_remapped_find_and_explicit_chords() -> Result<()> {
+async fn markdown_chord_and_remapped_find_work_in_transcript_selection() -> Result<()> {
     let mut app = crate::app::test_support::make_test_app().await;
     let mut server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
@@ -145,15 +145,13 @@ async fn markdown_shortcut_respects_remapped_find_and_explicit_chords() -> Resul
     let size = Size::new(/*width*/ 80, /*height*/ 16);
     tui.terminal.resize(size)?;
 
-    for (config, find, prefix) in [
+    for (config, prefix) in [
         (
-            serde_json::json!({"pager": {"find": "m"}}),
-            'm',
+            serde_json::json!({"pager": {"find": "c"}}),
             KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
         ),
         (
-            serde_json::json!({"global": {"leader": "f6"}, "pager": {"find": "c", "mark_markdown": "leader v"}}),
-            'c',
+            serde_json::json!({"global": {"leader": "f6"}, "pager": {"find": "c"}}),
             KeyCode::F(6).into(),
         ),
     ] {
@@ -171,7 +169,7 @@ async fn markdown_shortcut_respects_remapped_find_and_explicit_chords() -> Resul
         app.handle_tui_event(
             &mut tui,
             &mut server,
-            TuiEvent::Key(KeyCode::Char(find).into()),
+            TuiEvent::Key(KeyCode::Char('c').into()),
         )
         .await?;
         assert!(app.transcript_view.is_search_editing());

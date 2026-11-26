@@ -433,7 +433,6 @@ fn mcp_runtime(
         runtime: handler,
         exposure,
         native_review: Default::default(),
-        is_trusted: false,
         model_spec: None,
     }
 }
@@ -1150,7 +1149,12 @@ async fn environment_tools_follow_the_step_context() {
             /*tool_suggest_candidates*/ None,
             /*wait_for_environment_tool_config*/ None,
         ),
-        super::hosted_model_tool_specs(turn.as_ref(), turn.model_info(), &[]),
+        super::hosted_model_tool_specs(
+            turn.as_ref(),
+            turn.model_info(),
+            turn.config.web_search_mode.value(),
+            &[],
+        ),
         &Default::default(),
     ));
 
@@ -1745,7 +1749,6 @@ async fn strict_namespace_ownership_requires_tool_namespace_inventory_opt_in() {
                 runtime: Arc::new(McpHandler::new(tool).expect("MCP tool spec should build")),
                 exposure,
                 native_review: Default::default(),
-                is_trusted: false,
                 model_spec: None,
             }
         })
@@ -2043,7 +2046,6 @@ async fn strict_tool_collisions_allow_multiple_tools_in_one_namespace() {
                     ),
                     exposure: ToolExposure::Direct,
                     native_review: Default::default(),
-                    is_trusted: false,
                     model_spec: None,
                 },
                 mcp_runtime("shared", "shared", "lookup", ToolExposure::Direct),
@@ -2087,7 +2089,6 @@ async fn relaxed_tool_collisions_preserve_first_nonempty_namespace_description()
                 runtime: Arc::new(McpHandler::new(tool).expect("MCP tool spec should build")),
                 exposure: ToolExposure::Direct,
                 native_review: Default::default(),
-                is_trusted: false,
                 model_spec: None,
             }
         };
@@ -2284,6 +2285,7 @@ async fn tool_search_cache_rebuilds_when_deferred_sources_change() {
         super::hosted_model_tool_specs(
             first_step_context.turn.as_ref(),
             first_step_context.turn.model_info(),
+            first_step_context.turn.config.web_search_mode.value(),
             &[],
         ),
         &cache,
@@ -2318,6 +2320,7 @@ async fn tool_search_cache_rebuilds_when_deferred_sources_change() {
         super::hosted_model_tool_specs(
             second_step_context.turn.as_ref(),
             second_step_context.turn.model_info(),
+            second_step_context.turn.config.web_search_mode.value(),
             &[],
         ),
         &cache,
@@ -2383,6 +2386,7 @@ async fn tool_search_cache_rebuilds_when_deferred_world_state_changes() {
             super::hosted_model_tool_specs(
                 step_context.turn.as_ref(),
                 step_context.turn.model_info(),
+                step_context.turn.config.web_search_mode.value(),
                 &[],
             ),
             &cache,
@@ -3444,7 +3448,6 @@ async fn hosted_web_search_and_standalone_image_generation_follow_runtime_gates(
     standalone_web_search.assert_visible_lacks(&["web_search"]);
 
     let bedrock_cached_web_search = probe(|turn| {
-        set_web_search_mode(turn, WebSearchMode::Cached);
         use_bedrock_provider(turn);
         update_turn_settings_for_test(turn, |settings| {
             Arc::make_mut(&mut settings.model_info).web_search_tool_type = WebSearchToolType::Text;
