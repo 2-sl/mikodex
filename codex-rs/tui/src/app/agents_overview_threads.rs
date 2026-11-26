@@ -318,13 +318,14 @@ impl App {
         {
             return;
         }
+        let sidebar_focused = self.agents_overview.sidebar_focused;
         let overview = &mut self.agents_overview;
         let initialized = overview.initialized.contains(&backend_id);
         let source_has_more = overview
             .discovery
             .get(&backend_id)
             .is_none_or(AgentsOverviewDiscovery::has_more);
-        let visible = self.agents_overview.sidebar_focused
+        let visible = sidebar_focused
             || self
             .chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
