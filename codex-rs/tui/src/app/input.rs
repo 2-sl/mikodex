@@ -360,7 +360,6 @@ impl App {
             }
             .with_voice_toggle(&self.keymap);
         }
-        }
         if self.transcript_view.is_search_editing() && self.chat_widget.no_modal_or_popup_active() {
             return KeymapContextSet::new(KeymapContext::Editor).with_voice_toggle(&self.keymap);
         }
