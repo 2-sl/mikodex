@@ -769,11 +769,15 @@ impl App {
             && self.overlay.is_none()
             && self.chat_widget.no_modal_or_popup_active()
         {
-            if key_event.kind == KeyEventKind::Press
-                && key_event.code == KeyCode::Left
-                && key_event.modifiers == KeyModifiers::NONE
-                && self.chat_widget.agents_navigation_key_available()
-            {
+            let open_agent_center = self
+                .chat_widget
+                .blocked_thread_command_center_key_pressed(key_event)
+                || (self.chat_widget.is_read_only_view()
+                    && key_event.kind == KeyEventKind::Press
+                    && key_event.code == KeyCode::Left
+                    && key_event.modifiers == KeyModifiers::NONE
+                    && self.chat_widget.agents_navigation_key_available());
+            if open_agent_center {
                 self.open_agents_overview(app_server);
             }
             return;

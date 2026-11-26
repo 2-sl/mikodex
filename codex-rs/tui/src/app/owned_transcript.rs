@@ -655,7 +655,9 @@ impl App {
                 self.conversation_frame.close_buttons = buttons;
             }
             if let Some(dock) = agents_dock {
-                if let Some(view) = self.agents_overview.sidebar_view.as_ref() {
+                if !dock.sidebar.is_empty()
+                    && let Some(view) = self.agents_overview.sidebar_view.as_ref()
+                {
                     view.render_docked(dock.sidebar, frame.buffer);
                 }
                 dock.render_divider(frame.buffer, self);

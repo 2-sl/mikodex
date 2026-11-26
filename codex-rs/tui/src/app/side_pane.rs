@@ -613,6 +613,6 @@ pub(super) fn paint_divider(
         } else {
             guide
         };
-        frame.buffer[(x, y)].set_symbol("│").set_style(style);
+        super::panel_separators::draw_vertical_at(frame.buffer, x, y, style, None);
     }
 }
