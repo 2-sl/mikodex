@@ -138,7 +138,9 @@ impl AgentsOverviewView {
         let body = row(area, header_height, footer.y - header.bottom())
             .inner(Margin::new(/*horizontal*/ 2, /*vertical*/ 0));
         let stacked_details = area.width < 90 && area.height >= 26;
-        let [list, gap, details] = if stacked_details {
+        let [list, gap, details] = if self.rendering_docked_list.get() {
+            [body, Rect::default(), Rect::default()]
+        } else if stacked_details {
             let default_height = (u32::from(body.height) * 2 / 5).clamp(12, 26) as u16;
             let details_height = Self::clamp_docked_details_height(
                 state.docked_details_height.unwrap_or(default_height),
@@ -192,7 +194,9 @@ impl AgentsOverviewView {
             Constraint::Fill(1),
         ])
         .areas(area);
+        let was_rendering_docked_list = self.rendering_docked_list.replace(true);
         self.render(list, buf);
+        self.rendering_docked_list.set(was_rendering_docked_list);
         self.extend_docked_header_rule(list, buf);
         let divider_style = if resizing {
             Style::default()

@@ -60,6 +60,7 @@ use ratatui::text::Span;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -248,6 +249,7 @@ pub(super) struct AgentsOverviewView {
     agents_keymap: AgentsKeymap,
     center_shortcut_keys: Vec<crate::key_hint::KeyBinding>,
     worktrees_enabled: bool,
+    rendering_docked_list: Cell<bool>,
     editor_keymap: RuntimeKeymap,
 }
 
@@ -328,6 +330,7 @@ impl AgentsOverviewView {
             agents_keymap: keymap.agents,
             center_shortcut_keys,
             worktrees_enabled,
+            rendering_docked_list: Cell::new(false),
         };
         if selected_thread_id.is_none() && view.state().show_more_selected {
             view.selected = usize::MAX;
