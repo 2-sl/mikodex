@@ -1054,6 +1054,7 @@ impl App {
                 self.native_history.retain(&self.transcript_cells);
                     }
                     self.transcript_view = Default::default();
+                    self.apply_layout_cache_limits();
                     self.scrollback_has_older_history = app_server.has_older_history(thread_id);
                     self.deferred_history_lines.clear();
                     self.last_rendered_history_tail = None;
@@ -1107,6 +1108,7 @@ impl App {
                         view: std::mem::take(&mut self.transcript_view),
                         answer,
                     });
+                    self.apply_layout_cache_limits();
                 }
             }
             AppEvent::ResetTranscriptForThreadSwitch => {
@@ -4131,6 +4133,12 @@ impl App {
                     crate::app_event::TuiPreference::RenderTables(enabled) => format!(
                         "Markdown table rendering turned {} and saved.",
                         if enabled { "on" } else { "off" }
+                    ),
+                    crate::app_event::TuiPreference::LayoutCacheEntries(entries) => format!(
+                        "Transcript layout cache limit set to {entries} entries per view and saved."
+                    ),
+                    crate::app_event::TuiPreference::LayoutCacheMemoryMiB(memory_mib) => format!(
+                        "Transcript layout cache memory limit set to {memory_mib} MiB per view and saved."
                     ),
                     crate::app_event::TuiPreference::AgentCommandCenterSidebar(enabled) => format!(
                         "Agent Command Center sidebar turned {} and saved.",

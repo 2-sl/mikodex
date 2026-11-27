@@ -130,10 +130,19 @@ Arrow keys edit a nonempty draft normally while chat has focus.
 Use these commands during a session; each change is saved in your user config and takes effect immediately.
 
 - /render table on|off enables or disables rich Markdown table rendering. /render or /render table shows the current setting.
+- /render cache shows the transcript layout cache limits. Set them with /render cache entries <1-1024> or /render cache memory <1-128>.
 - /sidebar agent-command-center on|off (alias: acc) controls the left Agent Command Center rail.
 - /sidebar command-list on|off (alias: cl) controls the right command reference rail. /sidebar shows both settings.
 
 The two rails can be toggled independently. The command list still requires a wide terminal.
+
+The default layout cache limit is 128 entries and 32 MiB per transcript view. You can override it in your Mikodex config:
+
+    [tui.rendering]
+    layout_cache_entries = 128
+    layout_cache_mib = 32
+
+The memory limit estimates retained rendered text and image pixels. Each main, parked side-session, and document-preview view has its own cache limit, so this is not a cap on total process memory. A single visible layout larger than the limit can remain cached to avoid repeatedly rebuilding it.
 
 ## Automated checks
 

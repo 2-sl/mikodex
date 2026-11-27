@@ -74,6 +74,8 @@ pub(super) struct DocumentRenderOptions<'a> {
     pub(super) keymap: &'a RuntimeKeymap,
     pub(super) resize_hint: Option<&'a str>,
     pub(super) image_protocol: Option<ImageProtocol>,
+    pub(super) layout_cache_entries: usize,
+    pub(super) layout_cache_mib: usize,
 }
 
 pub(super) struct Document {
@@ -132,6 +134,12 @@ impl Document {
         match &mut self.state {
             State::Ready { view, cells, .. } => Some((view, cells)),
             _ => None,
+        }
+    }
+
+    pub(super) fn set_layout_cache_limits(&mut self, entries: usize, memory_mib: usize) {
+        if let State::Ready { view, .. } = &mut self.state {
+            view.set_layout_cache_limits(entries, memory_mib);
         }
     }
 
@@ -247,7 +255,12 @@ impl Document {
             keymap,
             resize_hint,
             image_protocol,
+            layout_cache_entries,
+            layout_cache_mib,
         } = options;
+        if let State::Ready { view, .. } = &mut self.state {
+            view.set_layout_cache_limits(layout_cache_entries, layout_cache_mib);
+        }
         let buf = &mut *frame.buffer;
         ratatui::widgets::Clear.render(area, buf);
         let body = area.inner(ratatui::layout::Margin::new(1, 0));

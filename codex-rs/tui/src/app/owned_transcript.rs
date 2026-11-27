@@ -421,6 +421,9 @@ impl App {
                         frame.cursor_position = None;
                     }
                     let resize_hint = self.pane_resize.map(|_| side_pane::RESIZE_HINT);
+                    let layout_cache_entries =
+                        self.local_settings.tui.rendering.layout_cache_entries;
+                    let layout_cache_mib = self.local_settings.tui.rendering.layout_cache_mib;
                     if let Some(doc) = self
                         .sidebars
                         .get_mut(&sidebar_parent)
@@ -436,6 +439,8 @@ impl App {
                                 keymap: &self.keymap,
                                 resize_hint,
                                 image_protocol: sidebar_image_protocol,
+                                layout_cache_entries,
+                                layout_cache_mib,
                             },
                         ) && focused
                         {

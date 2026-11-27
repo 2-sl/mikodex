@@ -641,9 +641,14 @@ impl ChatWidget {
                 self.open_theme_picker();
             }
             SlashCommand::Render => {
-                let status = if self.local_settings.tui.rendering.tables { "on" } else { "off" };
+                let rendering = self.local_settings.tui.rendering;
+                let tables = if rendering.tables { "on" } else { "off" };
                 self.add_info_message(
-                    format!("Markdown table rendering is {status}. Use /render table on|off."),
+                    format!(
+                        "Markdown table rendering is {tables}; transcript layout cache limit is {} entries and {} MiB per view. Use /render table on|off or /render cache entries|memory <value>.",
+                        rendering.layout_cache_entries.clamp(1, 1024),
+                        rendering.layout_cache_mib.clamp(1, 128),
+                    ),
                     /*hint*/ None,
                 );
             }
@@ -1261,22 +1266,80 @@ impl ChatWidget {
                 let mut parts = trimmed.split_whitespace();
                 let target = parts.next().unwrap_or_default().to_ascii_lowercase();
                 let action = parts.next().map(str::to_ascii_lowercase);
+                let value = parts.next();
                 let valid = parts.next().is_none();
-                match (valid, target.as_str(), action.as_deref()) {
-                    (true, "table", None) => {
+                match (valid, target.as_str(), action.as_deref(), value) {
+                    (true, "", None, None) => {
+                        let rendering = self.local_settings.tui.rendering;
+                        let tables = if rendering.tables { "on" } else { "off" };
+                        self.add_info_message(
+                            format!(
+                                "Markdown table rendering is {tables}; transcript layout cache limit is {} entries and {} MiB per view. Use /render table on|off or /render cache entries|memory <value>.",
+                                rendering.layout_cache_entries.clamp(1, 1024),
+                                rendering.layout_cache_mib.clamp(1, 128),
+                            ),
+                            /*hint*/ None,
+                        );
+                    }
+                    (true, "table", None, None) => {
                         let status = if self.local_settings.tui.rendering.tables { "on" } else { "off" };
                         self.add_info_message(
                             format!("Markdown table rendering is {status}. Use /render table on|off."),
                             /*hint*/ None,
                         );
                     }
-                    (true, "table", Some("on")) => {
+                    (true, "table", Some("on"), None) => {
                         self.app_event_tx.send(AppEvent::UpdateTuiPreference(TuiPreference::RenderTables(true)));
                     }
-                    (true, "table", Some("off")) => {
+                    (true, "table", Some("off"), None) => {
                         self.app_event_tx.send(AppEvent::UpdateTuiPreference(TuiPreference::RenderTables(false)));
                     }
-                    _ => self.add_error_message("Usage: /render table [on|off]".to_string()),
+                    (true, "cache", None, None) => {
+                        let rendering = self.local_settings.tui.rendering;
+                        self.add_info_message(
+                            format!(
+                                "Transcript layout cache limit is {} entries and {} MiB per view. Use /render cache entries <1-1024> or /render cache memory <1-128>.",
+                                rendering.layout_cache_entries.clamp(1, 1024),
+                                rendering.layout_cache_mib.clamp(1, 128),
+                            ),
+                            /*hint*/ None,
+                        );
+                    }
+                    (true, "cache", Some("entries"), Some(value)) => {
+                        match value
+                            .parse::<usize>()
+                            .ok()
+                            .filter(|entries| (1..=1024).contains(entries))
+                        {
+                            Some(entries) => self.app_event_tx.send(AppEvent::UpdateTuiPreference(
+                                TuiPreference::LayoutCacheEntries(entries),
+                            )),
+                            None => self.add_error_message(
+                                "Cache entries must be between 1 and 1024.".to_string(),
+                            ),
+                        }
+                    }
+                    (true, "cache", Some("memory"), Some(value))
+                    | (true, "cache", Some("mib"), Some(value)) => {
+                        match value
+                            .parse::<usize>()
+                            .ok()
+                            .filter(|memory_mib| (1..=128).contains(memory_mib))
+                        {
+                            Some(memory_mib) => self.app_event_tx.send(
+                                AppEvent::UpdateTuiPreference(
+                                    TuiPreference::LayoutCacheMemoryMiB(memory_mib),
+                                ),
+                            ),
+                            None => self.add_error_message(
+                                "Cache memory must be between 1 and 128 MiB.".to_string(),
+                            ),
+                        }
+                    }
+                    _ => self.add_error_message(
+                        "Usage: /render table [on|off]; /render cache [entries <1-1024>|memory <1-128>]"
+                            .to_string(),
+                    ),
                 }
             }
             SlashCommand::Sidebar => {

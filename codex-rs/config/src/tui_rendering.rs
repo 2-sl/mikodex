@@ -17,6 +17,12 @@ pub struct TuiRendering {
     pub tables: bool,
     /// Render Markdown bullets and task-list markers as Unicode symbols.
     pub lists: bool,
+    /// Maximum transcript layouts retained by each transcript view.
+    #[schemars(range(min = 1, max = 1024))]
+    pub layout_cache_entries: usize,
+    /// Approximate retained layout payload limit, in MiB, for each transcript view.
+    #[schemars(range(min = 1, max = 128))]
+    pub layout_cache_mib: usize,
 }
 
 impl Default for TuiRendering {
@@ -26,6 +32,8 @@ impl Default for TuiRendering {
             math: true,
             tables: true,
             lists: true,
+            layout_cache_entries: 128,
+            layout_cache_mib: 32,
         }
     }
 }

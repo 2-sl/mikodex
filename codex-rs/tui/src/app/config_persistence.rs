@@ -2234,6 +2234,21 @@ theme = "dracula"
 }
 
 impl App {
+    pub(super) fn apply_layout_cache_limits(&mut self) {
+        let entries = self.local_settings.tui.rendering.layout_cache_entries;
+        let memory_mib = self.local_settings.tui.rendering.layout_cache_mib;
+        self.transcript_view
+            .set_layout_cache_limits(entries, memory_mib);
+        for companion in self.side_companions.values_mut() {
+            companion.view.set_layout_cache_limits(entries, memory_mib);
+        }
+        for pane in self.sidebars.values_mut() {
+            for document in pane.documents.values_mut() {
+                document.set_layout_cache_limits(entries, memory_mib);
+            }
+        }
+    }
+
     pub(super) async fn persist_tui_preference(
         &mut self,
         preference: TuiPreference,
@@ -2242,6 +2257,18 @@ impl App {
             TuiPreference::RenderTables(enabled) => ConfigEdit::SetPath {
                 segments: vec!["tui".into(), "rendering".into(), "tables".into()],
                 value: enabled.into(),
+            },
+            TuiPreference::LayoutCacheEntries(entries) => ConfigEdit::SetPath {
+                segments: vec![
+                    "tui".into(),
+                    "rendering".into(),
+                    "layout_cache_entries".into(),
+                ],
+                value: (entries.clamp(1, 1024) as i64).into(),
+            },
+            TuiPreference::LayoutCacheMemoryMiB(memory_mib) => ConfigEdit::SetPath {
+                segments: vec!["tui".into(), "rendering".into(), "layout_cache_mib".into()],
+                value: (memory_mib.clamp(1, 128) as i64).into(),
             },
             TuiPreference::AgentCommandCenterSidebar(enabled) => ConfigEdit::SetPath {
                 segments: vec!["tui".into(), "sidebar".into(), "agent_command_center".into()],
@@ -2264,6 +2291,26 @@ impl App {
                 self.chat_widget.local_settings.tui.rendering.tables = enabled;
                 crate::markdown_render::preferences::init(self.local_settings.tui.rendering);
                 self.transcript_view.invalidate_render_layouts();
+            }
+            TuiPreference::LayoutCacheEntries(entries) => {
+                let entries = entries.clamp(1, 1024);
+                self.local_settings.tui.rendering.layout_cache_entries = entries;
+                self.chat_widget
+                    .local_settings
+                    .tui
+                    .rendering
+                    .layout_cache_entries = entries;
+                self.apply_layout_cache_limits();
+            }
+            TuiPreference::LayoutCacheMemoryMiB(memory_mib) => {
+                let memory_mib = memory_mib.clamp(1, 128);
+                self.local_settings.tui.rendering.layout_cache_mib = memory_mib;
+                self.chat_widget
+                    .local_settings
+                    .tui
+                    .rendering
+                    .layout_cache_mib = memory_mib;
+                self.apply_layout_cache_limits();
             }
             TuiPreference::AgentCommandCenterSidebar(enabled) => {
                 self.local_settings.tui.sidebar.agent_command_center = enabled;

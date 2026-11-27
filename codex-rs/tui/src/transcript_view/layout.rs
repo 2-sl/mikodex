@@ -10,8 +10,8 @@ use std::sync::Weak;
 
 use super::*;
 
-const MAX_CACHED_ENTRIES: usize = 64;
-const MAX_CACHED_LAYOUT_BYTES: usize = 8 * 1024 * 1024;
+const DEFAULT_MAX_CACHED_ENTRIES: usize = 128;
+const DEFAULT_MAX_CACHED_LAYOUT_BYTES: usize = 32 * 1024 * 1024;
 
 /// The selected activity presentation and any live content that follows it.
 pub(crate) struct ActivityTranscriptLines {
@@ -154,11 +154,24 @@ fn is_rich_user_prompt(cell: &dyn HistoryCell, mode: HistoryRenderMode) -> bool 
     mode == HistoryRenderMode::Rich && cell.as_any().is::<crate::history_cell::UserHistoryCell>()
 }
 
-#[derive(Default)]
 pub(super) struct LayoutCache {
     entries: Vec<CachedLayout>,
     frame: u64,
     render_state: Option<RenderState>,
+    max_entries: usize,
+    max_layout_bytes: usize,
+}
+
+impl Default for LayoutCache {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+            frame: 0,
+            render_state: None,
+            max_entries: DEFAULT_MAX_CACHED_ENTRIES,
+            max_layout_bytes: DEFAULT_MAX_CACHED_LAYOUT_BYTES,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -369,6 +382,15 @@ impl TranscriptView {
 }
 
 impl LayoutCache {
+    pub(super) fn set_limits(&mut self, max_entries: usize, max_layout_bytes: usize) {
+        if self.max_entries == max_entries && self.max_layout_bytes == max_layout_bytes {
+            return;
+        }
+        self.max_entries = max_entries;
+        self.max_layout_bytes = max_layout_bytes;
+        self.evict();
+    }
+
     pub(super) fn has_mutable_source(&self) -> bool {
         self.entries.iter().any(|entry| {
             entry
@@ -492,7 +514,7 @@ impl LayoutCache {
         let mut bytes = self.entries.iter().map(retained_bytes).sum::<usize>();
         // Retain a single oversized entry rather than repeatedly laying it out while visible.
         while self.entries.len() > 1
-            && (self.entries.len() > MAX_CACHED_ENTRIES || bytes > MAX_CACHED_LAYOUT_BYTES)
+            && (self.entries.len() > self.max_entries || bytes > self.max_layout_bytes)
         {
             bytes -= retained_bytes(&self.entries.remove(/*index*/ 0));
         }

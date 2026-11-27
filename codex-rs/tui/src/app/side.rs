@@ -984,9 +984,18 @@ impl App {
                         .insert(child_thread_id, profile.id.clone());
                 }
                 if !enter {
+                    let cache_entries = self.local_settings.tui.rendering.layout_cache_entries;
+                    let cache_memory_mib = self.local_settings.tui.rendering.layout_cache_mib;
                     self.side_companions
                         .entry(child_thread_id)
-                        .or_insert_with(|| SideCompanion::empty(forked.session.cwd.to_path_buf()));
+                        .or_insert_with(|| {
+                            let mut companion =
+                                SideCompanion::empty(forked.session.cwd.to_path_buf());
+                            companion
+                                .view
+                                .set_layout_cache_limits(cache_entries, cache_memory_mib);
+                            companion
+                        });
                 }
                 let channel = self.ensure_thread_channel(child_thread_id);
                 channel.backend_id = Some(app_server.backend_id());

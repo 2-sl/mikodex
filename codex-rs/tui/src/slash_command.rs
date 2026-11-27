@@ -136,7 +136,7 @@ impl SlashCommand {
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
             SlashCommand::Theme => "choose a syntax highlighting theme",
-            SlashCommand::Render => "toggle rich Markdown renderers such as tables",
+            SlashCommand::Render => "toggle Markdown tables and tune the transcript layout cache",
             SlashCommand::Sidebar => "show or hide the Agent Command Center and command list rails",
             SlashCommand::Background => {
                 "set, clear, or toggle the animated chat background; /bga is an alias"

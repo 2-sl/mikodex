@@ -1166,6 +1166,7 @@ See the Mikodex keymap documentation for supported actions and examples."
             #[cfg(test)]
             _test_codex_home: None,
         };
+        app.apply_layout_cache_limits();
         if tui.is_owned_screen()
             && app.right_click_paste_environment.wsl
             && app.right_click_paste_environment.allows(

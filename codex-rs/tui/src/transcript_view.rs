@@ -181,6 +181,12 @@ impl Default for TranscriptView {
 }
 
 impl TranscriptView {
+    pub(crate) fn set_layout_cache_limits(&mut self, entries: usize, memory_mib: usize) {
+        let entries = entries.clamp(1, 1024);
+        let memory_bytes = memory_mib.clamp(1, 128).saturating_mul(1024 * 1024);
+        self.cache.set_limits(entries, memory_bytes);
+    }
+
     pub(crate) fn can_scroll_without_refresh(
         &self,
         cells: &[Arc<dyn HistoryCell>],

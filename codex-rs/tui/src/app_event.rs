@@ -354,6 +354,8 @@ impl CapturedSideWork {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TuiPreference {
     RenderTables(bool),
+    LayoutCacheEntries(usize),
+    LayoutCacheMemoryMiB(usize),
     AgentCommandCenterSidebar(bool),
     CommandListSidebar(bool),
 }
